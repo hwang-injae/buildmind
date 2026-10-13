@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""검사 묶음 DesignChecker — 블록 JSON(parts/3.0)이 쌓을 만한 설계인지 본다 (ROS 없이 동작, W109, SDD 6.7).
+"""검사 묶음 DesignChecker — 블록 JSON(parts/4.0)이 쌓을 만한 설계인지 본다 (ROS 없이 동작, W109, SDD 6.7).
 
 `/d2/task/check_design`(JsonQuery) 서비스 뒤에서 task 노드가 부른다. ROS 없이 시험할 수 있게 노드와 나눴다(팀 규칙 ②).
 10/3 jenga_check.py(안정성 계산)를 가져와 내민 구조 버그를 고치고, 받침 · 손가락 틈 · 작업영역을 더했다.
@@ -14,7 +14,7 @@ from d2_task.parts_to_recipe import DesignRejected
 from d2_task.recipe_document import GRASPS, RecipeDocument, same_major
 from d2_task.template_checker import RequestInvalid, TemplateChecker
 
-SCHEMA_REQUEST = 'parts/3.0'     # check_design 요청 · 변환기 ①이 받는 형식 (IRD 6장, E-69 — 스캔 형식 blocks/2 는 위치 · 방향만이라 거절)
+SCHEMA_REQUEST = 'parts/4.0'     # check_design 요청 · 변환기 ①이 받는 형식 (IRD 6장, E-69 — 스캔 형식 blocks/2 는 위치 · 방향만이라 거절)
 SCHEMA_RESULT = 'check_result/3.0'
 ROLE_RE = re.compile(r'[A-Z]+(?:_[A-Z]+)?')     # 역할 한 단어 + 옵션 0~1개 한 단어(영문 대문자, 작명 규칙 v3)
 PENETRATION_MM = 0.000001     # 세 방향 모두 이 값보다 깊게 겹치면 파고듦. 면이 닿기만 하면 허용 — 레시피 도구 · 변환기(TOL 1e-6)와 같은 기준(E-84, 10/11 PL). 0 이 아닌 이유: 부동소수 계산 오차로 정상 면접촉이 거절되지 않게 (SDD 6.7 검사 2)
@@ -24,7 +24,7 @@ STATE_OF_ORI = {'x': FLAT, 'y': FLAT, 'xe': EDGE, 'ye': EDGE, 'zx': STAND, 'zy':
 
 
 class DesignChecker:
-    """요청(parts/3.0 + base_recipe) 하나를 요청 확인 → 형식 → 파고듦 → 받침 → 안정성 → 잡기 틈 → 작업영역 → Template(21번) 순으로 검사해 check_result/3.0 을 만든다.
+    """요청(parts/4.0 + base_recipe) 하나를 요청 확인 → 형식 → 파고듦 → 받침 → 안정성 → 잡기 틈 → 작업영역 → Template(21번) 순으로 검사해 check_result/3.0 을 만든다.
 
     입력: robot.yaml 을 읽은 dict(cfg — block_size_m · finger · grasp_depth_m · assembly_origin ·
     assembly_area_half_m · table · check.margin_mm · check.max_blocks), 요청 dict. 변환기 ①(parts_to_recipe)은 선택으로 받는다.
@@ -56,7 +56,7 @@ class DesignChecker:
 
     # ---------------- 바깥에서 부르는 곳 ----------------
     def check(self, request):
-        """요청(parts/3.0 + base_recipe) → check_result/3.0. ok · min_margin_mm(쌓는 도중 최소 여유, 못 구하면 None) · errors[part · reason · detail · kind] · recipe + placements(ok 일 때 둘 다).
+        """요청(parts/4.0 + base_recipe) → check_result/3.0. ok · min_margin_mm(쌓는 도중 최소 여유, 못 구하면 None) · errors[part · reason · detail · kind] · recipe + placements(ok 일 때 둘 다).
 
         요청이 틀리면(base_recipe 없음 · Template 이 design_id 와 다름 · revision 모양 틀림 …) 바로 REQUEST_INVALID 한 줄로 돌려준다(kind 없음, 재생성 안 함).
         그 뒤 형식이 틀리면 바로 돌려주고(뒤 검사가 읽을 수 없음), 받침이 없는 블록이 있으면 안정성은 건너뛴다.
@@ -64,6 +64,8 @@ class DesignChecker:
         reason: REQUEST_INVALID(요청 오류) · OUT_OF_SCOPE(블록 수 초과) · CHECK_FAILED(나머지) · TEMPLATE_SHAPE · TEMPLATE_RANGE(21번) · ERROR(변환기 ① 실패).
         kind(실패 종류): position(위치·방향·작업영역) · ai_fields(역할·그룹·단계·잡기·잡을 면) · template(21번) · scope(블록 수 초과) — 웹이 재시도 방법을 고르는 데 쓴다.
         입력을 바꾸지 않는다. 변환기 ①에는 base_recipe 를 뗀 사본을 준다(저장·응답에 Template 이 섞이지 않게).
+        made_by(선택 칸, E-106 · 10/13 PL): 정확히 글자 "scan" 이면 21번(Template 모양 · 범위 · 관계) 검사만 건너뛴다. 요청 확인(base_recipe · design_id 모양 —
+        공통)과 1~20번 물리 검사 · 변환기 ①은 그대로다. 없거나 다른 값(대소문자 · 앞뒤 빈칸 포함)은 지금처럼 21번까지 본다.
         """
         detail = self._envelope(request)
         if detail:
@@ -85,7 +87,8 @@ class DesignChecker:
         errors += self._grasp_errors(boxes)
         errors += self._workspace(boxes)
         try:
-            errors += self.template_checker.check(rules, parts)
+            if request.get('made_by') != 'scan':    # 스캔으로 저장하는 설계(정확히 글자 "scan")는 21번만 건너뛴다(E-106) — 요청 확인 · 1~20번 · 변환기 ①은 그대로
+                errors += self.template_checker.check(rules, parts)
         except RequestInvalid as e:         # 규칙의 식이 이 설계로 계산되지 않는다(0 으로 나눔 등) = 잘못된 규칙이지 AI 설계 탓이 아니다
             return self._request_invalid(e)
         if errors:
@@ -107,7 +110,7 @@ class DesignChecker:
     def handle_json(self, request_json):
         """`check_design`(JsonQuery) 한 번을 처리한다. 반환: (success, reason, response_json 글자).
 
-        요청은 parts/3.0 객체 + base_recipe 글자 그대로. 서비스가 처리했나(success)와 설계가 합격인가(응답 안 ok)를 나눈다:
+        요청은 parts/4.0 객체 + base_recipe 글자 그대로. 서비스가 처리했나(success)와 설계가 합격인가(응답 안 ok)를 나눈다:
         설계 불합격은 (True, '', ok:false + errors).
         봉투(envelope)가 틀린 요청 — JSON 구문 · 객체 아님 · schema 다름(스캔 형식 blocks/2 포함, 받은 schema 를 적음) · NaN · Infinity · 1e999 · design_id · parts 목록 없음/타입/빔 ·
         base_recipe 오류 · 규칙(revision) 오류 — 은 웹 쪽 잘못이지만 서비스는 처리했으므로 (True, '', ok:false + REQUEST_INVALID, kind 없음, 재생성하지 않는다).
@@ -168,16 +171,16 @@ class DesignChecker:
         return value
 
     def grasp_options(self, parts):
-        """놓는 시점(앞 블록들만 놓인 상태)에 손가락이 들어가는 잡기 후보. {order: [잡기 이름…]}.
+        """놓는 시점(앞 블록들만 놓인 상태)에 손가락이 들어가는 잡기 후보. {sequence: [잡기 이름…]}.
 
-        blocks: 형식이 맞는 parts/3.0 의 parts 목록(order 순). 변환기 ① · 집을 블록 고르기(W130)가 같은 규칙을 쓰려고 연다.
+        blocks: 형식이 맞는 parts/4.0 의 parts 목록(sequence 순). 변환기 ① · 집을 블록 고르기(W130)가 같은 규칙을 쓰려고 연다.
         """
-        boxes = [self._box(b) for b in sorted(parts, key=lambda b: b['order'])]
-        return {bx['order']: self._grasps(bx, boxes[:i]) for i, bx in enumerate(boxes)}
+        boxes = [self._box(b) for b in sorted(parts, key=lambda b: b['sequence'])]
+        return {bx['sequence']: self._grasps(bx, boxes[:i]) for i, bx in enumerate(boxes)}
 
     # ---------------- 1. 형식 ----------------
     def _parse(self, request, errors):
-        """형식을 확인해 order 순 블록 목록을 돌려준다. 틀린 곳은 errors 에 쌓는다."""
+        """형식을 확인해 sequence 순 블록 목록을 돌려준다. 틀린 곳은 errors 에 쌓는다."""
         def bad(detail, kind, part=None, reason='CHECK_FAILED'):
             """형식 오류 한 줄을 바깥 errors 에 쌓는다. 입력: detail = 이유 글자, kind = position · ai_fields · scope, part = 부품 order(없으면 None), reason = 실패 코드. 반환 없음. 바깥 영향은 errors 목록뿐이며 실패하지 않는다."""
             errors.append({'part': part, 'reason': reason, 'detail': f'형식: {detail}', 'kind': kind})
@@ -193,7 +196,7 @@ class DesignChecker:
             if not isinstance(it, dict):
                 bad(f'{k}번째 항목이 객체가 아니다', 'position')
                 continue
-            miss = [key for key in ('order', 'x', 'y', 'z', 'ori', 'role', 'group', 'stage', 'grasp') if key not in it]
+            miss = [key for key in ('sequence', 'x', 'y', 'z', 'ori', 'role', 'group', 'stage', 'grasp') if key not in it]
             if miss:
                 bad(f'{k}번째 항목에 {", ".join(miss)} 없음 (role · group · stage · grasp 는 AI 가 써야 한다 — 코드가 대신 채우지 않는다)',
                     'position' if set(miss) <= {'x', 'y', 'z', 'ori'} else 'ai_fields')
@@ -214,11 +217,11 @@ class DesignChecker:
                 bad(f'{k}번째 항목 inferred 가 true · false 가 아니다', 'ai_fields')
         if errors:
             return []
-        orders = [it['order'] for it in items]
+        orders = [it['sequence'] for it in items]
         if any(not isinstance(o, int) or isinstance(o, bool) for o in orders) or sorted(orders) != list(range(1, len(items) + 1)):
-            bad(f'order 가 1부터 {len(items)}까지 하나씩 있지 않다', 'ai_fields')
+            bad(f'sequence 가 1부터 {len(items)}까지 하나씩 있지 않다', 'ai_fields')
             return []
-        ordered = sorted(items, key=lambda it: it['order'])
+        ordered = sorted(items, key=lambda it: it['sequence'])
         stages = [it['stage'] for it in ordered]
         if stages[0] != 1 or any(b - a not in (0, 1) for a, b in zip(stages, stages[1:])):
             bad('stage 는 1부터 시작해 순서를 따라 같거나 1씩 늘어야 한다', 'ai_fields')
@@ -233,7 +236,7 @@ class DesignChecker:
     def _box(self, b):
         """블록 하나 → 상자 정보. x0 x1 y0 y1 z0 z1 은 mm, i 는 0부터 센 순서."""
         dx, dy, dz = self.extent[b['ori']]
-        return {'order': b['order'], 'ori': b['ori'], 'x': b['x'], 'y': b['y'], 'dx': dx, 'dy': dy, 'dz': dz,
+        return {'sequence': b['sequence'], 'ori': b['ori'], 'x': b['x'], 'y': b['y'], 'dx': dx, 'dy': dy, 'dz': dz,
                 'x0': b['x'] - dx / 2, 'x1': b['x'] + dx / 2, 'y0': b['y'] - dy / 2, 'y1': b['y'] + dy / 2,
                 'z0': b['z'], 'z1': b['z'] + dz}
 
@@ -251,8 +254,8 @@ class DesignChecker:
                 if (self._gap(a['x0'], a['x1'], b['x0'], b['x1']) > PENETRATION_MM
                         and self._gap(a['y0'], a['y1'], b['y0'], b['y1']) > PENETRATION_MM
                         and self._gap(a['z0'], a['z1'], b['z0'], b['z1']) > PENETRATION_MM):
-                    errs.append({'part': b['order'], 'reason': 'CHECK_FAILED',
-                                 'detail': f'{a["order"]}번 ↔ {b["order"]}번 겹침', 'kind': 'position'})
+                    errs.append({'part': b['sequence'], 'reason': 'CHECK_FAILED',
+                                 'detail': f'{a["sequence"]}번 ↔ {b["sequence"]}번 겹침', 'kind': 'position'})
         return errs
 
     # ---------------- 3. 받침 ----------------
@@ -275,20 +278,20 @@ class DesignChecker:
                     if x1 > x0 and y1 > y0:
                         sup.append((j, (x0, x1, y0, y1)))
             if a['z0'] < 0:
-                errors.append({'part': a['order'], 'reason': 'CHECK_FAILED', 'detail': f'{a["order"]}번 작업면 아래(z<0)', 'kind': 'position'})
+                errors.append({'part': a['sequence'], 'reason': 'CHECK_FAILED', 'detail': f'{a["sequence"]}번 작업면 아래(z<0)', 'kind': 'position'})
                 floating = True
             elif not sup:
-                later = [b['order'] for b in boxes[i + 1:] if b['z1'] == a['z0'] and
+                later = [b['sequence'] for b in boxes[i + 1:] if b['z1'] == a['z0'] and
                          self._gap(a['x0'], a['x1'], b['x0'], b['x1']) > 0 and self._gap(a['y0'], a['y1'], b['y0'], b['y1']) > 0]
                 hint = f' (받침 {later[0]}번이 더 늦게 놓임)' if later else ''
-                errors.append({'part': a['order'], 'reason': 'CHECK_FAILED', 'detail': f'{a["order"]}번 공중{hint}', 'kind': 'position'})
+                errors.append({'part': a['sequence'], 'reason': 'CHECK_FAILED', 'detail': f'{a["sequence"]}번 공중{hint}', 'kind': 'position'})
                 floating = True
             below.append(sup)
         return None if floating else below
 
     # ---------------- 4. 안정성 ----------------
     def _stability(self, boxes, below, errors):
-        """order 순서로 하나씩 놓을 때마다, 블록 b 와 그 위에 얹힌 덩어리 U(b) 의 무게중심이 U 가 바깥(받침 · 작업면)에 닿은 면들의
+        """sequence 순서로 하나씩 놓을 때마다, 블록 b 와 그 위에 얹힌 덩어리 U(b) 의 무게중심이 U 가 바깥(받침 · 작업면)에 닿은 면들의
         볼록 껍질 안쪽으로 margin_mm 이상 들어와 있는지 본다. 가장 작은 여유(mm)를 돌려주고, 모자란 블록은 errors 에 쌓는다.
 
         10/3 jenga_check 는 위 블록의 하중을 받침 접촉면 중심에 걸어서, 한쪽으로 내민 구조를 실제보다 안전하게 판정했다
@@ -318,8 +321,8 @@ class DesignChecker:
                 if mg < self.margin_mm and (b not in worst or mg < worst[b][0]):
                     worst[b] = (mg, k)
         for b, (mg, k) in sorted(worst.items()):
-            errors.append({'part': boxes[b]['order'], 'reason': 'CHECK_FAILED',
-                           'detail': f'{boxes[b]["order"]}번 위 덩어리: {boxes[k]["order"]}번까지 놓았을 때 여유 {mg:.1f} mm < {self.margin_mm}', 'kind': 'position'})
+            errors.append({'part': boxes[b]['sequence'], 'reason': 'CHECK_FAILED',
+                           'detail': f'{boxes[b]["sequence"]}번 위 덩어리: {boxes[k]["sequence"]}번까지 놓았을 때 여유 {mg:.1f} mm < {self.margin_mm}', 'kind': 'position'})
         return overall
 
     @staticmethod
@@ -402,8 +405,8 @@ class DesignChecker:
         errs = []
         for i, a in enumerate(boxes):
             if not self._grasps(a, boxes[:i]):
-                errs.append({'part': a['order'], 'reason': 'CHECK_FAILED',
-                             'detail': f'{a["order"]}번 잡을 면 없음: 놓는 시점에 두 손가락이 다 들어가는 방향이 없다', 'kind': 'ai_fields'})
+                errs.append({'part': a['sequence'], 'reason': 'CHECK_FAILED',
+                             'detail': f'{a["sequence"]}번 잡을 면 없음: 놓는 시점에 두 손가락이 다 들어가는 방향이 없다', 'kind': 'ai_fields'})
         return errs
 
     # ---------------- 6. 작업영역 ----------------
@@ -419,10 +422,10 @@ class DesignChecker:
                 bx = o['x_m'] + (c * x - s * y) / 1000.0
                 by = o['y_m'] + (s * x + c * y) / 1000.0
                 if abs(bx - o['x_m']) > half or abs(by - o['y_m']) > half:
-                    errs.append({'part': a['order'], 'reason': 'CHECK_FAILED', 'detail': f'{a["order"]}번 작업영역 밖(조립 작업공간 ± {half} m)', 'kind': 'position'})
+                    errs.append({'part': a['sequence'], 'reason': 'CHECK_FAILED', 'detail': f'{a["sequence"]}번 작업영역 밖(조립 작업공간 ± {half} m)', 'kind': 'position'})
                     break
                 if not (self.table['x_m'][0] <= bx <= self.table['x_m'][1] and self.table['y_m'][0] <= by <= self.table['y_m'][1]):
-                    errs.append({'part': a['order'], 'reason': 'CHECK_FAILED', 'detail': f'{a["order"]}번 작업대 밖', 'kind': 'position'})
+                    errs.append({'part': a['sequence'], 'reason': 'CHECK_FAILED', 'detail': f'{a["sequence"]}번 작업대 밖', 'kind': 'position'})
                     break
         return errs
 

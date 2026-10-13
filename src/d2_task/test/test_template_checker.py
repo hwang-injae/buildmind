@@ -36,7 +36,7 @@ def revision(req, role):
 # ---------------- 기본 4종 ----------------
 @pytest.mark.parametrize('model_id', DESIGNS)
 def test_새_fixture_4종은_schema_검사를_통과하고_규칙으로_읽힌다(model_id):
-    document = RecipeDocument.load(FIXTURES, model_id)                 # recipe/3.0 · placements/3.0 · 짝 해시
+    document = RecipeDocument.load(FIXTURES, model_id)                 # recipe/4.0 · placements/4.0 · 짝 해시
     rules = TemplateChecker(ori_extents(BLOCK_MM)).read_base(dict(base_design(model_id)))
     composition = document.recipe['template']['composition']
     assert set(rules) == set(composition)
@@ -98,9 +98,9 @@ def parent_mismatch(req):
     lambda r: r['base_recipe'].update(schema='recipe/2.0'),
     lambda r: r['base_recipe'].update(schema='blocks/2'),
     lambda r: r['base_recipe'].pop('schema'),
-    lambda r: r['base_recipe'].update(model_id='001_CHAIR_BENCH_V001'),
-    lambda r: r['base_recipe'].update(model_id=None),
-    lambda r: r['base_recipe'].update(model_id='_V000'),
+    lambda r: r['base_recipe'].update(design_id='001_CHAIR_BENCH_V001'),
+    lambda r: r['base_recipe'].update(design_id=None),
+    lambda r: r['base_recipe'].update(design_id='_V000'),
     parent_mismatch,
     lambda r: r.update(design_id='001_CHAIR_BENCH'),
     lambda r: r.update(design_id='001_CHAIR_BENCH_V01'),
@@ -238,9 +238,9 @@ def test_계산되지_않는_식은_AI_탓이_아니라_잘못된_규칙_REQUEST
 
 
 def test_모르는_선택_칸은_무시하고_아는_칸_검사는_그대로():
-    """형식 버전 규칙: recipe/3.1 + 모르는 선택 칸(note 등)은 호환 변경. 새 검사로 해석하지 않는다."""
+    """형식 버전 규칙: recipe/4.1 + 모르는 선택 칸(note 등)은 호환 변경. 새 검사로 해석하지 않는다."""
     req = base_design(BENCH)
-    req['base_recipe']['schema'] = 'recipe/3.1'
+    req['base_recipe']['schema'] = 'recipe/4.1'
     revision(req, 'LEG')['note'] = 'optional'
     revision(req, 'LEG')['speed'] = 1
     revision(req, 'SEAT')['future'] = {'a': [1, 2]}
@@ -406,7 +406,7 @@ def test_형식이_틀리면_21번은_읽을_수_없어_형식_실패만_돌려�
     (lambda r: r['parts'][0].update(group=0), 'ai_fields'),
     (lambda r: r['parts'][0].update(stage=True), 'ai_fields'),
     (lambda r: r['parts'][0].update(grasp='SIDE'), 'ai_fields'),
-    (lambda r: r['parts'][1].update(order=99), 'ai_fields'),
+    (lambda r: r['parts'][1].update(sequence=99), 'ai_fields'),
     (lambda r: r.update(parts=r['parts'] * 6), 'scope'),
 ])
 def test_기존_형식_실패에도_kind가_붙는다(mutate, kind):
@@ -486,12 +486,12 @@ def test_서비스_21번_합격_응답은_recipe_placements를_담고_base_recip
 # ---------------- TemplateChecker 직접: 작은 설계 ----------------
 def rig(composition, design_id='X_V001'):
     """composition(역할 → {count, revision, label?}) 으로 만든 규칙."""
-    base = {'schema': 'recipe/3.0', 'model_id': 'X_V000', 'template': {'composition': composition}}
+    base = {'schema': 'recipe/4.0', 'design_id': 'X_V000', 'template': {'composition': composition}}
     return TemplateChecker(ori_extents(BLOCK_MM)).read_base({'design_id': design_id, 'base_recipe': base})
 
 
 def put(order, x, y, z, ori, role, group):
-    return {'order': order, 'x': x, 'y': y, 'z': z, 'ori': ori, 'role': role, 'group': group}
+    return {'sequence': order, 'x': x, 'y': y, 'z': z, 'ori': ori, 'role': role, 'group': group}
 
 
 def measure(composition, parts):
@@ -741,3 +741,54 @@ def test_004_TOP의_XY_대칭은_좌우와_앞뒤를_확인한다():
             if part['role']=='BASE':part[axis]+=5
         errors=real().check(shifted)['errors']
         assert any(e['reason']=='TEMPLATE_RANGE' and e['kind']=='template' and '대칭' in e['detail'] for e in errors)
+
+
+# ---------------- 스캔 설계는 21번만 건너뜀 (E-106 · W191) ----------------
+def real_converter():
+    """진짜 21번 + 진짜 변환기 ①(task_node 와 같은 연결) — 대역 없이 made_by 경로를 본다."""
+    from d2_task.parts_to_recipe import PartsToRecipe
+    c = real()
+    c.parts_to_recipe = PartsToRecipe(c.grasp_options, BLOCK_MM).convert
+    return c
+
+
+def free_shape():
+    """벤치 V000 + 설계도에 없는 좌판 한 장을 맨 위에 더한 자유 모양(물리적으로는 받쳐짐)."""
+    req = base_design(BENCH)
+    req['parts'].append(dict(req['parts'][-1], sequence=len(req['parts']) + 1, z=req['parts'][-1]['z'] + 15, stage=req['parts'][-1]['stage'] + 1))
+    return req
+
+
+def test_같은_자유_모양_생성은_21번_불합격_스캔은_변환기까지_통과():
+    gen = real_converter().check(free_shape())
+    assert not gen['ok'] and set(reasons(gen)) == {'TEMPLATE_SHAPE'}
+    scan = real_converter().check(dict(free_shape(), made_by='scan'))
+    assert scan['ok'] and scan['errors'] == [] and 'recipe' in scan and 'placements' in scan
+
+
+@pytest.mark.parametrize('value', [None, 'web', 'Scan', ' scan', 'scan ', 1, True, ['scan']])
+def test_made_by_가_정확히_scan_이_아니면_21번은_그대로(value):
+    req = free_shape()
+    if value is not None:
+        req['made_by'] = value
+    res = real_converter().check(req)
+    assert not res['ok'] and 'TEMPLATE_SHAPE' in reasons(res)
+
+
+def test_스캔이어도_물리_불합격은_그대로_거절():
+    req = dict(free_shape(), made_by='scan')
+    req['parts'][-1]['z'] += 15                                         # 맨 위 좌판이 뜬다 — 받침 실패(1~20번)
+    res = real_converter().check(req)
+    assert not res['ok'] and 'CHECK_FAILED' in reasons(res) and 'TEMPLATE_SHAPE' not in reasons(res)
+    assert 'recipe' not in res
+
+
+@pytest.mark.parametrize('mutate', [lambda r: r.pop('base_recipe'),
+                                    lambda r: r['base_recipe'].update(design_id='002_CHAIR_BACK_V000'),
+                                    lambda r: r.update(design_id='bench_scan_1')])
+def test_스캔이어도_요청_확인은_공통으로_REQUEST_INVALID(mutate):
+    """base_recipe 있음 · Template 일치 · design_id 모양(<Template>_V3자리)은 스캔에도 그대로 본다(요청 계약)."""
+    req = dict(free_shape(), made_by='scan')
+    mutate(req)
+    res = real_converter().check(req)
+    assert not res['ok'] and reasons(res) == ['REQUEST_INVALID']

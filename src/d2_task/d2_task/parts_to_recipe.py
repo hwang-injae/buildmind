@@ -1,4 +1,4 @@
-"""변환기 ① — AI가 쓴 설계도(parts/3.0)를 레시피(recipe/3.0 — template.composition) + 조립 방법(placements/3.0)으로 바꾼다 (W110, E-69, PLM 1단계).
+"""변환기 ① — AI가 쓴 설계도(parts/4.0)를 레시피(recipe/4.0 — template.composition) + 조립 방법(placements/4.0)으로 바꾼다 (W110, E-69, PLM 1단계).
 
 검사 묶음(DesignChecker)이 설계를 통과시킨 뒤 부른다. ROS · 파일 쓰기 · 로봇 · 메시지 영향 없음(계산만).
 """
@@ -10,28 +10,29 @@ from pathlib import Path
 
 from d2_task.recipe_builder import RecipeBuilder
 from d2_task.recipe_document import recipe_sha256, same_major
+from d2_task.recipe_to_parts import ori_extents
 
-SCHEMA_REQUEST = 'parts/3.0'
+SCHEMA_REQUEST = 'parts/4.0'
 
 # 부품 이름 `<역할>[_<옵션>]_<그룹 3자리>_<부품 2자리>` → (역할[_옵션], 그룹, 부품). RecipeBuilder.PART_NAME 과 같은 꼴
 PART_NAME_RE = re.compile(r'([A-Z]+(?:_[A-Z]+)?)_([0-9]{3})_([0-9]{2})')
 
 # 구성요소 label = 화면 이름표(names.ts ROLE)와 같은 말 — 설계 초안 3절. roles.json(AI에게 주는 설명문)과 따로 둔다.
 ROLE_LABELS = {'LEG': '다리', 'SEAT': '좌판', 'BACK': '등받이', 'BEAM': '보', 'TOP': '상판', 'BASE': '바닥 받침', 'COLUMN': '기둥'}
-REQUIRED_KEYS = ('order', 'x', 'y', 'z', 'ori', 'role', 'group', 'stage', 'grasp')
+REQUIRED_KEYS = ('sequence', 'x', 'y', 'z', 'ori', 'role', 'group', 'stage', 'grasp')
 ROLES_PATH = Path(__file__).with_name('roles.json')
 
 # 역할[_옵션] — 영문 대문자 한 단어씩, 옵션 0~1개 (작명 규칙 v3 2장)
 ROLE_RE = re.compile(r'([A-Z]+)(?:_([A-Z]+))?')
 
-# 같은 높이 · 같은 면으로 볼 허용오차(mm). parts/3.0 좌표는 JSON 숫자 그대로라 부동소수 오차만 흡수한다.
+# 같은 높이 · 같은 면으로 볼 허용오차(mm). parts/4.0 좌표는 JSON 숫자 그대로라 부동소수 오차만 흡수한다.
 TOL = 1e-6
 
 
 class DesignRejected(ValueError):
     """AI가 쓴 값이 틀려 레시피를 만들 수 없음 — 검사 묶음이 CHECK_FAILED(재생성)로 돌려줄 실수. 프로그램 고장(ERROR)과 구분한다.
 
-    errors: [{'part': order 또는 None, 'detail': 사람이 · AI가 읽을 이유}] — 한 번에 찾은 실수를 모두 담아 재생성 횟수를 줄인다.
+    errors: [{'part': sequence 또는 None, 'detail': 사람이 · AI가 읽을 이유}] — 한 번에 찾은 실수를 모두 담아 재생성 횟수를 줄인다.
     """
 
     def __init__(self, errors):
@@ -41,7 +42,7 @@ class DesignRejected(ValueError):
 
 
 class PartsToRecipe:
-    """parts/3.0 → {'recipe': recipe/3.0, 'placements': placements/3.0}.
+    """parts/4.0 → {'recipe': recipe/4.0, 'placements': placements/4.0}.
 
     AI가 고른 값(역할 · 옵션 · 부품 묶음 · 순서 · 단계 · 잡기)은 그대로 옮기고 대신 채우지 않는다(E-69 ②).
     코드가 정하는 것은 블록 번호 · 중심 · 회전 R · 받침 · 닫힘 축 · recipe_sha256 뿐이다(RecipeBuilder — CAD 도구와 같은 규칙).
@@ -53,15 +54,14 @@ class PartsToRecipe:
         """잡기 후보 함수 · 블록 크기 · 역할 목록을 받는다.
 
         입력:
-            grasp_options: blocks 목록 → {order: [잡기 이름 …]} — 검사 묶음 DesignChecker.grasp_options(손가락 규칙을 한 곳에 두려고 받는다)
+            grasp_options: blocks 목록 → {sequence: [잡기 이름 …]} — 검사 묶음 DesignChecker.grasp_options(손가락 규칙을 한 곳에 두려고 받는다)
             block_mm: 블록 설계 기준 크기 [길이, 폭, 두께] mm — robot.yaml block_size_m × 1000
             roles_path: 역할 · 옵션 목록 JSON 파일 (기본 = 이 파일 옆 roles.json)
         실패: 목록 파일이 없거나 깨졌으면 OSError · ValueError (설정 고장 — AI 실수가 아님).
         """
         self.grasp_options = grasp_options
-        L, W, T = block_mm
-        # 방향 코드 → (x · y · z 방향 길이) mm. IRD 2장 ori 표 · task ori_extents 와 같은 규칙.
-        self.extent = {'x': (L, W, T), 'y': (W, L, T), 'xe': (L, T, W), 'ye': (T, L, W), 'zx': (T, W, L), 'zy': (W, T, L)}
+        # 방향 코드 → (x · y · z 방향 길이) mm — 정본 ori_extents 를 쓴다(10/14 PL C2)
+        self.extent = ori_extents(block_mm)
         self.roles, self.options = self.load_role_list(roles_path)
         self.builder = RecipeBuilder()
 
@@ -80,12 +80,12 @@ class PartsToRecipe:
         return set(roles), set(options)
 
     def convert(self, request):
-        """parts/3.0 하나를 레시피 + 조립 방법으로 바꾼다. 입력을 바꾸지 않는다.
+        """parts/4.0 하나를 레시피 + 조립 방법으로 바꾼다. 입력을 바꾸지 않는다.
 
         입력:
-            request: parts/3.0 dict — design_id, parts[{order, x, y, z(아랫면), ori, role, group, stage, grasp}] (mm, 설계 좌표계)
-        출력: {'recipe': recipe/3.0(model_id = design_id, source_cad = None), 'placements': placements/3.0}
-        실패: AI가 쓴 값이 틀리면 DesignRejected(errors — part = order). grasp_options 자체의 예외는 그대로 올린다(프로그램 고장).
+            request: parts/4.0 dict — design_id, parts[{sequence, x, y, z(아랫면), ori, role, group, stage, grasp}] (mm, 설계 좌표계)
+        출력: {'recipe': recipe/4.0(design_id = design_id, source_cad = None), 'placements': placements/4.0}
+        실패: AI가 쓴 값이 틀리면 DesignRejected(errors — part = sequence). grasp_options 자체의 예외는 그대로 올린다(프로그램 고장).
         """
         # 형식: 검사 묶음이 먼저 보지만, 따로 불려도 빈 칸을 대신 채우지 않게 다시 확인한다
         if not isinstance(request, dict) or not same_major(request.get('schema'), SCHEMA_REQUEST) or not request.get('design_id'):
@@ -93,14 +93,14 @@ class PartsToRecipe:
         items = request.get('parts')
         if not isinstance(items, list) or not items or not all(isinstance(b, dict) for b in items):
             raise DesignRejected([{'part': None, 'detail': 'parts 가 비어 있거나 객체 목록이 아니다'}])
-        missing = [{'part': b.get('order'), 'detail': f'{b.get("order")}번 블록에 {", ".join(k for k in REQUIRED_KEYS if k not in b)} 없음'}
+        missing = [{'part': b.get('sequence'), 'detail': f'{b.get("sequence")}번 블록에 {", ".join(k for k in REQUIRED_KEYS if k not in b)} 없음'}
                    for b in items if any(k not in b for k in REQUIRED_KEYS)]
         if missing:
             raise DesignRejected(missing)
-        items = sorted(items, key=lambda b: b['order'])
-        if [b['order'] for b in items] != list(range(1, len(items) + 1)):
-            raise DesignRejected([{'part': None, 'detail': f'order 가 1부터 {len(items)}까지 하나씩 있지 않다'}])
-        bad = [{'part': b['order'], 'detail': f'{b["order"]}번 ori · role · group · stage 가 형식에 맞지 않다 '
+        items = sorted(items, key=lambda b: b['sequence'])
+        if [b['sequence'] for b in items] != list(range(1, len(items) + 1)):
+            raise DesignRejected([{'part': None, 'detail': f'sequence 가 1부터 {len(items)}까지 하나씩 있지 않다'}])
+        bad = [{'part': b['sequence'], 'detail': f'{b["sequence"]}번 ori · role · group · stage 가 형식에 맞지 않다 '
                                                f'(ori 6가지 · role 글자 · group · stage 1 이상 정수)'}
                for b in items if b['ori'] not in self.extent or not isinstance(b['role'], str)
                or any(not isinstance(b[k], int) or isinstance(b[k], bool) or b[k] < 1 for k in ('group', 'stage'))]
@@ -109,7 +109,7 @@ class PartsToRecipe:
 
 
         # AI 실수 검사 ① 역할 목록 ② 부품 이어짐 ③ 고른 잡기 — 셋 다 모아 한 번에 돌려준다
-        boxes = {b['order']: self.calculate_box(b) for b in items}
+        boxes = {b['sequence']: self.calculate_box(b) for b in items}
         errors = self.check_role_names(items) + self.check_groups_connected(items, boxes) + self.check_chosen_grasps(items)
         if errors:
             raise DesignRejected(errors)
@@ -119,10 +119,10 @@ class PartsToRecipe:
         names = self.make_part_names(items, boxes)
         vertices, hints = [], {}
         for b in items:
-            lo, hi = boxes[b['order']]
+            lo, hi = boxes[b['sequence']]
             corners = [tuple((lo, hi)[s][k] for k, s in enumerate(pick)) for pick in itertools.product((0, 1), repeat=3)]
-            vertices.append({'part_name': names[b['order']], 'handle': None, 'vertices': corners})
-            hints[names[b['order']]] = {'SEQ': b['order'], 'STAGE': b['stage'], 'GRASP': b['grasp']}
+            vertices.append({'part_name': names[b['sequence']], 'handle': None, 'vertices': corners})
+            hints[names[b['sequence']]] = {'SEQ': b['sequence'], 'STAGE': b['stage'], 'GRASP': b['grasp']}
         try:
             built = self.builder.make_recipe(vertices, request['design_id'], None, None)
             placements = self.builder.make_placements(built, hints)
@@ -131,16 +131,16 @@ class PartsToRecipe:
             raise DesignRejected([{'part': None, 'detail': f'레시피 검사: {e}'}]) from e
         recipe = self.to_template_recipe(built)
         # 짝 확인 해시는 우리가 내보내는 구조 기준으로 다시 맞춘다(옛 builder 가 계산한 값은 옛 구조 기준이라 맞지 않는다).
-        # placements/3.0 에는 stock_id · cad_handle 이 없다 — builder 가 (옛 버전이) 넣어 줬다면 뗀다.
+        # placements/4.0 에는 stock_id · cad_handle 이 없다 — builder 가 (옛 버전이) 넣어 줬다면 뗀다.
         steps = [{k: v for k, v in step.items() if k not in ('stock_id', 'cad_handle')} for step in placements['steps']]
         placements = dict(placements, steps=steps, recipe_sha256=recipe_sha256(recipe))
         return {'recipe': recipe, 'placements': placements}
 
     def to_template_recipe(self, built):
-        """RecipeBuilder 가 만든 레시피(최상위 stocks · parts)를 AI·스캔 설계용 recipe/3.0(template.composition)으로 바꾼다.
+        """RecipeBuilder 가 만든 레시피(최상위 stocks · parts)를 AI·스캔 설계용 recipe/4.0(template.composition)으로 바꾼다.
 
         입력: built = RecipeBuilder.make_recipe 출력(mm). 이미 template 이 있는 새 builder 출력이면 허용 칸만 남긴 복사본을 돌려준다
-        (옛 builder 의 stocks · parts 를 바꾸는 이 어댑터는 현재 builder 와의 호환용이며, 외부의 옛 레시피를 읽는 길이 아니다). 출력: {schema, model_id, source_cad, stocks, template:{composition:{역할:
+        (옛 builder 의 stocks · parts 를 바꾸는 이 어댑터는 현재 builder 와의 호환용이며, 외부의 옛 레시피를 읽는 길이 아니다). 출력: {schema, design_id, source_cad, stocks, template:{composition:{역할:
         {label, count, parts:{그룹:[{part, stock_id, center_mm, R}]}}}}} — 구성요소는 label · count · parts 만 두고
         revision · name · description · tags · cad 는 없다(기본 설계 V000 에만 있다). 입력을 바꾸지 않는다. 바깥 영향 없음.
         label 은 기존 값이 있으면 보존하고, 없거나 빈 값이면 ROLE_LABELS(화면 이름표)로 보완한다. 목록에 없는 역할은 역할 이름 그대로 쓴다. 옵션 역할(LEG_WHEEL)은 기본 역할 label 을 쓴다.
@@ -165,14 +165,14 @@ class PartsToRecipe:
             groups.setdefault(f'{role}_{group_no}', []).append(
                 {'part': part_no, 'stock_id': item['stock_id'], 'center_mm': list(item['center_mm']),
                  'R': [list(row) for row in item['R']]})
-        return {'schema': built['schema'], 'model_id': built['model_id'], 'source_cad': built['source_cad'],
+        return {'schema': built['schema'], 'design_id': built['design_id'], 'source_cad': built['source_cad'],
                 'stocks': copy.deepcopy(built['stocks']), 'template': {'composition': composition}}
 
     def calculate_box(self, part):
         """블록 하나가 차지하는 축 정렬 상자.
 
         입력:
-            block: parts/3.0 블록 (x · y = 중심, z = 아랫면, mm)
+            block: parts/4.0 블록 (x · y = 중심, z = 아랫면, mm)
         출력: (lo, hi) — 각각 (x, y, z) 튜플 mm
         """
         dx, dy, dz = self.extent[part['ori']]
@@ -184,7 +184,7 @@ class PartsToRecipe:
         """① 역할 · 옵션이 목록에 있는지 본다. 꼴(대문자 한 단어 + 옵션 0~1)도 다시 본다.
 
         입력:
-            items: order 순 블록 목록
+            items: sequence 순 블록 목록
         출력: errors 목록(없으면 빈 목록). 같은 이름은 한 번만 적는다.
         """
         errors, seen = [], set()
@@ -195,14 +195,14 @@ class PartsToRecipe:
             seen.add(role)
             match = ROLE_RE.fullmatch(role) if isinstance(role, str) else None
             if not match:
-                errors.append({'part': b['order'], 'detail': f'{b["order"]}번 role={role!r} 는 영문 대문자 역할 한 단어 + 옵션 0~1개(예 LEG · LEG_WHEEL)가 아니다'})
+                errors.append({'part': b['sequence'], 'detail': f'{b["sequence"]}번 role={role!r} 는 영문 대문자 역할 한 단어 + 옵션 0~1개(예 LEG · LEG_WHEEL)가 아니다'})
                 continue
             name, option = match.groups()
             if name not in self.roles:
-                errors.append({'part': b['order'], 'detail': f'{b["order"]}번 역할 {name} 는 역할 목록에 없다(있는 것: {", ".join(sorted(self.roles))}) — '
+                errors.append({'part': b['sequence'], 'detail': f'{b["sequence"]}번 역할 {name} 는 역할 목록에 없다(있는 것: {", ".join(sorted(self.roles))}) — '
                                                          f'맞는 것을 쓰거나, 새 역할이면 뜻과 함께 목록에 더해야 한다'})
             if option is not None and option not in self.options:
-                errors.append({'part': b['order'], 'detail': f'{b["order"]}번 옵션 {option} 는 옵션 목록에 없다(있는 것: {", ".join(sorted(self.options))})'})
+                errors.append({'part': b['sequence'], 'detail': f'{b["sequence"]}번 옵션 {option} 는 옵션 목록에 없다(있는 것: {", ".join(sorted(self.options))})'})
         return errors
 
     def check_groups_connected(self, items, boxes):
@@ -212,8 +212,8 @@ class PartsToRecipe:
         젠가는 면으로 닿아야 버틴다). 겹치는 넓이가 버틸 만큼인지는 검사 묶음의 안정성 검사가 본다.
 
         입력:
-            items: order 순 블록 목록
-            boxes: {order: (lo, hi)}
+            items: sequence 순 블록 목록
+            boxes: {sequence: (lo, hi)}
         출력: errors 목록 — 떨어진 덩어리마다 블록 번호를 적는다
         """
         errors = []
@@ -246,28 +246,28 @@ class PartsToRecipe:
         """③ AI가 고른 잡기가, 놓는 순간 손가락이 들어가는 후보(grasp_options)에 있는지 본다. 놓인 자세와 다른 잡기도 여기서 걸린다.
 
         입력:
-            items: order 순 블록 목록
+            items: sequence 순 블록 목록
         출력: errors 목록 — 가능한 잡기를 이유에 적어 AI가 바로 고치게 한다
         """
         options = self.grasp_options(items)
         errors = []
         for b in items:
-            allowed = options.get(b['order']) or []
+            allowed = options.get(b['sequence']) or []
             if b['grasp'] not in allowed:
                 hint = f'가능: {", ".join(allowed)}' if allowed else '이 순서로는 잡을 수 있는 방향이 없다 — 순서를 바꿀 것'
-                errors.append({'part': b['order'], 'detail': f'{b["order"]}번 grasp {b["grasp"]} 로는 놓는 순간 손가락이 들어가지 않는다({hint})'})
+                errors.append({'part': b['sequence'], 'detail': f'{b["sequence"]}번 grasp {b["grasp"]} 로는 놓는 순간 손가락이 들어가지 않는다({hint})'})
         return errors
 
     def group_parts(self, items):
         """블록을 부품 그룹(역할[_옵션], group 값)별로 모은다.
 
         입력:
-            items: order 순 블록 목록
-        출력: {(역할, group 값): [order …]} — order 순
+            items: sequence 순 블록 목록
+        출력: {(역할, group 값): [sequence …]} — sequence 순
         """
         groups = {}
         for b in items:
-            groups.setdefault((b['role'], b['group']), []).append(b['order'])
+            groups.setdefault((b['role'], b['group']), []).append(b['sequence'])
         return groups
 
     def make_part_names(self, items, boxes):
@@ -277,9 +277,9 @@ class PartsToRecipe:
         RecipeBuilder.check_block_numbering 과 같은 위치 키(0.001 mm 반올림)를 써서 그 검사를 그대로 통과한다.
 
         입력:
-            items: order 순 블록 목록
-            boxes: {order: (lo, hi)}
-        출력: {order: 블록 이름}
+            items: sequence 순 블록 목록
+            boxes: {sequence: (lo, hi)}
+        출력: {sequence: 블록 이름}
         """
         # 부품 안 블록 순서: (바닥 z, 중심 y, 중심 x)
         def position(order):

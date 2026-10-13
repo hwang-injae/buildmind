@@ -171,15 +171,15 @@ def test_pick_place_tcp_rejects_different_up_axis(robot_cfg):
         mm.pick_place_tcp(robot_cfg, center, rot, _place_center(robot_cfg, IDENTITY), IDENTITY, 'EDGE_LONG', slot=3)
 
 
-def _recipe(size_mm=(75, 25, 15), model_id='001_CHAIR_BENCH_V000'):
+def _recipe(size_mm=(75, 25, 15), design_id='001_CHAIR_BENCH_V000'):
     """E-69 두 파일(조립 방법 · 구조)의 작은 레시피 — 눕힌 블록 두 개를 쌓는다 (SEAT_001_02 가 SEAT_001_01 위).
     반환: (조립 방법, 구조). recipe_parts 에는 load_recipe 처럼 구조를 'structure' 칸에 붙여 넣는다. steps 는 일부러 순서를 뒤집어 둔다."""
-    structure = {'schema': 'recipe/3.0', 'model_id': model_id,
+    structure = {'schema': 'recipe/4.0', 'design_id': design_id,
                  'stocks': [{'stock_id': 'STOCK_001', 'size_mm': list(size_mm)}],
                  'template': {'composition': {'SEAT': {'count': 1, 'parts': {'SEAT_001': [
                      {'part': '01', 'stock_id': 'STOCK_001', 'center_mm': [0, 0, 7.5], 'R': IDENTITY},
                      {'part': '02', 'stock_id': 'STOCK_001', 'center_mm': [0, 0, 22.5], 'R': IDENTITY}]}}}}}
-    recipe = {'schema': 'placements/3.0', 'model_id': model_id,
+    recipe = {'schema': 'placements/4.0', 'design_id': design_id,
               'steps': [{'part_name': 'SEAT_001_02', 'sequence': 2, 'stage': 2, 'grasp': 'FLAT_SHORT', 'grasp_axis': 'WIDTH',
                          'supports': ['SEAT_001_01']},
                         {'part_name': 'SEAT_001_01', 'sequence': 1, 'stage': 1, 'grasp': 'FLAT_SHORT', 'grasp_axis': 'WIDTH',
@@ -227,10 +227,10 @@ def _tree_parts(structure):
             for group, items in comp['parts'].items() for item in items}
 
 
-def _write_files(folder, recipe, structure, sha=None, schema='placements/3.0'):
-    """_recipe() 를 E-69 파일 두 개로 쓴다: <모델ID>_recipe.json(구조) + <모델ID>_placements.csv(18칸 — placements/3.0, supports 는 ';').
+def _write_files(folder, recipe, structure, sha=None, schema='placements/4.0'):
+    """_recipe() 를 E-69 파일 두 개로 쓴다: <모델ID>_recipe.json(구조) + <모델ID>_placements.csv(18칸 — placements/4.0, supports 는 ';').
     sha · schema 를 주면 그 값으로 바꿔 써서 거절 시험에 쓴다. 반환: 구조 파일 경로(글자)."""
-    rp = folder / f"{structure['model_id']}_recipe.json"
+    rp = folder / f"{structure['design_id']}_recipe.json"
     rp.write_text(json.dumps(structure, indent=2, ensure_ascii=False), encoding='utf-8')
     geo = _tree_parts(structure)
     buf = io.StringIO()
@@ -238,18 +238,18 @@ def _write_files(folder, recipe, structure, sha=None, schema='placements/3.0'):
     w.writeheader()
     for st in sorted(recipe['steps'], key=lambda k: k['sequence']):
         g = geo[st['part_name']]
-        w.writerow({'part_id': f"{recipe['model_id']}_{st['part_name']}", 'part_name': st['part_name'], 'sequence': st['sequence'],
+        w.writerow({'part_id': f"{recipe['design_id']}_{st['part_name']}", 'part_name': st['part_name'], 'sequence': st['sequence'],
                     'stage': st['stage'], 'size_L_mm': 75.0, 'size_W_mm': 25.0, 'size_T_mm': 15.0,
                     'center_x_mm': g['center_mm'][0], 'center_y_mm': g['center_mm'][1], 'center_z_mm': g['center_mm'][2],
                     'axis_L': '+X', 'axis_W': '+Y', 'axis_T': '+Z', 'grasp': st['grasp'], 'grasp_axis': st['grasp_axis'],
                     'supports': ';'.join(st['supports']), 'recipe_sha256': sha or mm.recipe_sha256(structure),
                     'schema': schema})
-    (folder / f"{structure['model_id']}_placements.csv").write_text(buf.getvalue(), encoding='utf-8')
+    (folder / f"{structure['design_id']}_placements.csv").write_text(buf.getvalue(), encoding='utf-8')
     return str(rp)
 
 
 def test_load_recipe_reads_placements_next_to_it(tmp_path, robot_cfg):
-    """load_recipe: 구조 _recipe.json(recipe/3.0) + 옆 _placements.csv 를 지금 모양(steps + 'structure')으로 붙인다 — sequence · stage 는 정수,
+    """load_recipe: 구조 _recipe.json(recipe/4.0) + 옆 _placements.csv 를 지금 모양(steps + 'structure')으로 붙인다 — sequence · stage 는 정수,
     supports 는 목록, part_id 는 CSV 값. CSV 가 없으면 FileNotFoundError. recipe_files 는 _recipe.json 만(CSV · 옛 .recipe.json 은 안 넣음)."""
     recipe, structure = _recipe()
     rp = _write_files(tmp_path, recipe, structure)
@@ -257,10 +257,10 @@ def test_load_recipe_reads_placements_next_to_it(tmp_path, robot_cfg):
     files = mm.recipe_files(str(tmp_path))
     assert [mm.recipe_name(f) for f in files] == ['001_CHAIR_BENCH_V000']
     loaded = mm.load_recipe(rp)
-    assert loaded['schema'] == 'placements/3.0' and loaded['structure'] == structure
+    assert loaded['schema'] == 'placements/4.0' and loaded['structure'] == structure
     assert loaded['steps'][1]['supports'] == ['SEAT_001_01'] and loaded['steps'][0]['supports'] == []
     assert all(isinstance(st['sequence'], int) and isinstance(st['stage'], int) for st in loaded['steps'])
-    assert mm.recipe_model_id(loaded) == '001_CHAIR_BENCH_V000'
+    assert mm.recipe_design_id(loaded) == '001_CHAIR_BENCH_V000'
     assert mm.recipe_parts(robot_cfg, loaded) == mm.recipe_parts(robot_cfg, _joined())
     (tmp_path / '001_CHAIR_BENCH_V000_placements.csv').unlink()
     with pytest.raises(FileNotFoundError):
@@ -420,3 +420,124 @@ def test_tip_rejects_lying_block(robot_cfg):
     """눕힌 블록은 눕히기(TIP) 대상이 아니다 — ValueError."""
     with pytest.raises(ValueError):
         mm.tip_place_tcp(robot_cfg, (0.37, -0.285, 0.0874), mm.rpy_matrix(0, 0, 0), (0.37, -0.285, 0.0874), False)
+
+
+# ---------------- 세우기 교시 동작 (W131 — 한세교 시험, 10/13 박진용이 받침 키 · 잡기 이름에 맞춤) ----------------
+STAND_LYING = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]                  # 긴 쪽 base Y 로 눕힘 (spare_spots yaw 90)
+STAND_STOOD = {'high': [[0, -1, 0], [0, 0, -1], [1, 0, 0]],       # LENGTH 위
+               'side': [[0, 0, 1], [1, 0, 0], [0, 1, 0]]}         # WIDTH 위
+STAND_GRASP = {'high': 'STANDUP_HIGH', 'side': 'STANDUP_SIDE'}
+
+
+def stand_centers(cfg, case):
+    """받침 자리(spare_spots 첫 자리)의 눕힌 블록 · 세운 블록 중심 (m). 출력: (집기 중심, 놓기 중심)."""
+    spot = cfg['spare_spots'][0]
+    return [(spot['x_m'], spot['y_m'], spot['z_m'] + mm.half_height(rot, cfg['block_actual_m'])) for rot in (STAND_LYING, STAND_STOOD[case])]
+
+
+def same_rotation(q1, q2, tol=1e-3):
+    """두 쿼터니언이 같은 회전인지 (q 와 -q 는 같다)."""
+    return abs(abs(sum(a * b for a, b in zip(q1, q2))) - 1.0) <= tol
+
+
+def test_posx_to_rg2tcp_matches_virtual_table():
+    """펜던트 (90, 120, -90) 이 가상 세움 표의 MoveIt 쿼터니언과 같은 회전이고, 위치는 mm -> m 그대로 (한세교 세움 가상모드 좌표 2번)."""
+    xyz, q = mm.posx_to_rg2tcp([367.47, -327.59, 108.39, 90.0, 120.0, -90.0])
+    assert close(xyz, (0.36747, -0.32759, 0.10839))
+    assert same_rotation(q, (-0.6124, -0.6124, -0.3536, 0.3536))
+
+
+def test_posx_to_rg2tcp_axes():
+    """posx 축과 rg2_tcp 축 관계: x_rg2 = -y_posx, y_rg2(닫힘) = +x_posx, z 같음 — 높게세움 진입은 툴 수직 · 닫힘 base X."""
+    _, q = mm.posx_to_rg2tcp([367.47, -284.99, 194.98, 141.43, 180.0, 141.19])
+    x, y, z = mm.quat_axes(q)
+    assert close(z, [0, 0, -1], 1e-3) and abs(abs(y[0]) - 1.0) < 1e-3
+    r = mm.zyz_matrix(30.0, 40.0, 50.0)
+    _, q = mm.posx_to_rg2tcp([0, 0, 0, 30.0, 40.0, 50.0])
+    x, y, z = mm.quat_axes(q)
+    assert close(x, [-v for v in mm.column(r, 1)], 1e-9) and close(y, mm.column(r, 0), 1e-9) and close(z, mm.column(r, 2), 1e-9)
+    with pytest.raises(ValueError):
+        mm.posx_to_rg2tcp([1, 2, 3])
+
+
+@pytest.mark.parametrize('case,axis_index,deg', [('high', 0, -88.35), ('side', 1, 90.0)])
+def test_standup_taught_rotation(robot_cfg, case, axis_index, deg):
+    """교시 리프트업 -> 내려놓기 방향 변화가 닫힘 축 둘레 회전이다 — 높게세움 base X 둘레 −88.35°, 옆세움 base Y 둘레 +90° (0.5° 안)."""
+    t = mm.standup_targets(robot_cfg, case)
+    a, b = mm.matrix_from_quat(t['lift_up'][1]), mm.matrix_from_quat(t['place'][1])
+    d = [[sum(b[i][k] * a[j][k] for k in range(3)) for j in range(3)] for i in range(3)]   # b · aᵀ
+    angle = math.degrees(math.acos(max(-1.0, min(1.0, (d[0][0] + d[1][1] + d[2][2] - 1) / 2))))
+    axis = [d[2][1] - d[1][2], d[0][2] - d[2][0], d[1][0] - d[0][1]]
+    assert abs((angle if axis[axis_index] > 0 else -angle) - deg) < 0.5, case
+    assert abs(axis[axis_index]) > 0.99 * math.hypot(*axis)
+    assert abs(abs(mm.quat_axes(t['pick'][1])[1][axis_index]) - 1.0) < 1e-3      # 닫힘 축이 회전축과 나란함(E-77)
+
+
+@pytest.mark.parametrize('case', ['high', 'side'])
+def test_standup_targets_release_up(robot_cfg, case):
+    """release_up = 내려놓기 자세에서 Z+ lift_after_place_m, 방향 그대로. 진입은 툴 수직 아래."""
+    t = mm.standup_targets(robot_cfg, case)
+    (px, py, pz), pq = t['place']
+    (rx, ry, rz), rq = t['release_up']
+    assert close((rx, ry, rz - pz), (px, py, robot_cfg['standup_taught']['lift_after_place_m'])) and rq == pq
+    assert close(mm.quat_axes(t['entry'][1])[2], [0, 0, -1], 1e-3)
+    assert set(t) == set(mm.STANDUP_ORDER) | {'release_up'}
+
+
+@pytest.mark.parametrize('case', ['high', 'side'])
+def test_standup_case_picks_taught_motion(robot_cfg, case):
+    """받침 자리의 눕힌 블록 -> 세운 블록, 잡기 STANDUP_HIGH · STANDUP_SIDE 면 그 교시 동작."""
+    pick_c, place_c = stand_centers(robot_cfg, case)
+    assert mm.standup_case(robot_cfg, pick_c, STAND_LYING, place_c, STAND_STOOD[case], STAND_GRASP[case]) == case
+
+
+def test_standup_case_rejects(robot_cfg):
+    """교시와 다른 요청은 ValueError: 세우기 잡기 아님 · 위 축이 잡기와 다름 · 받침 자리에서 15 mm 넘게 · 눕힌 블록이 아님."""
+    pick_c, place_c = stand_centers(robot_cfg, 'high')
+    with pytest.raises(ValueError, match='세우기 잡기가 아니다'):
+        mm.standup_case(robot_cfg, pick_c, STAND_LYING, place_c, STAND_STOOD['high'], 'FLAT_SHORT')
+    with pytest.raises(ValueError, match='위로 세운다'):
+        mm.standup_case(robot_cfg, pick_c, STAND_LYING, place_c, STAND_STOOD['high'], 'STANDUP_SIDE')
+    far = (pick_c[0] + 0.02, pick_c[1], pick_c[2])
+    with pytest.raises(ValueError, match='받침 자리'):
+        mm.standup_case(robot_cfg, far, STAND_LYING, place_c, STAND_STOOD['high'], 'STANDUP_HIGH')
+    with pytest.raises(ValueError, match='눕힌 블록'):
+        mm.standup_case(robot_cfg, place_c, STAND_STOOD['high'], pick_c, STAND_LYING, 'STANDUP_HIGH')
+
+
+@pytest.mark.parametrize('case', ['high', 'side'])
+def test_standup_held_box(robot_cfg, case):
+    """쥔 상자: 크기 = 실측 - 1 mm, TCP 방향으로 돌리면 블록 축이 눕힌 블록 축과 같고, 상자 중심 = 요청 블록 중심,
+    상자 바닥 = 받침 윗면(spare_spots z_m) + 0.5 mm (받침과 안 겹침)."""
+    t = mm.standup_targets(robot_cfg, case)
+    pick_c, _ = stand_centers(robot_cfg, case)
+    tcp_xyz, tcp_q = t['pick']
+    held = mm.standup_held_box(robot_cfg, pick_c, STAND_LYING, tcp_xyz, tcp_q)
+    assert close(held['size_m'], [v - mm.STANDUP_HELD_SHRINK_M for v in robot_cfg['block_actual_m']], 1e-12)
+    r_tcp, r_rel = mm.matrix_from_quat(tcp_q), mm.matrix_from_quat(held['quat'])
+    r_blk = [[sum(r_tcp[i][k] * r_rel[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+    assert all(close(r_blk[i], STAND_LYING[i], 1e-9) for i in range(3))
+    center = [tcp_xyz[i] + sum(r_tcp[i][k] * held['offset_m'][k] for k in range(3)) for i in range(3)]
+    assert close(center, pick_c, 1e-9)
+    bottom = center[2] - mm.half_height(r_blk, held['size_m'])
+    assert close(bottom - robot_cfg['spare_spots'][0]['z_m'], mm.STANDUP_HELD_SHRINK_M / 2, 1e-9)
+
+
+def test_standup_spot_on_spare_base(robot_cfg):
+    """교시 자리 = 받침(spare_base_m) 가운데 · 받침 280 × 80 mm · 윗면 80 mm(한세교 교시, 10/13 00시 PL 승인 자리)."""
+    sp, sb = robot_cfg['spare_spots'][0], robot_cfg['spare_base_m']
+    assert close(((sb['x_m'][0] + sb['x_m'][1]) / 2, (sb['y_m'][0] + sb['y_m'][1]) / 2), (sp['x_m'], sp['y_m']), 1e-6)
+    assert close((sb['x_m'][1] - sb['x_m'][0], sb['y_m'][1] - sb['y_m'][0], sp['z_m']), (0.28, 0.08, 0.08), 1e-6)
+
+
+@pytest.mark.parametrize('case', ['high', 'side'])
+def test_held_block_pose(robot_cfg, case):
+    """held_block_pose: 파지 TCP 에서는 요청한 눕힌 블록 자세 그대로, 놓기 TCP 에서는 놓을 자세와 같은 쪽이 위인 세운 블록."""
+    t = mm.standup_targets(robot_cfg, case)
+    pick_c, _ = stand_centers(robot_cfg, case)
+    held = mm.standup_held_box(robot_cfg, pick_c, STAND_LYING, *t['pick'])
+    c, q = mm.held_block_pose(*t['pick'], held)
+    assert close(c, pick_c, 1e-9) and same_rotation(q, mm.quat_from_axes(*(mm.column(STAND_LYING, i) for i in range(3))), 1e-9)
+    c, q = mm.held_block_pose(*t['place'], held)
+    assert mm.up_axis(mm.matrix_from_quat(q)) == mm.up_axis(STAND_STOOD[case])
+    assert math.hypot(c[0] - pick_c[0], c[1] - pick_c[1]) < 0.015

@@ -104,6 +104,30 @@ def test_complete_bench(checker, blocks):
     assert math.isnan(res[0]['top_z_m']) and math.isnan(res[0]['dz_m'])    # 1층 벽은 가려져서 높이를 못 잼
 
 
+def test_standing_legs_under_beam_are_covered():
+    """세운 다리 둘 위에 보를 얹으면 다리 자리에서 보이는 높이는 보 윗면 — 다리는 '가려진 present'(높이 NaN)여야 한다.
+    허용을 놓인 세로 길이(75 mm)의 절반으로 하면 +16 mm 를 '있음 · 16 mm 어긋남'으로 냈다(10/13 003 실기). 허용 = 두께 절반."""
+    L = SIZE[0]
+    R_stand = [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]    # 길이 축이 위(세움), 폭 축 x
+    yaw = math.radians(ORIGIN['yaw_deg'])
+    c, s = math.cos(yaw), math.sin(yaw)
+
+    def at(x_mm, z, R, bid):
+        x = x_mm / 1000.0
+        return {'part_id': bid, 'rot': rot_z(R, yaw), 'center': (ORIGIN['x_m'] + c * x, ORIGIN['y_m'] + s * x, ORIGIN['z_m'] + z)}
+    legs = [at(-25.0, L / 2, R_stand, 'LEG_1'), at(25.0, L / 2, R_stand, 'LEG_2')]
+    beam = at(0.0, L + T / 2, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], 'BEAM')
+    chk = BlockChecker(legs + [beam], (ORIGIN['x_m'], ORIGIN['y_m']), HALF_M, SIZE)
+    res = chk.check(scene_points(legs + [beam], {'LEG_1', 'LEG_2', 'BEAM'}), ['LEG_1', 'LEG_2', 'BEAM'])
+    assert [r['state'] for r in res] == ['present'] * 3
+    assert all(math.isnan(r['dz_m']) and math.isnan(r['top_z_m']) for r in res[:2])       # 덮인 다리는 높이를 안 잰다
+    assert abs(res[2]['dz_m']) < 0.001
+    # 보 없이 서 있으면 다리 윗면을 잰다 — scene_points 는 눕힌 블록 윗면만 그리므로 세운 다리는 축에 맞춘 상자(extra)로 그린다
+    leg_box = [((x, y, z), (SIZE[1] / 2, SIZE[2] / 2, L / 2)) for x, y, z in (legs[0]['center'], legs[1]['center'])]
+    alone = chk.check(scene_points([], set(), extra=leg_box), ['LEG_1'])
+    assert alone[0]['state'] == 'present' and abs(alone[0]['dz_m']) < 0.001
+
+
 def test_extra_block_on_top_is_occluded(checker, blocks):
     """좌판 위에 설계에 없는 블록을 하나 더 놓으면 그 아래 좌판은 occluded (설계에 없는 높이)."""
     top = ORIGIN['z_m'] + 5 * T
@@ -185,14 +209,14 @@ def test_new_full_names_match_and_foreign_ids_unknown():
     assert all(math.isnan(r['top_z_m']) and math.isnan(r['dz_m']) for r in res[1:3])
 
 
-# ---------------- design_source remote (10/7 민범진 · 한석형): get_design 답(design/3.0) → recipe_parts 에 넣을 레시피 ----------------
-RECIPE = {'schema': 'recipe/3.0', 'model_id': '001_CHAIR_BENCH_V000', 'stocks': [], 'blocks': []}
-PLACEMENTS = {'schema': 'placements/3.0', 'model_id': '001_CHAIR_BENCH_V000', 'recipe_sha256': recipe_sha256(RECIPE), 'steps': []}
+# ---------------- design_source remote (10/7 민범진 · 한석형): get_design 답(design/4.0) → recipe_parts 에 넣을 레시피 ----------------
+RECIPE = {'schema': 'recipe/4.0', 'design_id': '001_CHAIR_BENCH_V000', 'stocks': [], 'blocks': []}
+PLACEMENTS = {'schema': 'placements/4.0', 'design_id': '001_CHAIR_BENCH_V000', 'recipe_sha256': recipe_sha256(RECIPE), 'steps': []}
 
 
 def design(recipe=RECIPE, placements=PLACEMENTS, design_id='001_CHAIR_BENCH_V000', **extra):
-    """시험용 design/3.0 dict. recipe · placements 가 None 이면 그 칸을 넣지 않는다."""
-    d = {'schema': 'design/3.0', 'design_id': design_id, **extra}
+    """시험용 design/4.0 dict. recipe · placements 가 None 이면 그 칸을 넣지 않는다."""
+    d = {'schema': 'design/4.0', 'design_id': design_id, **extra}
     if recipe is not None:
         d['recipe'] = recipe
     if placements is not None:
@@ -207,31 +231,31 @@ def test_recipe_sha256_matches_team_value():
     csv_sha = (folder / '001_CHAIR_BENCH_V000_placements.csv').read_text(encoding='utf-8').splitlines()[1].split(',')[-2]
     direct = hashlib.sha256(json.dumps(recipe, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')).hexdigest()
     # 새 구조(template.composition) 벤치 fixture 의 고정값 — 옛 구조 값 2685767e…1c76 은 폐기. hashlib 직접 계산과도 같아야 한다
-    assert recipe_sha256(recipe) == direct == csv_sha == '87333b39c4897ce1fd6ebdf336b7f0a719feba547dd1bd1a3c63a4b039211645'
+    assert recipe_sha256(recipe) == direct == csv_sha == '63b1a5389e133f79af0396784ac2ceade86464da5d9071e71b27feda04eed2b2'
 
 
 def test_recipe_from_design_attaches_structure():
-    """design/3.0: 조립 방법에 구조를 'structure' 칸으로 붙인다(load_recipe 와 같은 모양). 입력 design 은 바꾸지 않는다."""
-    d = design(family='chair', blocks={'schema': 'parts/3.0'})
+    """design/4.0: 조립 방법에 구조를 'structure' 칸으로 붙인다(load_recipe 와 같은 모양). 입력 design 은 바꾸지 않는다."""
+    d = design(family='chair', blocks={'schema': 'parts/4.0'})
     out = recipe_from_design(d, '001_CHAIR_BENCH_V000')
     assert out['structure'] is RECIPE
     assert {k: v for k, v in out.items() if k != 'structure'} == PLACEMENTS
     assert 'structure' not in d['placements'] and 'structure' not in PLACEMENTS
 
 
-OLD_STRUCT = {'schema': 'cad_structure/1.0', 'model_id': '001_CHAIR_BENCH_V000', 'parts': [], 'blocks': []}
-OLD_RECIPE = {'schema': 'cad_recipe/1.0', 'model_id': '001_CHAIR_BENCH_V000', 'structure_sha256': '0' * 64, 'steps': []}
+OLD_STRUCT = {'schema': 'cad_structure/1.0', 'design_id': '001_CHAIR_BENCH_V000', 'parts': [], 'blocks': []}
+OLD_RECIPE = {'schema': 'cad_recipe/1.0', 'design_id': '001_CHAIR_BENCH_V000', 'structure_sha256': '0' * 64, 'steps': []}
 
 
 @pytest.mark.parametrize('bad', [
-    None, [], {'schema': 'parts/3.0'},                                          # design/3.0 아님
+    None, [], {'schema': 'parts/4.0'},                                          # design/4.0 아님
     {'schema': 'design/1', 'design_id': '001_CHAIR_BENCH_V000', 'structure': OLD_STRUCT, 'recipe': OLD_RECIPE},   # 옛 E-52 design/1
     {'schema': 'design/1', 'design_id': '001_CHAIR_BENCH_V000', 'recipe': dict(OLD_RECIPE, schema='assembly.recipe/1.0')},
     design(OLD_STRUCT, OLD_RECIPE),                                              # 봉투만 새것 — 안은 옛 cad_* (칸 이름이 아니라 schema 로 본다)
     design(design_id='002_CHAIR_BACK_V000'),                                          # 요청한 설계와 다른 답
     design(recipe=None), design(placements=None), design(recipe=[]),             # 칸 없음 · 객체 아님
     design(dict(RECIPE, schema='recipe/2.0')),                                   # 앞자리가 다름(형식 버전 규칙 — 옛 parts 판)
-    design(placements=dict(PLACEMENTS, model_id='002_CHAIR_BACK_V000')),             # model_id 다름
+    design(placements=dict(PLACEMENTS, design_id='002_CHAIR_BACK_V000')),             # model_id 다름
     design(placements=dict(PLACEMENTS, recipe_sha256='0' * 64)),                 # 다른 구조에 대해 쓴 조립 방법
     design(dict(RECIPE, blocks=[{'part_name': 'LEG_001_01'}])),                      # 구조가 바뀌었는데 조립 방법은 그대로
 ])
@@ -243,7 +267,7 @@ def test_recipe_from_design_rejects(bad):
 
 @pytest.mark.parametrize('design_id, n', [('001_CHAIR_BENCH_V000', 11), ('002_CHAIR_BACK_V000', 16), ('003_DESK_STAND_V000', 9), ('004_DESK_PEDESTAL_V000', 11)])
 def test_local_and_get_design_paths_give_same_blocks(design_id, n):
-    """한석형 부탁(10/7): 로컬 파일 길(load_recipe)과 get_design 길(task 의 RecipeDocument.load(...).design() 으로 만든 design/3.0 →
+    """한석형 부탁(10/7): 로컬 파일 길(load_recipe)과 get_design 길(task 의 RecipeDocument.load(...).design() 으로 만든 design/4.0 →
     recipe_from_design)이 같은 블록 이름 · 자리를 낸다. 작업 관리자(TaskPlanner)가 쓰는 블록 이름과도 같다.
     d2_motion · d2_task 가 import 되지 않으면(CI 의 d2_vision 시험은 d2_vision 만 경로에 넣는다) 건너뛴다 — 로컬에서 colcon 빌드 뒤 돈다."""
     mm = pytest.importorskip('d2_motion.motion_math')

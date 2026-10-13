@@ -5,7 +5,7 @@ task 는 로봇 PC 에서 돈다. 웹 화면 · 음성은 웹 PC 에 있고 다�
 이 클래스는 MQTT 를 전혀 모른다. task 노드(task_node.py)가 콜백에서 on_* · command 를 부르고,
 작업 스레드 하나가 run_once() 를 되풀이한다.
 바깥 일(이동 · 관측 · 집기 · 방송)은 생성할 때 받은 io 객체로 한다. io 가 갖춰야 할 것(ROS 노드나 시험용 가짜):
-  get_design(design_id, should_abort) -> (ok, reason, design)   설계 조회(/d2/hmi/get_design, design/3.0 dict). 제한 시간은 io 가 건다
+  get_design(design_id, should_abort) -> (ok, reason, design)   설계 조회(/d2/hmi/get_design, design/4.0 dict). 제한 시간은 io 가 건다
   services_ready() -> [이름]                        아직 안 떠 있는 서버 이름들(없으면 빈 목록, 기다리지 않는다)
   move_to(target, should_abort, speed_ratio=1.0) -> (ok, reason)  복구 뒤 첫 이동만 비율 지정
   check_progress(part_ids, should_abort) -> (ok, reason, rows)   rows = {part_id: {state, dx_m, dy_m, dz_m, top_z_m}}
@@ -37,15 +37,16 @@ import time
 
 from d2_task.block_picker import BlockPicker
 from d2_task.recipe_document import same_major
+from d2_task.recipe_to_parts import ORIS
 from d2_task.run_logger import RunLogger, _reject_constant
 from d2_task.scatter_pick import REOBSERVE, REPLAN_SAME, ScatterFlow, StepTracker, contact_phase, grasped_now
 from d2_task.task_planner import TaskPlanner
 
 PLAN_STREAK = 3                            # 받침 경유: 움직이기 전 길 계산 거절이 연달아 이만큼이면 사람(10/12 실기 — 장면에 남은 블록으로 20번 헛돎)
 
-RECIPE_SCHEMA = 'recipe/3.0'
-PLACEMENTS_SCHEMA = 'placements/3.0'
-DESIGN_SCHEMA = 'design/3.0'
+RECIPE_SCHEMA = 'recipe/4.0'
+PLACEMENTS_SCHEMA = 'placements/4.0'
+DESIGN_SCHEMA = 'design/4.0'
 
 GRIPPER_POLL_S = 0.05                          # gripper 상태 대기 간격(s) — 정지가 끼면 이 안에 알아본다
 LOG = logging.getLogger('d2_task')
@@ -371,7 +372,7 @@ class TaskManager:
 
         select_design = 설계를 **조회**(/d2/hmi/get_design)하고 시작 점검 → READY. start = READY 에서 [설계 선택] 때 받아 둔 설계로 출발(점검 한 번 더) → CHECK(다시 조회하지 않는다),
         WAIT_SUPPLY 에서는 [계속](관측 자세 도착 뒤), WAIT_HMI 는 웹 재연결 뒤 진행 확인부터 SELECT 로 이어 간다(조회 없음).
-        scan 은 IDLE·SCAN_REVIEW 에서 새 촬영을 시작한다. cancel 은 READY·ERROR·SCAN_REVIEW 를 IDLE 로 돌린다(음성 cancel 과 같다, S-16).
+        scan 은 IDLE·SCAN_REVIEW·DONE 에서 새 촬영을 시작한다. cancel 은 READY·ERROR·SCAN_REVIEW 를 IDLE 로 돌린다(음성 cancel 과 같다, S-16).
         조회는 이 호출 스레드가 잠금 **밖에서** 기다린다(최대 timeout.service_s). 조회 실패 · 시간 초과 · 잘못된 답이면 새 조립을 시작하지 않고
         거절한다(로컬 파일로 몰래 대신하지 않는다 — 개발용 로컬은 노드가 design_source=local 로 명시해야 한다).
         reason 은 IRD 7장에 이미 있는 코드만 쓴다: 운전 중 'BUSY', 정지 중 'STOPPED', 조회 시간 초과 'TIMEOUT'. 맞는 코드가 없는 거절(설계 없음 ·
@@ -743,7 +744,7 @@ class TaskManager:
         elif status == 'SPARE_BLOCKED':            # 받침 둘레 손가락 자리에 뭔가 있다(깊이) — 사람이 비우고 [계속]이면 다시 잼(one_pick p1_to_recipe)
             self._hold(part_id, f'받침 둘레 손가락 자리에 물건이 있어요({result["message"]}) — 받침 둘레를 비우고 [계속]을 누르세요')
         elif status == 'STAND_NOT_READY':
-            self._to_error(f'{part_id}: 세움 · 옆세움 레시피 블록은 받침에서 세우는 동작이 정식 흐름에 아직 없다(세우기 W131) — 사람이 확인해 주세요')
+            self._to_error(f'{part_id}: 이 자세(세움 · 옆세움)로 세우는 교시 동작이 robot.yaml standup_taught 에 없다(세우기 W131) — 사람이 확인해 주세요')
         elif status == 'SPARE_NOT_FLAT':
             self._to_error(f'{part_id}: 받침 위 블록 자세를 모른다({result["block"].get("up")}) — 받침 위 블록을 확인해 주세요')
         elif status == 'REORIENT':                 # 맞는 자세가 없어 눕힌 블록을 빈 자리에 세운다 — 보내는 순간 1회로 센다(실패해도 다시 세우지 않음)
@@ -854,7 +855,16 @@ class TaskManager:
             if not ok:
                 self.logger.log('spare', part, '받침 맞추기 길이 안 나와 건너뜀')
             self._start_goal(dict(goal['then'], status='FOUND', from_spare=True))
+            if goal['then'].get('spare_stand'):     # 세움 · 옆세움 레시피: 맞춘 뒤 교시 동작으로 세운다(조립은 다시 잰 뒤)
+                return self._set('PICK_PLACE', None, f'{part} 에 쓸 받침 위 블록을 세웁니다')
             return self._set('PICK_PLACE', None, f'{part} 를 받침에서 다시 집어 조립합니다')
+        if ok and goal.get('spare_stand'):         # 받침 위 블록을 세움(W131 교시 동작) — 조립이 아니다. 다음 SELECT 가 받침을 다시 재서 레시피 잡기로 집는다
+            self._plan_streak = 0
+            self.logger.log('spare', part, '받침 위 블록을 세움')
+            self.poll_hmi()
+            if self._hmi_pause:
+                return self._enter_wait_hmi()
+            return self._set('SELECT', None, f'{part} 에 쓸 받침 위 블록을 세웠다. 다시 잽니다')
         if ok and goal.get('spare_tip'):           # 받침 위 블록을 눕힘 — 조립이 아니다. 다음 SELECT 가 받침을 다시 잰다
             self._plan_streak = 0
             self.logger.log('spare', part, '받침 위 블록을 눕힘')
@@ -947,6 +957,7 @@ class TaskManager:
         """지금 목표가 받침 경유의 어느 단계인가 — 공급→받침 · 받침 눕히기 · 받침 맞추기 · 받침→조립 · 바로 조립 · 세우기."""
         g = self.goal
         return ('to_spare' if g.get('via_spare') else 'spare_tip' if g.get('spare_tip') else 'spare_center' if g.get('spare_center')
+                else 'spare_stand' if g.get('spare_stand')
                 else 'from_spare' if g.get('from_spare') else 'reorient' if g.get('reorient') else 'direct')
 
     def _w144_before_pick(self):
@@ -1115,11 +1126,12 @@ class TaskManager:
 
     # ---------- 스캔: 네트워크 대기는 잠금 밖 ----------
     def _begin_scan(self):
-        """잠금 안에서 IDLE·SCAN_REVIEW의 scan 명령을 점검하고 새 run으로 시작한다. 로봇 이동은 작업 스레드에서 한다.
+        """잠금 안에서 IDLE·SCAN_REVIEW·DONE의 scan 명령을 점검하고 새 run으로 시작한다. 로봇 이동은 작업 스레드에서 한다.
 
         설정은 robot.yaml scan.poses, 단위 없음. 점검 실패는 현재 상태·기록을 보존하며 (False, reason)을 반환한다.
         """
-        if self.state not in ('IDLE', 'SCAN_REVIEW') or self._shutdown:
+        # DONE 도 받는다(10/13 PL): 끝난 조립 기록은 이미 닫혀 있고 last_build · pending_builds 는 그대로 두며 새 run_id 로 시작한다
+        if self.state not in ('IDLE', 'SCAN_REVIEW', 'DONE') or self._shutdown:
             return self._reject(self._busy_reason(), '지금은 스캔을 시작할 수 없다')
         poses = self.cfg.get('scan', {}).get('poses')
         if not isinstance(poses, list) or not poses or any(
@@ -1209,7 +1221,7 @@ class TaskManager:
                 if isinstance(num, bool) or not isinstance(num, int) or num <= 0 or num in nums:
                     raise ValueError('블록 scan_num 이 잘못됐다')
                 nums.add(num)
-                if b.get('ori') not in ('x', 'y', 'xe', 'ye', 'zx', 'zy') or not isinstance(b.get('inferred', False), bool):
+                if b.get('ori') not in ORIS or not isinstance(b.get('inferred', False), bool):
                     raise ValueError('블록 ori · inferred 가 잘못됐다')
                 if any(isinstance(b[k], bool) or not isinstance(b[k], (int, float)) for k in ('x', 'y', 'z')):
                     raise ValueError('블록 좌표가 숫자가 아니다')
@@ -1485,9 +1497,9 @@ class TaskManager:
             return self._start()
 
     def _planner_from(self, design, design_id):
-        """조회 답(design/3.0)을 검증해 TaskPlanner 를 만든다. 반환: (planner, 문제 글자). 문제가 없으면 문제 글자는 빈 값.
+        """조회 답(design/4.0)을 검증해 TaskPlanner 를 만든다. 반환: (planner, 문제 글자). 문제가 없으면 문제 글자는 빈 값.
 
-        검증: 객체 · schema design/3.0 · 요청한 design_id 와 같음 · recipe(구조)와 placements(조립 방법)가 각각 recipe/3.0 · placements/3.0 객체
+        검증: 객체 · schema design/4.0 · 요청한 design_id 와 같음 · recipe(구조)와 placements(조립 방법)가 각각 recipe/4.0 · placements/4.0 객체
         (두 문서는 block 이름과 recipe_sha256 으로 연결한다). 칸 이름이 아니라 schema 로 내용을 확인하고, 옛 형식(design/1 · cad_*)은 받은 schema 를
         적어 거절한다(변환하지 않음). 레시피 내용은 TaskPlanner 가 robot.yaml 과 맞는지 본다. 잘못된 입력은 조립하지 않고 문제 글자를 반환한다.
         """

@@ -15,7 +15,7 @@ SRC = Path(__file__).resolve().parents[2]
 ROBOT = SRC / 'd2_robot' if (SRC / 'd2_robot/d2_bringup').is_dir() else SRC
 CFG = yaml.safe_load((ROBOT / 'd2_bringup/config/robot.yaml').read_text(encoding='utf-8'))
 _DOC = RecipeDocument.load(Path(__file__).parent / 'fixtures', '001_CHAIR_BENCH_V000')
-RECIPE, PLACEMENTS = _DOC.recipe, _DOC.placements       # 구조(recipe/3.0) · 조립 방법(placements/3.0)
+RECIPE, PLACEMENTS = _DOC.recipe, _DOC.placements       # 구조(recipe/4.0) · 조립 방법(placements/4.0)
 IDS = [f'001_CHAIR_BENCH_V000_{s["part_name"]}' for s in sorted(PLACEMENTS['steps'], key=lambda s: s['sequence'])]   # E-52 역할 블록 이름
 
 
@@ -39,7 +39,7 @@ def test_블록마다_잡기가_같은_칸을_준다():
     for n in range(11):
         r = planner(n).next_block()
         assert CFG['supply_slots'][int(r['supply_slot']) - 1]['grasp'] == r['grasp'], r['part_id']
-    assert [planner(n).next_block()['supply_slot'] for n in (0, 8, 9)] == ['2', '2', '1']   # FLAT_SHORT p2(앞 9개), 마지막 둘 FLAT_LONG p1
+    assert [planner(n).next_block()['supply_slot'] for n in (0, 7, 8)] == ['2', '2', '1']   # 다리 8개 FLAT_SHORT p2, 좌판 연짝 3개 FLAT_LONG p1(10/13)
 
 
 def test_높이는_실측_블록으로_쌓아_올린다():

@@ -124,6 +124,7 @@ def test_generate_reads_reference_checks_and_saves_chosen(store, good, bad):
     assert [c['check']['ok'] for c in r['candidates']] == [True, True, True] and r['attempts'] == 2   # 통과한 것만 화면에
     assert r['candidates'][0]['parts']['design_id'] == '001_CHAIR_BENCH_V002'
     assert len(sent) == 4 and all(req['base_recipe'] == store.get_design(BENCH)['recipe'] for req in sent)
+    assert all('made_by' not in req for req in sent)      # AI 생성 검사 요청에는 made_by 를 싣지 않는다(10/14 PL A1)
     assert all('base_recipe' not in c['parts'] for c in r['candidates'])
     assert events == ['reading', 'candidates', 'checked', 'checked', 'checked', 'retry', 'candidates', 'checked']
     assert '후보 2개는 통과해 남겨 둔다' in client.calls[2]['messages'][-1]['content'] and '새 후보 1개만' in client.calls[2]['messages'][-1]['content']
@@ -137,7 +138,7 @@ def test_generate_reads_reference_checks_and_saves_chosen(store, good, bad):
     assert second['messages'][-1]['role'] == 'tool' and '"parts"' in second['messages'][-1]['content']
     rec = gen.save(r, 0)
     assert rec['design_id'] == '001_CHAIR_BENCH_V002' and rec['parent_id'] == BENCH and rec['made_by'] == 'web'
-    assert rec['prompt'] == '벤치를 만들어 줘' and rec['recipe']['model_id'] == '001_CHAIR_BENCH_V002'
+    assert rec['prompt'] == '벤치를 만들어 줘' and rec['recipe']['design_id'] == '001_CHAIR_BENCH_V002'
     assert (rec.get('ai_template'), rec.get('ai_reason'), rec.get('template_changed')) == (None, None, None)
     assert 'base_recipe' not in rec['parts'] and 'revision' not in json.dumps(rec['recipe'])   # AI 레시피 = composition 만(레시피 초안 6절)
     with pytest.raises(ValueError):
@@ -375,6 +376,7 @@ def test_save_scan_checks_with_base_recipe_and_saves_as_scan(store, good):
     assert rec['design_id'] == '001_CHAIR_BENCH_V001' and rec['made_by'] == 'scan' and rec['parent_id'] == BENCH
     assert (rec['ai_template'], rec['ai_reason'], rec['template_changed']) == (TEMPLATE, '다리 둘 위 좌판', False)
     assert sent[0]['base_recipe'] == store.get_design(BENCH)['recipe'] and 'base_recipe' not in rec['parts']
+    assert sent[0]['made_by'] == 'scan' and 'made_by' not in rec['parts']   # 스캔 [저장]만 21번 건너뜀 표시(E-106 · 10/14 PL A1)
     assert events == ['filled', 'checked']
 
 
@@ -418,7 +420,7 @@ def test_four_bases_pass_real_check_with_their_base_recipe(store):
         design_id, _ = store.new_design_id(t, f'{t}_V000')
         parts = {**store.get_design(f'{t}_V000')['parts'], 'design_id': design_id}
         chk = gen._check(parts)
-        assert chk['ok'] and chk['recipe']['model_id'] == design_id and 'revision' not in json.dumps(chk['recipe']), (t, chk['errors'])
+        assert chk['ok'] and chk['recipe']['design_id'] == design_id and 'revision' not in json.dumps(chk['recipe']), (t, chk['errors'])
     wrong = real_check()({**parts, 'base_recipe': store.base_recipe('001_CHAIR_BENCH')})
     assert wrong['ok'] is False and [e['reason'] for e in wrong['errors']] == ['REQUEST_INVALID']
 
@@ -428,7 +430,7 @@ def scan_answer(parts, parent, reason='블록 수 · 다리 벽이 같다', drop
     """GPT 의 스캔 채우기 답(W177 진짜 scan_fill 시험용) — scan_num 마다 채울 칸만(scan_of 의 번호 규칙: 거꾸로 = n − order + 1).
     drop 개만큼 뒤에서 뺀다(모양 틀린 답)."""
     n = len(parts)
-    rows = [{'scan_num': n - p['order'] + 1, **{k: p[k] for k in ('order', 'role', 'group', 'stage', 'grasp')}} for p in parts]
+    rows = [{'scan_num': n - p['sequence'] + 1, **{k: p[k] for k in ('sequence', 'role', 'group', 'stage', 'grasp')}} for p in parts]
     body = {'parent_id': parent, 'reason': reason, 'plan': 'z0: …', 'parts': rows[:len(rows) - drop]}
     return SimpleNamespace(content=json.dumps(body, ensure_ascii=False), refusal=None, tool_calls=None)
 
@@ -438,11 +440,11 @@ def test_scan_fill_keeps_scan_shape_and_passes_check(store, good):
     gen, client = make(store, [tool_call(BENCH), scan_answer(good, BENCH)])
     r = gen.scan_fill(scan_of(good))
     assert r['parent_id'] == BENCH and r['ai_template'] == TEMPLATE and r['ai_reason'] == '블록 수 · 다리 벽이 같다'
-    assert [{k: p[k] for k in ('order', 'x', 'y', 'z', 'ori', 'role', 'group', 'stage', 'grasp')} for p in r['parts']] == \
-        [{k: p[k] for k in ('order', 'x', 'y', 'z', 'ori', 'role', 'group', 'stage', 'grasp')} for p in good]
+    assert [{k: p[k] for k in ('sequence', 'x', 'y', 'z', 'ori', 'role', 'group', 'stage', 'grasp')} for p in r['parts']] == \
+        [{k: p[k] for k in ('sequence', 'x', 'y', 'z', 'ori', 'role', 'group', 'stage', 'grasp')} for p in good]
     assert all('inferred' not in p for p in r['parts'])                     # 스캔에 없는 칸은 만들지 않음
     design_id, _ = store.new_design_id(TEMPLATE, r['parent_id'])
-    chk = gen._check({'schema': 'parts/3.0', 'design_id': design_id, 'parts': r['parts']})
+    chk = gen._check({'schema': 'parts/4.0', 'design_id': design_id, 'parts': r['parts']})
     assert chk['ok'], chk['errors']
     first = client.calls[0]
     assert first['tool_choice'] == 'required' and first['tools'][0]['function']['parameters']['properties']['design_id']['enum'] == \
@@ -489,7 +491,7 @@ def test_scan_fill_feedback_and_tool_failure_fallback(store, good):
     assert '[앞 검사 결과]' in text and '9번 블록이 공중' in text and '고칠 것' in text
     n = len(good)
     shown = json.loads(text.split('[앞 답]\n')[1].split('\n')[0])
-    assert {'scan_num': n - 9 + 1, 'order': 9} == {k: shown[8][k] for k in ('scan_num', 'order')}   # 앞 order 9 = 어느 스캔 블록인지
+    assert {'scan_num': n - 9 + 1, 'sequence': 9} == {k: shown[8][k] for k in ('scan_num', 'sequence')}   # 앞 sequence 9 = 어느 스캔 블록인지
 
 
 def test_scan_fill_rejects_bad_input_before_calling_ai(store):

@@ -153,7 +153,7 @@ def test_design_gen_runs_through_bridge(tmp_path):
     store.register_bases()
     bench = store.get_design(BENCH)['parts']['parts']
     n = len(bench)
-    fill = [{'scan_num': n - p['order'] + 1, **{k: p[k] for k in ('order', 'role', 'group', 'stage', 'grasp')}} for p in bench]
+    fill = [{'scan_num': n - p['sequence'] + 1, **{k: p[k] for k in ('sequence', 'role', 'group', 'stage', 'grasp')}} for p in bench]
     answers = iter([
         {'out_of_scope': False, 'reason': '', 'candidates': [{'idea': '그대로', 'plan': 'p', 'parts': bench}] * 3},   # ① 후보
         {'design_id': BENCH},                                                                                            # ② 도구 읽기
@@ -176,7 +176,7 @@ def test_design_gen_runs_through_bridge(tmp_path):
     f = gen.scan_fill(scan_of(bench))
     assert f['parent_id'] == BENCH and f['ai_reason'] == '같은 벤치'
     design_id, _ = store.new_design_id('001_CHAIR_BENCH', BENCH)
-    assert gen._check({'schema': 'parts/3.0', 'design_id': design_id, 'parts': f['parts']})['ok']
+    assert gen._check({'schema': 'parts/4.0', 'design_id': design_id, 'parts': f['parts']})['ok']
 
 
 # ---------- 웹 PC 준비 점검(--check, 10/13) — claude · 네트워크 · docker 는 모두 가짜 ----------
