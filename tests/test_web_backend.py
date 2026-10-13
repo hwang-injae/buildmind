@@ -674,3 +674,17 @@ def test_designs_rest_and_robot_handlers(store):
     assert res.content == b'\xff\xd8scan' and res.headers['content-type'] == 'image/jpeg'
     res = client.get('/api/robot/scan_cloud.ply')
     assert res.content == b'ply\n' and res.headers['cache-control'] == 'no-store'
+
+
+def test_frontend_pages_are_not_reused_from_cache(store, tmp_path, monkeypatch):
+    """화면 페이지는 Cache-Control: no-cache(새 빌드를 올리면 바로 보이게 — 10/13 옛 화면이 보였던 일), 해시 이름 _next/static 은 그대로."""
+    import app as web_app
+    out = tmp_path / 'out'
+    (out / '_next' / 'static' / 'chunks').mkdir(parents=True)
+    (out / 'index.html').write_text('<html>새 화면</html>', encoding='utf-8')
+    (out / '_next' / 'static' / 'chunks' / 'a1b2.js').write_text('1', encoding='utf-8')
+    monkeypatch.setattr(web_app, 'FRONTEND_OUT', out)
+    client = TestClient(web_app.create_app(mqtt=FakeMqtt(True), rules=RULES, store=store, gen=FakeGen()))
+    page = client.get('/')
+    assert page.status_code == 200 and '새 화면' in page.text and page.headers['cache-control'] == 'no-cache'
+    assert 'cache-control' not in client.get('/_next/static/chunks/a1b2.js').headers

@@ -144,19 +144,6 @@ export default function RobotPanel({ robot, onLog }: Props) {
 
       {gripperButton && !clearNotice && <div className="btn-row">{gripperButton}</div>}
 
-      {askOpen && (
-        <div className="modal-back" role="presentation">
-          <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="grip-title">
-            <h2 id="grip-title">블록을 손으로 받쳤나요?</h2>
-            <p>그리퍼를 열면 쥔 블록이 떨어져요. 한 사람이 블록을 받친 뒤 여세요.</p>
-            <div className="btn-row">
-              <button className="warn" autoFocus onClick={openGripper}>받쳤어요 · 열기</button>
-              <button className="secondary" onClick={() => setAskOpen(false)}>아니요</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {asking && (
         <div className="confirm" role="alertdialog" aria-label="초기화 확인">
           <p>이번 조립을 버리고 처음(대기)으로 돌아갈까요? 놓은 블록은 사람이 치워야 해요.</p>
@@ -167,21 +154,36 @@ export default function RobotPanel({ robot, onLog }: Props) {
         </div>
       )}
 
-      {clearNotice && (
+      {/* 창은 하나만 — [초기화] 알림 안에서 [그리퍼 열기]를 누르면 같은 창이 확인 질문으로 바뀌고, 답하면 알림으로 돌아온다.
+          창 두 개를 겹치면 뒤에 연 질문이 알림 뒤에 가려져 안 보였다(10/13 황인재 확인). 기본 초점은 [아니요] — Enter 한 번에 블록이 떨어지지 않게 */}
+      {(askOpen || clearNotice) && (
         <div className="modal-back" role="presentation">
-          <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="clear-title">
-            <h2 id="clear-title">작업대의 블록을 치워 주세요</h2>
-            <p>이번 조립을 버렸어요. 로봇은 정지(잠금) 상태 그대로예요 — 작업대(조립 자리) 위 블록을 모두 치워 주세요.</p>
-            <p className="muted">
-              그리퍼에 블록이 있으면 한 사람이 받치고 [그리퍼 열기]를 누르세요. 다 치우면 [정리 끝] — 그때 잠금이 풀리고 대기로 가요.
-            </p>
-            {noticeErr && <p className="result bad">{noticeErr}</p>}
-            <div className="btn-row">
-              {gripperButton}
-              <button className="primary big" autoFocus disabled={!!busy} onClick={cleared}>
-                {label('정리 끝 — 잠금 풀기', '정리 끝')}
-              </button>
-            </div>
+          <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby={askOpen ? 'grip-title' : 'clear-title'}>
+            {askOpen ? (
+              <>
+                <h2 id="grip-title">블록을 손으로 받쳤나요?</h2>
+                <p>그리퍼를 열면 쥔 블록이 떨어져요. 한 사람이 블록을 받친 뒤 여세요.</p>
+                <div className="btn-row">
+                  <button className="warn" onClick={openGripper}>받쳤어요 · 열기</button>
+                  <button className="secondary" autoFocus onClick={() => setAskOpen(false)}>아니요</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 id="clear-title">작업대의 블록을 치워 주세요</h2>
+                <p>이번 조립을 버렸어요. 로봇은 정지(잠금) 상태 그대로예요 — 작업대(조립 자리) 위 블록을 모두 치워 주세요.</p>
+                <p className="muted">
+                  그리퍼에 블록이 있으면 한 사람이 받치고 [그리퍼 열기]를 누르세요. 다 치우면 [정리 끝] — 그때 잠금이 풀리고 대기로 가요.
+                </p>
+                {noticeErr && <p className="result bad">{noticeErr}</p>}
+                <div className="btn-row">
+                  {gripperButton}
+                  <button className="primary big" autoFocus disabled={!!busy} onClick={cleared}>
+                    {label('정리 끝 — 잠금 풀기', '정리 끝')}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
