@@ -37,8 +37,8 @@
 ### 아키텍처
 
 <p align="center">
-  <img src="docs/images/시스템아키텍처_v6_100902.png" width="900" alt="시스템 아키텍처 v6 — 노드 카드: 입력 → 처리 → 출력"><br>
-  <sub>시스템 아키텍처 v6 (10/6 PC 배치 · MQTT 다리 + 10/7 기술 스택 v2) · 따라 읽는 법: <a href="docs/시스템아키텍처_설명_v3_101021.md">시스템 아키텍처 설명</a></sub>
+  <img src="docs/images/시스템아키텍처_v7_101317.png" width="900" alt="시스템 아키텍처 v7 — 노드 카드: 입력 → 처리 → 출력"><br>
+  <sub>시스템 아키텍처 v7 (10/13 main 기준 — 실선 = 지금 코드 · 점선 = 정했지만 아직 없음) · 따라 읽는 법: <a href="docs/시스템아키텍처_설명_v4_101317.md">시스템 아키텍처 설명</a></sub>
 </p>
 
 **PC 2대(10/6 18시 E-26~E-31).** **로봇 PC**에 ROS 2 노드 전부(브링업 · MoveIt2 · 정지 · 손목 비전 · 스캔 추론기 · **task** · **다리 `bridge`**)가 호스트로 돈다. **웹 PC**에는 ROS가 없다 — docker compose로 `mosquitto`(MQTT 브로커) · `db`(DB) · `web`(backend FastAPI — 설계 생성 · 저장소 + frontend 화면 정적 파일)을 띄우고, 음성은 호스트. 화면(frontend)은 사람의 브라우저에서 돌고 backend와 REST · WebSocket으로만 주고받는다(10/7 E-41). 두 PC는 **MQTT**로 잇는다(다리 노드가 ROS ↔ MQTT 변환).
@@ -67,11 +67,11 @@ ROS 노드는 **6개**(`task` · `wrist_block` · `pick_place` · `scene_manager
 | 서기 궤적 | 토픽 `/dsr_moveit_controller/joint_trajectory` | 정지 노드 → 두산 제어기 | 지금 관절값 0.3초 — 제어기에 직접 |
 | `/d2/gripper/command` · `/d2/gripper/state` | 서비스 · 토픽 | 집기 · 놓기 → 그리퍼 → 모두 | 폭 · 힘 → 잡힘 · 폭 |
 
-좌표 · 그리퍼 값 · 시간 기준은 설정 파일 하나(`src/d2_robot/d2_bringup/config/robot.yaml`)에 둔다. 이름 · 칸 · 단위의 정본은 [인터페이스 문서](docs/02_인터페이스_IRD_v3_101315.md), 패키지 · 절차는 [설계 문서](docs/03_설계_SDD_v3_101110.md).
+좌표 · 그리퍼 값 · 시간 기준은 설정 파일 하나(`src/d2_robot/d2_bringup/config/robot.yaml`)에 둔다. 이름 · 칸 · 단위의 정본은 [인터페이스 문서](docs/02_인터페이스_IRD_v3_101315.md), 패키지 · 절차는 [설계 문서](docs/03_설계_SDD_v3_101315.md).
 
 ### 동작 흐름
 
-**설계 생성 → 조립** ([그림 설명](docs/시스템아키텍처_설명_v3_101021.md))
+**설계 생성 → 조립** ([그림 설명](docs/시스템아키텍처_설명_v4_101317.md))
 
 ```
 ① 요청        웹 글상자 "2인용 벤치 만들어 줘" [생성]  /  "hello rokey" → 음성 → 받아 적은 문장을 화면에서 확인 → [생성]
@@ -110,7 +110,7 @@ ROS 노드는 **6개**(`task` · `wrist_block` · `pick_place` · `scene_manager
 
 ## 결과
 
-**아직 핵심 구현 중이라 최종 결과는 없다.** 주제 확정 때 쓴 10/3 사전 검증 값과 10/4 · 10/6 · 10/7 실기다. 근거는 [결과표](docs/04_결과_결과표_v2_101012.md).
+**아직 핵심 구현 중이라 최종 결과는 없다.** 주제 확정 때 쓴 10/3 사전 검증 값과 10/4 · 10/6 · 10/7 실기다. 근거는 [결과표](docs/04_결과_결과표_v2_101317.md).
 
 | 항목 | 결과 | 판정 |
 |---|---|---|
