@@ -33,11 +33,18 @@ MODELS = ('opus', 'sonnet')   # 10/13 설계 생성으로 시험한 claude --mod
 RUN_TIMEOUT_S = 240                              # claude 한 번 상한 — design_gen 호출 제한(260초)보다 짧게: 중계가 먼저 끊어야
                                                  # claude 가 혼자 남지 않고 화면에 진짜 까닭(504)이 간다(10/13 PL)
 ROLE_KO = {'user': '사용자', 'assistant': 'AI 답(이전)', 'tool': '도구 결과'}
+# 구독 사용 한도 글 조각(소문자). Claude Code 2.1.296 이 한도 안내로 보는 문장 머리('You've hit your session limit · resets …' 등)
+# + 옛 판 'Claude AI usage limit reached'. 'limit' 낱말 하나로는 안 된다 — 'Context limit reached' · 'Budget limit reached' 같은
+# 한도 아닌 실패도 그 낱말을 써서, 화면 '사용 한도' · --check '계정을 바꾼다'로 잘못 안내했다(10/13 PL, E-99 덧붙임)
+USAGE_LIMIT_MARKS = ("you've hit your", "you've reached your", 'usage limit', 'out of usage', 'out of extra usage',
+                     "doesn't include usage", "doesn't include extra usage", 'usage allocation', 'requires usage credits')
 
 
 def is_usage_limit(text):
-    """claude 오류 글이 구독 사용 한도인지 — 중계 응답(429)과 준비 점검(--check ③)이 같은 판단을 쓴다."""
-    return 'limit' in (text or '').lower()
+    """claude 오류 글이 구독 사용 한도인지 — 중계 응답(429)과 준비 점검(--check ③)이 같은 판단을 쓴다.
+    입력: 오류 글(None 가능). 출력: USAGE_LIMIT_MARKS 조각이 하나라도 있으면 True(굽은 따옴표 ’ 는 ' 로 보고 비교). 바깥 영향 없음."""
+    low = (text or '').lower().replace('’', "'")
+    return any(m in low for m in USAGE_LIMIT_MARKS)
 
 
 class BridgeError(Exception):
