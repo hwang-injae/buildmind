@@ -24,6 +24,7 @@
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 14px rgba(16, 24, 40, 0.06);
   --radius: 16px;
   --reset: #c2410c;            /* [초기화] — 정지(빨강)와 다르게, 흰 글자 대비 5:1 이상 */
+  --warn-btn: #b45309;         /* [계속] · [그리퍼 열기] 바탕 — --warn 은 흰 글자 대비가 3:1 이라 버튼엔 더 진하게 */
   --focus: rgba(37, 99, 235, 0.45);
   --backdrop: rgba(15, 18, 24, 0.55);
   --mill-bg: #eef0f3;          /* 설계 목록 열 보기 — CodePen 원본 색 */
@@ -59,6 +60,7 @@
   --grid-minor: #262d36;
   --shadow: none;
   --reset: #c2410c;
+  --warn-btn: #b45309;
   --focus: rgba(59, 130, 246, 0.55);
   --backdrop: rgba(0, 0, 0, 0.65);
   --mill-bg: #12161b;
@@ -210,7 +212,7 @@ button.primary:disabled { filter: saturate(0.6); }
 button.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
 button.primary:hover:not(:disabled) { filter: brightness(1.08); }
 button.secondary { background: var(--btn-2); border-color: transparent; }
-button.warn { background: var(--warn); border-color: var(--warn); color: #fff; }
+button.warn { background: var(--warn-btn); border-color: var(--warn-btn); color: #fff; }
 button.big { min-height: 52px; font-size: 17px; }
 button.stop { flex: 1.4; min-height: 64px; font-size: 22px; background: var(--bad); border-color: var(--bad); color: #fff; }
 button.resume { flex: 1; min-height: 64px; border: 2px solid var(--ok); color: var(--ok); background: var(--btn-bg); font-size: 18px; }

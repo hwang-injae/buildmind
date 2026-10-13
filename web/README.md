@@ -48,7 +48,7 @@ cd web/frontend && NEXT_PUBLIC_BACKEND=http://localhost:8000 npm run dev
 | 출발 · [계속] | 같음 `{cmd: start, design_id, mode: auto}` | 같음 | 같음(`WAIT_SUPPLY` · `WAIT_HMI`에서 start = 계속) |
 | 스캔 · 다시 스캔 | 같음 `{cmd: scan}` | 같음 | 같음 |
 | 취소 | 같음 `{cmd: cancel}` | 같음 | 같음(`READY` · `ERROR` · `SCAN_REVIEW`) |
-| 초기화(정지 뒤) | `STOPPED` · 잠김에서 [정지] 자리가 [초기화] → 한 번 더 확인 → `{cmd: cancel}` → 받으면 `POST /api/robot/resume` → '작업대 블록을 치워 주세요' 알림(W184, 10/13) | 같음 | 작업 관리자가 STOPPED 에서 cancel 을 받아 이번 조립을 버림(W183 한석형) → 잠금 풀리면 RECOVER → IDLE. cancel 이 거절되면 잠금을 풀지 않음 |
+| 초기화(정지 뒤) · 그리퍼 열기 | `STOPPED` · 잠김에서 [정지] 자리가 [초기화] → 한 번 더 확인 → `{cmd: cancel}` → 받으면 '블록을 치워 주세요'(잠금 유지) → [정리 끝] → `POST /api/robot/resume`. 잠김 + 그리퍼가 쥐고 있으면 [그리퍼 열기] → '블록을 손으로 받쳤나요?' → `{cmd: gripper_open}`(W183 · W184, 10/13 16시 PL) | 같음 | 작업 관리자가 STOPPED(잠김)에서 cancel 을 받아 기록만 STOPPED 로 닫고 잠금 유지(W183 한석형) → [정리 끝]의 resume 뒤 RECOVER → IDLE. gripper_open 은 STOPPED 일 때만 /d2/gripper/command(0.0865 m · 10 N). cancel 이 거절되면 잠금을 풀지 않음 |
 | 정지 | `POST /api/robot/stop` | `d2/safety/stop/req` (`source: web`, **reason 빈 값** → 정지 노드가 `STOP_WEB`) | `/d2/safety/stop` |
 | 다시 시작 | `POST /api/robot/resume` | `d2/safety/resume/req` | `/d2/safety/resume` |
 | 상태 · 진행도 · 정지 · 그리퍼 · 스캔 결과 | `GET /api/robot/state`(지금 값) + `/ws` | `d2/task/state` · `progress` · `scan_result` · `d2/safety/state` · `d2/gripper/state`(retained) | 토픽 |

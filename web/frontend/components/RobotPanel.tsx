@@ -3,9 +3,10 @@
 // 버튼 하나 = REST 하나(lib/api). 판단은 로봇 쪽이 한다 — 여기서는 상태표대로 보이고 켜고 끄기만 한다. 자동 재전송 없음.
 // 조립 시작은 오른쪽 설계 3D 의 [조립] 하나(보는 곳에서 보냄 — select_design + start, 10/13 PL). 여기에는 [출발]이 없다.
 // 그때만 쓰는 버튼은 그때만 보인다(10/10 황인재): [계속] = 공급 · 웹 연결을 기다릴 때, [다시 시작] = 멈췄을 때. 긴 설명은 title(마우스).
-// 멈춘 뒤에는 [정지] 자리가 [초기화](W184 · 10/13 황인재): 한 번 더 확인 → cancel(이번 조립 버리기 — 작업 관리자 W183) → 받으면 resume
-// (잠금 풀기 — 조립 중이 아니게 됐으니 작업 관리자가 IDLE 로) → '작업대 블록을 치워 주세요' 알림. cancel 이 거절되면 잠금을 풀지 않는다
-// (그대로 풀면 조립을 이어 가므로).
+// 멈춘 뒤에는 [정지] 자리가 [초기화](W183 · W184 — 10/13 16시 PL 확정): 한 번 더 확인 → cancel(작업 관리자가 잠긴 채 이번 조립 기록을 닫음,
+// STOPPED 유지) → '블록을 치워 주세요' 알림 — 치우는 동안 잠금 유지 → [정리 끝] → resume(→ RECOVER → IDLE, 로봇 안 움직임).
+// cancel 이 거절되면 잠금을 풀지 않는다(그대로 풀면 조립을 이어 가므로). [그리퍼 열기] = 잠김 + 그리퍼가 쥐고 있을 때만 — 한 사람이
+// 블록을 받쳤는지 확인한 뒤 cmd gripper_open(작업 관리자가 STOPPED 일 때만 연다).
 import { useState } from 'react';
 import * as api from '@/lib/api';
 import { designName, stateName, stopReasonKo } from '@/lib/names';
@@ -27,7 +28,9 @@ export default function RobotPanel({ robot, onLog }: Props) {
   const [stopping, setStopping] = useState(false);
   const [last, setLast] = useState<{ label: string; r: CmdResult } | null>(null);
   const [asking, setAsking] = useState(false); // [초기화] 확인 한 번 더(되돌릴 수 없어서)
-  const [clearNotice, setClearNotice] = useState(false); // 초기화 뒤 '블록을 치워 주세요' 알림
+  const [clearNotice, setClearNotice] = useState(false); // 초기화 뒤 '블록을 치워 주세요' 알림(잠금 유지 — [정리 끝]까지)
+  const [noticeErr, setNoticeErr] = useState('');
+  const [askOpen, setAskOpen] = useState(false); // [그리퍼 열기] 확인 — 블록이 떨어지지 않게 사람이 받쳤나
 
   async function send(label: string, call: () => Promise<CmdResult>, isStop = false): Promise<CmdResult> {
     isStop ? setStopping(true) : setBusy(label);
@@ -48,16 +51,36 @@ export default function RobotPanel({ robot, onLog }: Props) {
   };
   const showResume = locked || has(['STOPPED', 'ERROR'], st);
   const stopped = locked || st === 'STOPPED';
+  const label = (name: string, text: string) => (busy === name ? '보내는 중…' : text);
 
-  /** [초기화]: cancel → 받으면 resume. 바깥 영향: 이번 조립 기록을 닫고 잠금을 푼다(로봇은 안 움직임 — 작업 관리자 IDLE) */
+  const grasped = !!robot.gripper?.grasped;
+
+  /** [초기화]: cancel → 받으면 '블록을 치워 주세요'(잠금 유지). 바깥 영향: 이번 조립 기록을 닫는다(로봇은 안 움직임) */
   async function reset() {
     setAsking(false);
     const r = await send('초기화', () => api.command('cancel'));
-    if (!r.success) return;
-    const u = await send('초기화 — 잠금 풀기', api.resume);
-    if (u.success) setClearNotice(true);
+    if (r.success) {
+      setNoticeErr('');
+      setClearNotice(true);
+    }
   }
-  const label = (name: string, text: string) => (busy === name ? '보내는 중…' : text);
+  /** [정리 끝]: 그때 잠금을 푼다 → 작업 관리자 RECOVER → IDLE(조립 중이 아니게 됐으므로 이어 가지 않음) */
+  async function cleared() {
+    const u = await send('정리 끝 — 잠금 풀기', api.resume);
+    if (u.success) setClearNotice(false);
+    else setNoticeErr(`잠금을 못 풀었어요 — ${u.message ?? u.reason}`);
+  }
+  /** [그리퍼 열기]: 사람이 블록을 받친 뒤 — cmd gripper_open(작업 관리자가 STOPPED 일 때만 연다). 바깥 영향: 그리퍼가 열림 */
+  async function openGripper() {
+    setAskOpen(false);
+    const r = await send('그리퍼 열기', () => api.command('gripper_open'));
+    if (!r.success) setNoticeErr(`그리퍼를 못 열었어요 — ${r.message ?? r.reason}`);
+  }
+  const gripperButton = locked && grasped && (
+    <button className="warn" disabled={!!busy} onClick={() => setAskOpen(true)} title="정지 중에 그리퍼가 쥔 블록을 빼요 — 한 사람이 블록을 받치고 누르세요">
+      {label('그리퍼 열기', '그리퍼 열기')}
+    </button>
+  );
   const width = robot.gripper?.width_m;
 
   return (
@@ -119,6 +142,21 @@ export default function RobotPanel({ robot, onLog }: Props) {
         )}
       </div>
 
+      {gripperButton && !clearNotice && <div className="btn-row">{gripperButton}</div>}
+
+      {askOpen && (
+        <div className="modal-back" role="presentation">
+          <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="grip-title">
+            <h2 id="grip-title">블록을 손으로 받쳤나요?</h2>
+            <p>그리퍼를 열면 쥔 블록이 떨어져요. 한 사람이 블록을 받친 뒤 여세요.</p>
+            <div className="btn-row">
+              <button className="warn" autoFocus onClick={openGripper}>받쳤어요 · 열기</button>
+              <button className="secondary" onClick={() => setAskOpen(false)}>아니요</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {asking && (
         <div className="confirm" role="alertdialog" aria-label="초기화 확인">
           <p>이번 조립을 버리고 처음(대기)으로 돌아갈까요? 놓은 블록은 사람이 치워야 해요.</p>
@@ -133,9 +171,17 @@ export default function RobotPanel({ robot, onLog }: Props) {
         <div className="modal-back" role="presentation">
           <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="clear-title">
             <h2 id="clear-title">작업대의 블록을 치워 주세요</h2>
-            <p>초기화했어요. 로봇이 다시 쌓기 전에 작업대(조립 자리) 위 블록을 모두 치워 주세요.</p>
-            <p className="muted">그리퍼가 블록을 쥐고 있으면 손으로 빼 주세요. 치울 때는 로봇이 멈춰 있는지 먼저 확인하세요.</p>
-            <button className="primary big" autoFocus onClick={() => setClearNotice(false)}>다 치웠어요</button>
+            <p>이번 조립을 버렸어요. 로봇은 정지(잠금) 상태 그대로예요 — 작업대(조립 자리) 위 블록을 모두 치워 주세요.</p>
+            <p className="muted">
+              그리퍼에 블록이 있으면 한 사람이 받치고 [그리퍼 열기]를 누르세요. 다 치우면 [정리 끝] — 그때 잠금이 풀리고 대기로 가요.
+            </p>
+            {noticeErr && <p className="result bad">{noticeErr}</p>}
+            <div className="btn-row">
+              {gripperButton}
+              <button className="primary big" autoFocus disabled={!!busy} onClick={cleared}>
+                {label('정리 끝 — 잠금 풀기', '정리 끝')}
+              </button>
+            </div>
           </div>
         </div>
       )}

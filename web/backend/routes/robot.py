@@ -14,8 +14,9 @@ NEEDS_BRIDGE = ('start', 'scan')   # 로봇 PC 가 끊겼으면 막는 명령(IR
 
 
 class Command(BaseModel):
-    """화면 명령(IRD 2장 cmd). start 는 WAIT_SUPPLY · WAIT_HMI 에서 [계속]과 같다. mode 는 auto 고정(칸만 둠)."""
-    cmd: Literal['select_design', 'start', 'scan', 'cancel']
+    """화면 명령(IRD 2장 cmd). start 는 WAIT_SUPPLY · WAIT_HMI 에서 [계속]과 같다. mode 는 auto 고정(칸만 둠).
+    gripper_open = 정지(잠김) 뒤 [그리퍼 열기] — 작업 관리자가 STOPPED 일 때만 그리퍼를 연다(W183 · 10/13 PL, 그 밖엔 거절)."""
+    cmd: Literal['select_design', 'start', 'scan', 'cancel', 'gripper_open']
     design_id: str = ''
     mode: str = 'auto'
 

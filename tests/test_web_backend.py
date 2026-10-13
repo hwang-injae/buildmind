@@ -360,6 +360,15 @@ def test_generate_routes_job_flow(store):
     assert client.get('/api/designs/generate/nope').status_code == 404
 
 
+def test_gripper_open_command_passes_through(store):
+    """[그리퍼 열기](W183 · 10/13 PL): cmd gripper_open 을 hmi/command 로 그대로(다리는 cmd 칸을 옮김 — 받을지는 작업 관리자가 STOPPED 로 정함).
+    모르는 cmd 는 422(보내지 않음)."""
+    client, fake = make_client(store)
+    assert client.post('/api/robot/command', json={'cmd': 'gripper_open'}).json() == {'success': True, 'reason': ''}
+    assert fake.calls == [('/d2/hmi/command', {'cmd': 'gripper_open', 'design_id': '', 'mode': 'auto'})]
+    assert client.post('/api/robot/command', json={'cmd': 'open_everything'}).status_code == 422 and len(fake.calls) == 1
+
+
 def test_voice_listen_route(store):
     """마이크 버튼(10/13 PL): POST /api/voice/listen → MqttClient.listen 한 번(d2/hmi/voice/listen — 다리 안 거침). 답은 그대로."""
     client, fake = make_client(store)
