@@ -208,3 +208,29 @@ def test_정리하지_않으면_기존_조립_복구_그대로():
     drive(m, 'CHECK')                                    # 기존: 조립 중 정지 → RECOVER → CHECK
     drive(m, 'DONE')
     assert io.world == set(IDS)
+
+
+def test_받침_경유_중_멈춘_뒤_정리하면_이동_없이_IDLE_받침_기록은_새_출발에서_비운다():
+    """W188 받침 경유(main 7ea3dda4)와 합친 뒤: 받침에 블록을 둔 채 멈춰도 정리 확인 → resume 은 팔을 움직이지 않고 IDLE.
+    코드의 받침 기록(_spare_on)은 정리로 지우지 않는다 — 실물은 사람이 치우고, 기록은 새 출발 때 비워진다."""
+    from test_via_spare import make as spare_make
+    from test_scatter_connect import start as spare_start
+    m, io = spare_make()
+    spare_start(m)
+    for _ in range(200):
+        m.run_once()
+        if m._spare_on is not None:
+            break
+    assert m._spare_on is not None
+    m.on_safety(SAFE_STOP)
+    m.run_once()
+    assert m.state == 'STOPPED'
+    before = len(io.calls)
+    assert m.command('cancel') == OK and m.state == 'STOPPED' and m.planner is None
+    m.on_safety(SAFE_OK)
+    drive(m, 'IDLE')
+    for _ in range(10):
+        m.run_once()
+    assert m.state == 'IDLE' and not [c for c in io.calls[before:] if c[0] in ('move_to', 'pick', 'find_blocks')]
+    assert m.command('select_design', 'bench') == OK and m.command('start') == OK
+    assert m._spare_on is None
