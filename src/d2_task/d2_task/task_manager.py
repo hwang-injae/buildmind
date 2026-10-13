@@ -55,7 +55,7 @@ RUN_STATES = ('CHECK', 'SELECT', 'PICK_PLACE', 'WAIT_SUPPLY', 'WAIT_HMI', 'VERIF
 # 로봇이 서야 하는 결과 — 정지 노드가 세웠다(STOPPED · CANCELED). 그리퍼 응답 없음(GRIPPER_NO_RESPONSE) · 피드백 없음(NO_FEEDBACK)은
 # 정지 노드가 잠그지 않으니 신호를 기다리지 않고 작업 관리자가 ERROR 로 멈춘다(E-74, 10/9 PL)
 STOP_REASONS = ('STOPPED', 'CANCELED')
-GRIPPER_OPEN_M = 0.0865   # 정지 중 그리퍼 열기 폭(m) — 복구 절차 6번 명령과 같은 값(10/13 16:30 PL). 쥔 블록(최대 75 mm)을 뺄 수 있게 연다
+GRIPPER_OPEN_M = 0.0865   # 정지 중 그리퍼 열기 폭(m) — 복구 절차 4절 2 명령과 같은 값(10/13 16:30 PL). 쥔 블록(최대 75 mm)을 뺄 수 있게 연다
 
 
 def wait_until(event, should_abort, poll_s=0.05, timeout_s=None):
@@ -398,7 +398,7 @@ class TaskManager:
             return self._reject('', f'모르는 명령: {cmd}')
 
     def on_intent(self, intent, design_id=None):
-        """음성 의도(intent/1, 다리가 ROS 토픽으로 낸다). start·select_design은 버튼과 같고 cancel은 READY·ERROR·SCAN_REVIEW에서 받는다.
+        """음성 의도(intent/1, 다리가 ROS 토픽으로 낸다). start·select_design은 버튼과 같고 cancel은 READY·ERROR·SCAN_REVIEW와 STOPPED(정리 확인 — 화면 cancel과 같은 함수)에서 받는다.
 
         그 밖(request_design 등)은 무시. 출발할 수 없는 때의 음성 start 는 무시하고 알림 voice_start_ignored 만 낸다(IRD 8.5).
         설계 조회가 있는 동작은 잠금 밖에서 command 로 한다.
@@ -417,7 +417,10 @@ class TaskManager:
                     self._publish('voice_start_ignored', '관측 자세로 가는 중이라 음성 출발을 무시했다')
         elif intent == 'cancel':
             with self._lock:
-                self._cancel_to_idle()
+                if self.state == 'STOPPED':
+                    self._cleanup_stopped()      # 화면 [초기화]와 같은 함수(10/13 19:45 PL) — 기록 닫기 · 잠금 유지, 팔 이동 없음
+                else:
+                    self._cancel_to_idle()
 
     def _cleanup_stopped(self):
         """(잠금 안) STOPPED 의 화면 cancel = 사람이 쥔 블록 · 구조물을 정리했다는 확인(W183, 10/13 16:30 PL). 반환: (success, reason).
@@ -438,12 +441,13 @@ class TaskManager:
     def _gripper_open(self):
         """화면 gripper_open: STOPPED 에서만 그리퍼 열기를 보낸다(사람이 쥔 블록을 빼기 위해, W183). 반환: (접수했나, reason). 팔은 움직이지 않는다.
 
-        폭 · 힘은 복구 절차(docs 복구절차_정지뒤다시시작 6번)와 같은 GRIPPER_OPEN_M · robot.yaml gripper.force_n.
+        폭 · 힘은 복구 절차(docs 복구절차_정지뒤다시시작 4절 2)와 같은 GRIPPER_OPEN_M · robot.yaml gripper.force_n.
         접수되면 곧바로 (True, '')로 답하고(10/13 PL — 그리퍼가 다 멈출 때까지 화면 명령을 붙잡지 않는다), 실제 결과는 그리퍼 서버의 답이 올 때
         _gripper_done 이 gripper_done 알림으로 낸다. 그때까지 _gripper_busy 를 유지하며 state/2 는 모두 message_id gripper_opening 으로 나간다
         (retained 마지막 값으로 다시 붙은 화면도 대기 중임을 안다). 대기 중 반복 open · select_design · start · scan 은 BUSY,
         조립 RECOVER 는 CHECK 로 가지 않고 기다린다. 정지 · resume · cancel 은 막지 않는다. 상태 · 안전 잠금 · 조립 기록은 바꾸지 않는다.
         보내지 못하면(서버 없음 · 예외) 바로 gripper_done(실패)을 내고 (False, reason).
+        답이 끝내 오지 않으면 대기(차단)를 스스로 풀지 않는다 — 사람이 그리퍼 장비를 확인한 뒤 task 를 다시 켠다(10/13 19:45 PL, 복구 절차 4-1).
         """
         with self._lock:
             if self.state != 'STOPPED':

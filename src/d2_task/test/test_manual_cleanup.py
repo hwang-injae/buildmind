@@ -179,7 +179,7 @@ def test_정리_전_resume_이면_조립_RECOVER_는_열기_답까지_CHECK_로_
 
 
 def test_응답이_끝내_없으면_대기를_스스로_풀지_않는다():
-    """현재 동작 기록용 — 해제 방법은 미결(황인재 질문 ②)."""
+    """10/13 19:45 PL: 답이 끝내 없으면 차단 유지 — 사람이 장비를 확인하고 task 를 다시 켠다(복구 절차 4-1)."""
     m, io = stopped_mid_build()
     assert m.command('cancel') == OK and m.command('gripper_open') == OK
     m.on_safety(SAFE_OK)
@@ -234,3 +234,15 @@ def test_받침_경유_중_멈춘_뒤_정리하면_이동_없이_IDLE_받침_기
     assert m.state == 'IDLE' and not [c for c in io.calls[before:] if c[0] in ('move_to', 'pick', 'find_blocks')]
     assert m.command('select_design', 'bench') == OK and m.command('start') == OK
     assert m._spare_on is None
+
+
+def test_음성_cancel_도_STOPPED_에서는_화면과_같은_정리_확인():
+    """10/13 19:45 PL: STOPPED 음성 cancel = 화면 cancel 과 같은 함수 — 기록 닫기 · 조립 비움 · STOPPED/잠금 유지, 이동 없음."""
+    m, io = stopped_mid_build()
+    before = moves(io)
+    m.on_intent('cancel')
+    assert m.state == 'STOPPED' and m.safety['locked'] and m.planner is None and m._assembling is False
+    assert m.last_build['result'] == 'STOPPED' and moves(io) == before
+    m.on_safety(SAFE_OK)
+    drive(m, 'IDLE')
+    assert moves(io) == before
