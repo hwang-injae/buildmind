@@ -132,7 +132,7 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 ⑦  설계 3D 의 [조립] → hmi/command select_design → 작업 관리자가 get_design → READY → 이어서 hmi/command start(한 번 누름 — 10/13 PL)
 ```
 
-- 시간: LLM(Claude, 10/13 — 고르기 · 읽기 각 3초쯤 + 후보 작성 1 ~ 2분 반, 호출당 제한 240초) + 검사 3번(≈ 10초). 후보는 backend 메모리(`job_id`)에만 — 새로고침하면 사라져도 된다(저장 전).
+- 시간: LLM(Claude, 10/13 — 고르기 · 읽기 각 3초쯤 + 후보 작성 1 ~ 2분 반, 호출당 제한 260초 — 중계는 240초에 먼저 끊음) + 검사 3번(≈ 10초). 후보는 backend 메모리(`job_id`)에만 — 새로고침하면 사라져도 된다(저장 전).
 - `design_id` = `<Template ID>_V<3자리>`(10/10 E-84 · IRD 2장): Template = 기본 설계 4개 이름(`001_CHAIR_BENCH` …), 기본 = `_V000`, AI · 음성 · 스캔 = 같은 Template의 다음 번호(그 Template의 가장 큰 V + 1 — 부모와 상관없이 만든 차례). 부모 · 만든 방법은 `parent_id` · `made_by`에만, `version` = V 번호(`V001`). 저장 설계는 바뀌지 않는다(E-55 — 고치면 다음 번호). `gen_path` 칸 없음(E-71).
 - **ID는 검사 전에 정한다**(10/10, W111): 변환기 ①이 그 ID로 레시피 `model_id` · `part_id`를 만들기 때문. ③ 전에 `store.new_design_id(template, parent_id)`(AI = 고른 설계의 Template, 스캔 = 부모의 Template) → 후보 3개를 같은 ID로 `check_design` → 고른 1개만 `save_design`. 저장 때 다른 요청이 먼저 같은 ID를 쓰면 거절 → ID부터 다시 · 검사도 다시.
 - **참고 설계는 그 Template 안에서만**(E-84 ③): GPT 목록 요약 · 도구 `get_design` 허용 목록 = `store.list_designs(template=…)`, 자동 전환 = `store.examples_for(template)`(그 V000 + 최근 파생 3). 다른 Template 설계를 읽고 만든 후보는 저장에서 거절되기 때문.

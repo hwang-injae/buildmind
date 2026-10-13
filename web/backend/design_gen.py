@@ -31,8 +31,8 @@ from design_store import AI_NONE, SCHEMA_PARTS, build_summary, family_of, split_
 LLM_URL = os.environ.get('D2_LLM_URL') or 'http://127.0.0.1:8790/v1'   # 중계 claude_bridge(컨테이너에서는 compose 가 호스트 주소로 줌)
 MODEL = os.environ.get('D2_LLM_MODEL') or 'opus'   # 설계 작성 · 스캔 채우기 — claude 별칭(opus · sonnet). 10/13 시험: 둘 다 벤치 · 책상 3/3 합격,
 #                                                     sonnet 은 책상 후보에 블록 35 ~ 54개(조립이 너무 김) — opus 는 16 ~ 18개라 기본
-CALL_TIMEOUT_S = 240             # 호출당 시간 제한 — 10/13 시험 후보 작성 한 번 31 ~ 165초(책상이 김)라 30초(TR-12)에서 늘림.
-#                                  중계 RUN_TIMEOUT_S 는 이보다 짧게 — 중계가 먼저 끊어야 claude 가 혼자 남지 않고 504 로 까닭이 온다
+CALL_TIMEOUT_S = 260             # 호출당 시간 제한 — 10/13 시험 후보 작성 한 번 31 ~ 165초(책상이 김)라 30초(TR-12)에서 늘림.
+#                                  중계 RUN_TIMEOUT_S(240)보다 20초 길게(10/13 17시 PL) — 중계가 먼저 끊어야 claude 가 혼자 남지 않고 504 로 까닭이 온다
 CALL_RETRIES = 0                 # 다시 안 함 — 한 번이 1 ~ 2분이라 다시 하면 화면이 너무 오래 멈춘다. 실패는 화면에 알리고 사람이 다시 누른다
 MAX_READS = 2                    # 도구 get_design 최대 횟수(E-72)
 MAX_REGEN = 2                    # 통과 후보가 3개 안 될 때 모자란 만큼 더 만드는 횟수(처음 + 2번 — 10/11 PL N3 · A5)
@@ -185,7 +185,7 @@ class DesignGenerator:
                     msg = self._read_and_answer(log, messages, allowed, read, progress, first='auto')
                 except GenError as e:
                     # 도구 단계가 실패하면 같은 Template 예시를 코드가 넣어 한 번 더(E-72 자동 전환). 시간 초과 · 중계 꺼짐 · 한도는
-                    # 다시 불러도 같아 화면만 두 배로 멈추므로(240초 + 240초) 바로 알린다
+                    # 다시 불러도 같아 화면만 두 배로 멈추므로(한 번에 최대 4분씩 두 번) 바로 알린다
                     if e.final:
                         raise
                     log['fallback'] = True

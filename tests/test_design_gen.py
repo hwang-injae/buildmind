@@ -533,7 +533,7 @@ class APITimeoutError(Exception):   # openai 의 같은 이름 예외 흉내(이
     (RelayError(429, 'claude 실패: 사용 한도'), '사용 한도'),
 ])
 def test_timeout_and_limit_skip_example_fallback(store, good, err, words):
-    """시간 초과 · 한도는 도구 단계에서 나도 예시를 넣어 한 번 더 부르지 않는다(다시 불러도 같아 화면만 240초 + 240초 멈춤) — 생성 · 스캔 채우기 둘 다."""
+    """시간 초과 · 한도는 도구 단계에서 나도 예시를 넣어 한 번 더 부르지 않는다(다시 불러도 같아 화면만 두 배로 멈춤) — 생성 · 스캔 채우기 둘 다."""
     v1 = derive(store)
     gen, client = make(store, [err, answer([good] * 3)])
     with pytest.raises(GenError) as e:
