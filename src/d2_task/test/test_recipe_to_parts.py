@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""변환기 ② 시험 (W117, E-69) — 기본 설계 4종(001 벤치 · 002 의자 · 003 책상 세운 다리 · 004 가운데 기둥)의 레시피 두 파일(recipe/3.0 구조 + placements/3.0 조립 방법)을
-parts/3.0 으로 바꿔 본다. 위치 · 방향 계산은 E-52 때와 같고, role · part 는 블록 이름에서, stage · grasp 는 조립 방법에서 나온다."""
+"""변환기 ② 시험 (W117, E-69) — 기본 설계 4종(001 벤치 · 002 의자 · 003 책상 세운 다리 · 004 가운데 기둥)의 레시피 두 파일(recipe/4.0 구조 + placements/4.0 조립 방법)을
+parts/4.0 으로 바꿔 본다. 위치 · 방향 계산은 E-52 때와 같고, role · part 는 블록 이름에서, stage · grasp 는 조립 방법에서 나온다."""
 import copy
 import json
 import re
@@ -25,7 +25,7 @@ def load(model_id):
 
 
 def flat_parts(recipe):
-    """recipe/3.0 template.composition 의 부품 항목을 {부품 이름(LEG_001_01): 항목}으로 편다(시험에서 값을 찾고 고치려고)."""
+    """recipe/4.0 template.composition 의 부품 항목을 {부품 이름(LEG_001_01): 항목}으로 편다(시험에서 값을 찾고 고치려고)."""
     return {f'{group}_{item["part"]}': item for comp in recipe['template']['composition'].values()
             for group, items in comp['parts'].items() for item in items}
 
@@ -44,8 +44,8 @@ def convert(model_id):
 def test_4종_블록_수와_머리말(model_id):
     out = convert(model_id)
     design_id, family, n = IDS[model_id]
-    assert (out['schema'], out['design_id']) == ('parts/3.0', design_id) and 'family' not in out    # family 는 설계 이름에서 계산(10/13 PL)
-    assert [b['order'] for b in out['parts']] == list(range(1, n + 1))
+    assert (out['schema'], out['design_id']) == ('parts/4.0', design_id) and 'family' not in out    # family 는 설계 이름에서 계산(10/13 PL)
+    assert [b['sequence'] for b in out['parts']] == list(range(1, n + 1))
     assert all(b['ori'] in ori_extents(BLOCK_MM) and 'inferred' not in b for b in out['parts'])      # inferred 는 스캔 설계만
 
 
@@ -55,13 +55,13 @@ def test_role_part_stage_grasp가_블록_이름과_조립_방법에서_나온다
     recipe, placements = load(model_id)
     steps = {s['sequence']: s for s in placements['steps']}
     for b in convert(model_id)['parts']:
-        st = steps[b['order']]
+        st = steps[b['sequence']]
         m = re.fullmatch(r'([A-Z]+(?:_[A-Z]+)?)_([0-9]{3})_[0-9]{2}', st['part_name'])
         assert (b['role'], b['group'], b['stage'], b['grasp']) == (m.group(1), int(m.group(2)), st['stage'], st['grasp'])
 
 
 def test_벤치_역할과_부품_묶음():
-    b = {x['order']: x for x in convert('001_CHAIR_BENCH_V000')['parts']}
+    b = {x['sequence']: x for x in convert('001_CHAIR_BENCH_V000')['parts']}
     assert (b[1]['role'], b[1]['group'], b[1]['stage'], b[1]['grasp']) == ('LEG', 1, 1, 'FLAT_SHORT')
     assert (b[2]['role'], b[2]['group']) == ('LEG', 2)               # 오른쪽 다리는 다른 부품 묶음
     assert (b[3]['role'], b[3]['group'], b[3]['stage']) == ('LEG', 1, 2)
@@ -69,7 +69,7 @@ def test_벤치_역할과_부품_묶음():
 
 
 def test_벤치_실제_레시피와_같다():
-    b = {x['order']: x for x in convert('001_CHAIR_BENCH_V000')['parts']}
+    b = {x['sequence']: x for x in convert('001_CHAIR_BENCH_V000')['parts']}
     assert (b[1]['x'], b[1]['y'], b[1]['z'], b[1]['ori']) == (-25, 0, 0, 'y')
     assert (b[2]['x'], b[2]['y'], b[2]['z'], b[2]['ori']) == (25, 0, 0, 'y')
     assert (b[9]['x'], b[9]['y'], b[9]['z'], b[9]['ori']) == (0, -25, 60, 'x')
@@ -77,14 +77,14 @@ def test_벤치_실제_레시피와_같다():
 
 
 def test_책상_세운_다리는_zx_이고_아랫면_높이():
-    b = {x['order']: x for x in convert('003_DESK_STAND_V000')['parts']}
+    b = {x['sequence']: x for x in convert('003_DESK_STAND_V000')['parts']}
     assert (b[1]['x'], b[1]['y'], b[1]['z'], b[1]['ori']) == (-30, -25, 0, 'zx')   # 중심 37.5 − 길이 75/2
     assert (b[5]['z'], b[5]['ori']) == (75, 'x')
     assert (b[7]['x'], b[7]['z'], b[7]['ori']) == (-25, 90, 'y')
 
 
 def test_의자_등받이_위층():
-    b = {x['order']: x for x in convert('002_CHAIR_BACK_V000')['parts']}
+    b = {x['sequence']: x for x in convert('002_CHAIR_BACK_V000')['parts']}
     assert b[16]['z'] == 135 and b[16]['ori'] == 'x'
 
 
@@ -92,7 +92,7 @@ def test_steps_순서가_섞여도_sequence_순():
     r, pl = load('001_CHAIR_BENCH_V000')
     pl['steps'].reverse()
     out = RecipeToParts('bench', 'chair', BLOCK_MM).convert(r, pl)
-    assert [b['order'] for b in out['parts']] == list(range(1, 12))
+    assert [b['sequence'] for b in out['parts']] == list(range(1, 12))
     assert out == convert('001_CHAIR_BENCH_V000')
 
 
@@ -147,7 +147,7 @@ def test_짝_해시가_안_맞으면_거절():
 
 
 def test_model_id가_다르면_거절():
-    bad(lambda r, pl: pl.update(model_id='OTHER'))
+    bad(lambda r, pl: pl.update(design_id='OTHER'))
 
 
 def test_잘못된_schema():

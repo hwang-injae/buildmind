@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""변환기 ① 시험 (W110, E-69) — parts/3.0 → recipe/3.0 + placements/3.0.
+"""변환기 ① 시험 (W110, E-69) — parts/4.0 → recipe/4.0 + placements/4.0.
 
-기본 설계 4종 왕복(V-45: 레시피 → 변환기 ② → parts/3.0 → 변환기 ① → 같은 레시피), 블록 번호 매기기,
+기본 설계 4종 왕복(V-45: 레시피 → 변환기 ② → parts/4.0 → 변환기 ① → 같은 레시피), 블록 번호 매기기,
 AI 실수 세 가지(역할 목록 · 부품 면 맞닿음 · 고른 잡기) 거부, AI 값을 대신 채우지 않음을 본다. ROS · 로봇 없이 돈다."""
 import copy
 import json
@@ -18,7 +18,7 @@ from d2_task.recipe_to_parts import RecipeToParts
 SRC = Path(__file__).resolve().parents[2]
 CFG = yaml.safe_load((SRC / 'd2_robot/d2_bringup/config/robot.yaml').read_text(encoding='utf-8'))
 BLOCK_MM = [v * 1000.0 for v in CFG['block_size_m']]
-RECIPES = Path(__file__).parent / 'fixtures'          # 기본 설계 4종 시험용 사본(recipe/3.0 template.composition — 레시피 도구가 새 구조를 내기 전까지 이 사본이 정답)
+RECIPES = Path(__file__).parent / 'fixtures'          # 기본 설계 4종 시험용 사본(recipe/4.0 template.composition — 레시피 도구가 새 구조를 내기 전까지 이 사본이 정답)
 FAMILY = {'001_CHAIR_BENCH_V000': 'chair', '002_CHAIR_BACK_V000': 'chair', '003_DESK_STAND_V000': 'desk', '004_DESK_PEDESTAL_V000': 'desk'}
 
 
@@ -28,7 +28,7 @@ def make_converter():
 
 
 def load_base(model_id):
-    """기본 설계 레시피 두 파일 → (RecipeDocument, 변환기 ② 로 만든 parts/3.0)."""
+    """기본 설계 레시피 두 파일 → (RecipeDocument, 변환기 ② 로 만든 parts/4.0)."""
     document = RecipeDocument.load(RECIPES, model_id)
     blocks = RecipeToParts(model_id, FAMILY[model_id], BLOCK_MM).convert(document.recipe, document.placements)
     return document, blocks
@@ -43,16 +43,16 @@ def rejected_details(request):
 
 @pytest.fixture
 def bench():
-    """벤치(001) parts/3.0 — 고치며 시험할 복사본."""
+    """벤치(001) parts/4.0 — 고치며 시험할 복사본."""
     return copy.deepcopy(load_base('001_CHAIR_BENCH_V000')[1])
 
 
 def part_names(recipe):
-    """recipe/3.0 template.composition 의 부품 이름(`<그룹>_<part>`, 예 LEG_001_01) 목록."""
+    """recipe/4.0 template.composition 의 부품 이름(`<그룹>_<part>`, 예 LEG_001_01) 목록."""
     return [f'{g}_{it["part"]}' for c in recipe['template']['composition'].values() for g, its in c['parts'].items() for it in its]
 
 
-# V-45 왕복: 기본 설계 4종 레시피 → parts/3.0 → 변환기 ① 이 저장된 레시피와 같다. 기본 설계에만 있는 칸(source_cad · template 의
+# V-45 왕복: 기본 설계 4종 레시피 → parts/4.0 → 변환기 ① 이 저장된 레시피와 같다. 기본 설계에만 있는 칸(source_cad · template 의
 # name · description · tags · 구성요소 revision · 부품 cad)은 AI·스캔 설계에 없어 빠진다(설계 초안 6절). 조립 방법은 새 구조 recipe_sha256 까지
 # 맞아 task RecipeDocument 가 받는다
 @pytest.mark.parametrize('model_id', FAMILY)
@@ -75,7 +75,7 @@ def test_round_trip_matches_cad_recipe(model_id):
 def test_output_has_only_composition_fields(bench):
     out = make_converter().convert(bench)
     recipe = out['recipe']
-    assert set(recipe) == {'schema', 'model_id', 'source_cad', 'stocks', 'template'} and set(recipe['template']) == {'composition'}
+    assert set(recipe) == {'schema', 'design_id', 'source_cad', 'stocks', 'template'} and set(recipe['template']) == {'composition'}
     assert {r: set(c) for r, c in recipe['template']['composition'].items()} == {'LEG': {'label', 'count', 'parts'}, 'SEAT': {'label', 'count', 'parts'}}
     assert [recipe['template']['composition'][r]['label'] for r in ('LEG', 'SEAT')] == ['다리', '좌판']
     assert [recipe['template']['composition'][r]['count'] for r in ('LEG', 'SEAT')] == [2, 1]
@@ -152,7 +152,7 @@ def test_to_template_recipe_completes_optional_label(role, label, expected):
     comp = {'count': 0, 'parts': {}}
     if label is not None:
         comp['label'] = label
-    built = {'schema': 'recipe/3.0', 'model_id': 'X', 'source_cad': None,
+    built = {'schema': 'recipe/4.0', 'design_id': 'X', 'source_cad': None,
              'template': {'composition': {role: comp}}}
     before = copy.deepcopy(built)
     out = make_converter().to_template_recipe(built)
@@ -164,7 +164,7 @@ def test_to_template_recipe_completes_optional_label(role, label, expected):
 def test_to_template_recipe_does_not_mutate(bench):
     converter = make_converter()
     document, _ = load_base('001_CHAIR_BENCH_V000')
-    built = {'schema': 'recipe/3.0', 'model_id': 'X', 'source_cad': None, 'stocks': [{'stock_id': 'PART_001', 'size_mm': BLOCK_MM}],
+    built = {'schema': 'recipe/4.0', 'design_id': 'X', 'source_cad': None, 'stocks': [{'stock_id': 'PART_001', 'size_mm': BLOCK_MM}],
              'parts': [{'part_name': 'LEG_001_01', 'stock_id': 'PART_001', 'center_mm': [0.0, 0.0, 7.5],
                         'R': [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]}]}
     before = copy.deepcopy(built)
@@ -184,7 +184,7 @@ def test_bench_block_names_from_positions(bench):
 def test_generated_design_id_part_id_upper(bench):
     bench['design_id'] = '001_CHAIR_BENCH_V001'
     out = make_converter().convert(bench)
-    assert out['recipe']['model_id'] == '001_CHAIR_BENCH_V001'
+    assert out['recipe']['design_id'] == '001_CHAIR_BENCH_V001'
     assert out['placements']['steps'][0]['part_id'].startswith('001_CHAIR_BENCH_V001_LEG_')
     RecipeDocument(out['recipe'], out['placements'])
 
@@ -192,11 +192,11 @@ def test_generated_design_id_part_id_upper(bench):
 # AI 값은 그대로: 순서 · 단계 · 잡기를 옮기고, 둘 다 되는 블록에서 AI 가 고른 긴 쪽도 짧은 쪽으로 바꾸지 않는다(공식 채움 없음)
 def test_ai_values_kept_as_written(bench):
     options = DesignChecker(CFG).grasp_options(bench['parts'])
-    both = next(b for b in bench['parts'] if {'FLAT_SHORT', 'FLAT_LONG'} <= set(options[b['order']]))
+    both = next(b for b in bench['parts'] if {'FLAT_SHORT', 'FLAT_LONG'} <= set(options[b['sequence']]))
     both['grasp'] = 'FLAT_LONG'
     steps = {s['sequence']: s for s in make_converter().convert(bench)['placements']['steps']}
-    assert steps[both['order']]['grasp'] == 'FLAT_LONG'
-    assert all((steps[b['order']]['stage'], steps[b['order']]['grasp']) == (b['stage'], b['grasp']) for b in bench['parts'])
+    assert steps[both['sequence']]['grasp'] == 'FLAT_LONG'
+    assert all((steps[b['sequence']]['stage'], steps[b['sequence']]['grasp']) == (b['stage'], b['grasp']) for b in bench['parts'])
 
 
 # 칸이 빠지면 대신 채우지 않고 거부 — 어느 블록의 어느 칸인지 적는다
@@ -248,11 +248,11 @@ def test_face_contact_only():
 # ③ AI 가 고른 잡기로 손가락이 안 들어가면 거부하고 가능한 잡기를 알려 준다 · 놓인 자세와 다른 잡기(눕힌 블록에 STAND)도 거부
 def test_blocked_or_wrong_state_grasp_rejected(bench):
     options = DesignChecker(CFG).grasp_options(bench['parts'])
-    only = next(b for b in bench['parts'] if len(options[b['order']]) == 1)
-    allowed = options[only['order']][0]
+    only = next(b for b in bench['parts'] if len(options[b['sequence']]) == 1)
+    allowed = options[only['sequence']][0]
     only['grasp'] = 'FLAT_LONG' if allowed == 'FLAT_SHORT' else 'FLAT_SHORT'
     details = rejected_details(bench)
-    assert len(details) == 1 and f'{only["order"]}번' in details[0] and f'가능: {allowed}' in details[0]
+    assert len(details) == 1 and f'{only["sequence"]}번' in details[0] and f'가능: {allowed}' in details[0]
     only['grasp'] = allowed
     bench['parts'][0]['grasp'] = 'STAND_SHORT'
     assert any('1번 grasp STAND_SHORT' in d for d in rejected_details(bench))
@@ -263,7 +263,7 @@ def test_all_mistakes_reported_together(bench):
     bench['parts'][0]['role'] = 'FOOT'
     for b in bench['parts']:
         if b['role'] == 'SEAT':
-            b['group'] = b['order']                       # 좌판 3장 → 각자 다른 part(한 장짜리 부품, 맞닿음 문제 없음)
+            b['group'] = b['sequence']                       # 좌판 3장 → 각자 다른 part(한 장짜리 부품, 맞닿음 문제 없음)
     bench['parts'][-1]['grasp'] = 'EDGE_LONG'
     details = rejected_details(bench)
     assert any('FOOT' in d for d in details) and any('EDGE_LONG' in d for d in details)
@@ -272,8 +272,8 @@ def test_all_mistakes_reported_together(bench):
 # 형식이 틀린 요청(schema · order 빠짐)은 레시피를 만들지 않고 거부
 def test_bad_request_rejected(bench):
     assert rejected_details(dict(bench, schema='blocks/2'))
-    bench['parts'][3]['order'] = 99
-    assert any('order' in d for d in rejected_details(bench))
+    bench['parts'][3]['sequence'] = 99
+    assert any('sequence' in d for d in rejected_details(bench))
 
 
 # 역할 목록 파일: 작명 규칙 v3 3장 — 역할 7개 + 옵션 WHEEL, 이름은 대문자 한 단어(밑줄 없음), 뜻이 비어 있지 않음
@@ -292,4 +292,4 @@ def test_attached_to_design_checker(model_id):
     ok, reason, text = checker.handle_json(json.dumps(dict(blocks, base_recipe=document.recipe)))
     result = json.loads(text)
     assert (ok, reason, result['ok']) == (True, '', True), result['errors']
-    assert result['recipe']['schema'] == 'recipe/3.0' and result['placements']['schema'] == 'placements/3.0'
+    assert result['recipe']['schema'] == 'recipe/4.0' and result['placements']['schema'] == 'placements/4.0'
