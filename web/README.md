@@ -48,6 +48,7 @@ cd web/frontend && NEXT_PUBLIC_BACKEND=http://localhost:8000 npm run dev
 | 출발 · [계속] | 같음 `{cmd: start, design_id, mode: auto}` | 같음 | 같음(`WAIT_SUPPLY` · `WAIT_HMI`에서 start = 계속) |
 | 스캔 · 다시 스캔 | 같음 `{cmd: scan}` | 같음 | 같음 |
 | 취소 | 같음 `{cmd: cancel}` | 같음 | 같음(`READY` · `ERROR` · `SCAN_REVIEW`) |
+| 초기화(정지 뒤) | `STOPPED` · 잠김에서 [정지] 자리가 [초기화] → 한 번 더 확인 → `{cmd: cancel}` → 받으면 `POST /api/robot/resume` → '작업대 블록을 치워 주세요' 알림(W184, 10/13) | 같음 | 작업 관리자가 STOPPED 에서 cancel 을 받아 이번 조립을 버림(W183 한석형) → 잠금 풀리면 RECOVER → IDLE. cancel 이 거절되면 잠금을 풀지 않음 |
 | 정지 | `POST /api/robot/stop` | `d2/safety/stop/req` (`source: web`, **reason 빈 값** → 정지 노드가 `STOP_WEB`) | `/d2/safety/stop` |
 | 다시 시작 | `POST /api/robot/resume` | `d2/safety/resume/req` | `/d2/safety/resume` |
 | 상태 · 진행도 · 정지 · 그리퍼 · 스캔 결과 | `GET /api/robot/state`(지금 값) + `/ws` | `d2/task/state` · `progress` · `scan_result` · `d2/safety/state` · `d2/gripper/state`(retained) | 토픽 |
@@ -64,6 +65,7 @@ cd web/frontend && NEXT_PUBLIC_BACKEND=http://localhost:8000 npm run dev
 | 스캔 [그대로 저장] | `POST /api/designs/from_scan {run_id}` → 4-C → check_design → 저장(`made_by scan`) → `select_design` | `check_design/req` · `hmi/command/req` | 같음 |
 | 스캔 [AI로 고치기](10/14 이후 — 10/10 PL 보류, 지금 안 만듦) | `POST /api/designs/generate {text, parent_id: <스캔 설계>}` — 4-B | 검사만 | 같음 |
 | 사진 · 점군 | `/ws` `{type: scan_image · scan_cloud, seq, stamp, bytes, run_id}` → `GET /api/robot/scan.jpg` · `/api/robot/scan_cloud.ply`(마지막 스캔 것만 메모리에, 없으면 404) ✅(10/10). `run_id` = 직전 `scan_result`의 것 — 화면은 `scan_result.run_id`와 같을 때만 보여 줌. 새 스캔이 오면 앞 것은 지움(점군 없는 스캔에 옛 점군이 안 남게) | `d2/vision/scan_image`(JPEG ≤ 500 KB) · `scan_cloud`(PLY ≤ 2 MB), QoS 1 | 다리가 `scan_result`의 `image_path`(PNG → JPEG로 줄임) · `cloud_path` 파일을 읽어 `scan_result` 바로 뒤에 보냄 ✅ |
+| 스캔 중 점군 미리보기 | `/ws` `{type: scan_preview, seq, stamp, bytes, run_id, index, kind, pose_id, points}` → `GET /api/robot/scan_preview.ply?kind=capture\|live`(kind 별 마지막 하나, 없으면 404). 화면 스캔 칸이 스캔 중 실시간으로 바꿔 그림(live 가 3초 안이면 live, 아니면 capture 누적본) + 손목 그림(`wrist_image`) — 결과 확인이 되면 같은 칸에 사진 · 최종 점군 · 추론 설계(10/13) | `d2/vision/scan_preview`(JSON, QoS 1) + 바로 뒤 `scan_preview_cloud`(PLY — capture ≤ 2 MB QoS 1 · live ≤ 500 KB QoS 0), retained ✗. backend 는 바로 앞 JSON 과 짝짓고 옛 index · 새 run_id 를 거름 | 다리가 `/d2/vision/scan_preview`의 `cloud_path` 파일을 읽어 JSON 바로 뒤에 보냄(E-82, 한 쌍은 잠금 안에서) |
 | 손목 검출 화면 | `/ws` `{type: wrist_image, seq, stamp}` → `GET /api/robot/wrist.jpg?seq=`(마지막 한 장, 없으면 404) ✅ | `d2/vision/wrist_image`(JPEG 바이트, QoS 0) | `/d2/vision/wrist_image` |
 | (로봇이 부름) 설계 꺼내기 · 결과 저장 | backend가 `DesignStore`로 답함 ✅(10/9) | `d2/hmi/get_design/req` → `/res` · `d2/hmi/save_build/req` → `/res` | `/d2/hmi/get_design` · `save_build` |
 
@@ -81,7 +83,7 @@ cd web/frontend && NEXT_PUBLIC_BACKEND=http://localhost:8000 npm run dev
 | `WAIT_HMI` | 계속(= start) | 웹 연결이 끊겼었어요. [계속]을 누르세요(`hmi_lost`) |
 | `SCAN_MOVE` · `SCAN_CAPTURE` · `SCAN_INFER` | (정지) | 스캔 중(`scan_running`) |
 | `SCAN_REVIEW` | 그대로 저장 · 다시 스캔 · 취소(AI로 고치기는 10/14 이후) | 비교 화면(`scan_review`) |
-| `STOPPED` | 다시 시작 | 멈췄어요 — `reason` + "로봇 작업 영역에서 손을 빼고 누르세요" |
+| `STOPPED` | 다시 시작 · 초기화([정지] 자리) | 멈췄어요 — `reason` + "로봇 작업 영역에서 손을 빼고 누르세요" |
 | `RECOVER` | (정지) | 다시 시작 중(저속) |
 | `ERROR` | 다시 시작 · 취소 | 오류 — `message`(그리퍼 응답 없음 · 피드백 없음도 여기, E-74 · E-77) |
 | `DONE` | 설계 선택 · 스캔 · 생성 | 완성(`done`) · 100 % |

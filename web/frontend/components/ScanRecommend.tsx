@@ -52,13 +52,15 @@ export default function ScanRecommend({ robot, onView, onLog }: Props) {
     const { step, r } = await api.assemble(best.design_id, ready);
     setSending(false);
     setSent(r);
+    // 출발하면 스캔 칸은 닫힌다(SCAN_REVIEW 를 벗어남) — 진행 색이 보이는 설계 3D 로 화면을 옮겨 '사라졌다'고 느끼지 않게(10/13 황인재)
+    if (r.success) document.querySelector('.view-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     onLog('button', `추천 설계로 조립(${best.design_id}) → ${r.success ? '출발' : `${step} 거절`}${r.reason ? ' ' + r.reason : ''}${r.message ? ' — ' + r.message : ''}`);
   }
 
   return (
     <div className="scan-recommend">
       <div className="kv">
-        <span className="muted">추천 설계</span>
+        <span className="muted">가장 비슷한 저장 설계</span>
         <strong>{designName(best.design_id)}</strong>
       </div>
       <p className={best.rate >= GOOD_RATE ? 'hint' : 'result bad'}>

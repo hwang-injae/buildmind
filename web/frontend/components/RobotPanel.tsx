@@ -3,6 +3,9 @@
 // 버튼 하나 = REST 하나(lib/api). 판단은 로봇 쪽이 한다 — 여기서는 상태표대로 보이고 켜고 끄기만 한다. 자동 재전송 없음.
 // 조립 시작은 오른쪽 설계 3D 의 [조립] 하나(보는 곳에서 보냄 — select_design + start, 10/13 PL). 여기에는 [출발]이 없다.
 // 그때만 쓰는 버튼은 그때만 보인다(10/10 황인재): [계속] = 공급 · 웹 연결을 기다릴 때, [다시 시작] = 멈췄을 때. 긴 설명은 title(마우스).
+// 멈춘 뒤에는 [정지] 자리가 [초기화](W184 · 10/13 황인재): 한 번 더 확인 → cancel(이번 조립 버리기 — 작업 관리자 W183) → 받으면 resume
+// (잠금 풀기 — 조립 중이 아니게 됐으니 작업 관리자가 IDLE 로) → '작업대 블록을 치워 주세요' 알림. cancel 이 거절되면 잠금을 풀지 않는다
+// (그대로 풀면 조립을 이어 가므로).
 import { useState } from 'react';
 import * as api from '@/lib/api';
 import { designName, stateName, stopReasonKo } from '@/lib/names';
@@ -23,6 +26,8 @@ export default function RobotPanel({ robot, onLog }: Props) {
   const [busy, setBusy] = useState<string | null>(null); // 보내는 중인 버튼(정지는 따로 — 늘 누를 수 있게)
   const [stopping, setStopping] = useState(false);
   const [last, setLast] = useState<{ label: string; r: CmdResult } | null>(null);
+  const [asking, setAsking] = useState(false); // [초기화] 확인 한 번 더(되돌릴 수 없어서)
+  const [clearNotice, setClearNotice] = useState(false); // 초기화 뒤 '블록을 치워 주세요' 알림
 
   async function send(label: string, call: () => Promise<CmdResult>, isStop = false): Promise<CmdResult> {
     isStop ? setStopping(true) : setBusy(label);
@@ -42,6 +47,16 @@ export default function RobotPanel({ robot, onLog }: Props) {
     cancel: !busy && !locked && has(['READY', 'ERROR', 'SCAN_REVIEW'], st),
   };
   const showResume = locked || has(['STOPPED', 'ERROR'], st);
+  const stopped = locked || st === 'STOPPED';
+
+  /** [초기화]: cancel → 받으면 resume. 바깥 영향: 이번 조립 기록을 닫고 잠금을 푼다(로봇은 안 움직임 — 작업 관리자 IDLE) */
+  async function reset() {
+    setAsking(false);
+    const r = await send('초기화', () => api.command('cancel'));
+    if (!r.success) return;
+    const u = await send('초기화 — 잠금 풀기', api.resume);
+    if (u.success) setClearNotice(true);
+  }
   const label = (name: string, text: string) => (busy === name ? '보내는 중…' : text);
   const width = robot.gripper?.width_m;
 
@@ -86,9 +101,16 @@ export default function RobotPanel({ robot, onLog }: Props) {
       </div>
 
       <div className="btn-row safety">
-        <button className="stop" disabled={stopping} onClick={() => send('정지', api.stop, true)}>
-          {stopping ? '보내는 중…' : '정지'}
-        </button>
+        {stopped ? (
+          <button className="reset" disabled={!!busy} onClick={() => setAsking(true)}
+            title="이번 조립을 버리고 처음(대기)으로 — 로봇은 움직이지 않아요">
+            {label('초기화', '초기화')}
+          </button>
+        ) : (
+          <button className="stop" disabled={stopping} onClick={() => send('정지', api.stop, true)}>
+            {stopping ? '보내는 중…' : '정지'}
+          </button>
+        )}
         {showResume && (
           <button className="resume" disabled={!!busy} title="로봇 작업 영역에서 손을 빼고 누르세요 — 놓인 블록은 건너뛰고 이어서 해요"
             onClick={() => send('다시 시작', api.resume)}>
@@ -96,6 +118,27 @@ export default function RobotPanel({ robot, onLog }: Props) {
           </button>
         )}
       </div>
+
+      {asking && (
+        <div className="confirm" role="alertdialog" aria-label="초기화 확인">
+          <p>이번 조립을 버리고 처음(대기)으로 돌아갈까요? 놓은 블록은 사람이 치워야 해요.</p>
+          <div className="btn-row">
+            <button className="reset" onClick={reset}>초기화</button>
+            <button className="secondary" onClick={() => setAsking(false)}>아니요</button>
+          </div>
+        </div>
+      )}
+
+      {clearNotice && (
+        <div className="modal-back" role="presentation">
+          <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="clear-title">
+            <h2 id="clear-title">작업대의 블록을 치워 주세요</h2>
+            <p>초기화했어요. 로봇이 다시 쌓기 전에 작업대(조립 자리) 위 블록을 모두 치워 주세요.</p>
+            <p className="muted">그리퍼가 블록을 쥐고 있으면 손으로 빼 주세요. 치울 때는 로봇이 멈춰 있는지 먼저 확인하세요.</p>
+            <button className="primary big" autoFocus onClick={() => setClearNotice(false)}>다 치웠어요</button>
+          </div>
+        </div>
+      )}
 
       {last && !last.r.success && (
         <div className="result bad" title={[last.r.reason, last.r.message].filter(Boolean).join(' — ')}>

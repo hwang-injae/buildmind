@@ -67,6 +67,12 @@ def scan_image(request: Request):
     return _blob(request, 'scan_image', 'image/jpeg', '스캔 사진')
 
 
+@router.get('/scan_preview.ply')
+def scan_preview(request: Request, kind: Literal['capture', 'live'] = 'capture'):
+    """스캔 중 마지막 점군 미리보기(PLY, base_link m — E-82). kind = capture(자세마다 모은 누적본) · live(지금 보이는 것). 없으면 404."""
+    return _blob(request, f'scan_preview_{kind}', 'application/octet-stream', '점군 미리보기')
+
+
 @router.get('/scan_cloud.ply')
 def scan_cloud(request: Request):
     """마지막 스캔 점군(PLY, base_link m — 화면 점군 창 three.js PLYLoader 가 읽음, IRD 10.5). cloud_path 가 없던 스캔이면 404."""
