@@ -276,7 +276,7 @@ button.mitem.selected .tag.ok { color: #fff; border-color: #fff; }
 .gen-input button { min-width: 110px; }
 .gen-input button.mic { min-width: 96px; }
 .cands { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-/* 스캔 비교(W112 · W116) — 사진 · 점군 · 추론 설계를 나란히, 좁으면 한 줄씩 */
+/* 스캔 칸(W112 · W116) — 점군 · 추론 설계를 나란히, 좁으면 한 줄씩(사진은 10/13 PL 결정으로 뺌) */
 .scan-recommend { display: flex; flex-direction: column; gap: 8px; }
 .steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13px; font-weight: 600; }
 .steps li { padding: 3px 10px; border-radius: 999px; background: var(--btn-2); color: var(--muted); }
@@ -290,10 +290,9 @@ button.mitem.selected .tag.ok { color: #fff; border-color: #fff; }
 .scan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 8px 0 12px; }
 .scan-grid figure { margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .scan-grid figcaption { font-size: 14px; font-weight: 600; }
-.scan-grid .view3d { height: 320px; }
-.scan-photo { width: 100%; height: 320px; object-fit: contain; border-radius: 12px; background: var(--canvas-bg); border: 1px solid var(--line); }
+.scan-grid .view3d { height: 380px; }
 /* .view3d-empty(뒤쪽, absolute)보다 앞서도 지지 않게 .scan-grid 를 붙인다 — 안 그러면 빈 칸이 칸 밖으로 빠져 안 보임 */
-.scan-grid .scan-empty { position: static; height: 320px; border: 1px dashed var(--line); border-radius: 12px; background: var(--canvas-bg); }
+.scan-grid .scan-empty { position: static; height: 380px; border: 1px dashed var(--line); border-radius: 12px; background: var(--canvas-bg); }
 .cand { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 2px solid transparent; border-radius: 12px; background: var(--panel-2); min-width: 0; }
 .cand.failed { opacity: 0.45; }
 .cand.picked { border-color: var(--ok); }

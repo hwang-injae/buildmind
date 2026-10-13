@@ -10,7 +10,7 @@
   safety/resume → 풀림. 진짜 작업 관리자와 같이 조립 중에 멈췄으면 RECOVER → CHECK → 놓인 블록은 건너뛰고 이어서,
   조립 중이 아니었으면 IDLE(설계 다시 고름) — task_manager._recover · 복구 절차 문서 5장
 - 가짜 조립 중 블록마다 가짜 손목 검출 그림(d2/vision/wrist_image, 640×480 JPEG — 진짜는 find_blocks 때 손목 비전이 그림). PIL 이 없으면 그림만 안 보냄
-- 스캔 중 자세마다 손목 그림 + 점군 미리보기(d2/vision/scan_preview JSON + scan_preview_cloud PLY — 이동 중 live · 촬영 때 capture 누적본, E-82).
+- 스캔 중 자세마다 점군 미리보기(d2/vision/scan_preview JSON + scan_preview_cloud PLY — 이동 중 live · 촬영 때 capture 누적본, E-82).
 - 스캔 끝에 scan_result 바로 뒤 가짜 스캔 사진 · 점군(d2/vision/scan_image JPEG · scan_cloud PLY — 진짜는 다리가 파일을 읽어 보냄, IRD 10.5).
   그림 · 점은 비전 가짜 스캔(d2_vision mock_scan)과 같다. numpy · PIL 이 없으면 사진 · 점군만 안 보냄
 - 설계는 진짜 작업 관리자처럼 웹 저장소에 get_design 을 MQTT 로 묻는다(AI · 스캔 설계도 — 레시피 파일에 없음).
@@ -194,8 +194,8 @@ class MockRobot:
     def _scan(self, run_id):
         """SCAN_MOVE · CAPTURE 를 자세 3곳 → SCAN_INFER → scan_result/2.0(벤치 blocks/2, 추정 2개) + 사진 · 점군 → SCAN_REVIEW.
 
-        스캔 중 화면 실시간 창(E-82)을 시험하려고 자세마다: 이동 중 live 미리보기 2번(지금 보이는 블록만) · 촬영 때 손목 그림(위에서 본 그림)과
-        capture 미리보기(지금까지 모은 누적본, index 1 · 2 · 3) — 다리가 보내는 것과 같은 토픽 · 순서(JSON 바로 뒤 PLY).
+        스캔 중 화면 실시간 창(E-82)을 시험하려고 자세마다: 이동 중 live 미리보기 2번(지금 보이는 블록만) · 촬영 때 capture 미리보기
+        (지금까지 모은 누적본, index 1 · 2 · 3) — 다리가 보내는 것과 같은 토픽 · 순서(JSON 바로 뒤 PLY). 손목 RGB 는 화면에 안 씀(10/13 PL).
         """
         _, design = self.local_design(BENCH)
         items = [{'scan_num': b['order'], 'x': b['x'], 'y': b['y'], 'z': b['z'], 'ori': b['ori'], 'inferred': i < 2}
@@ -211,9 +211,6 @@ class MockRobot:
                 if self.abort.wait(self.step_s / 2):
                     return
             self.set_state('SCAN_CAPTURE', f'스캔 중 — {pose} 촬영', 'scan_running')
-            jpeg, _ = fake_scan_media(seen, self.origin, self.block_mm)
-            if jpeg:
-                self.c.publish('d2/vision/wrist_image', jpeg, qos=0)   # 진짜는 손목 비전이 촬영 때 컬러 한 장(민범진 요청 중)
             self._preview(run_id, pose, i, 'capture', seen)
             if self.abort.wait(self.step_s):
                 return
