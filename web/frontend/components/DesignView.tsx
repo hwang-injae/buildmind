@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import * as api from '@/lib/api';
 import type { DesignPart, CmdResult, Design, Rules } from '@/lib/types';
 import { gripperOpening, type Robot } from '@/lib/ws';
-import { MADE_KO, ROLE, designName, roleOf, stateName } from '@/lib/names';
+import { MADE_KO, ROLE, designName, rejectText, roleOf, stateName } from '@/lib/names';
 import DesignTree from './DesignTree';
 import Preview3D, { type Item3D } from './Preview3D';
 
@@ -160,9 +160,7 @@ export default function DesignView({ robot, viewId, rules, dark, onPick, onLog }
                   : `지금은 조립할 수 없어요(${stateName(st?.state) || '연결 전'})`}
           </small>
           {sent && !sent.success && (
-            <span className="result bad">
-              거절{sent.reason ? ` (${sent.reason})` : ''}{sent.message ? ` — ${sent.message}` : ''}
-            </span>
+            <span className="result bad">{rejectText('조립', sent)}</span>
           )}
         </div>
       )}

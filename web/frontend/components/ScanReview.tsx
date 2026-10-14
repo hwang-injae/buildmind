@@ -8,8 +8,7 @@
 // 실패면 backend 가 준 버튼만 남긴다(블록 수 초과 = [취소]만 · 그 밖 = [다시 스캔] · [취소] — 레시피 초안 7-1). [AI로 고치기]는 챌린지(10/14 뒤).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '@/lib/api';
-import { designName } from '@/lib/names';
-import { stateName } from '@/lib/names';
+import { NO_WEB, designName, stateName } from '@/lib/names';
 import type { Cmd, Rules, ScanPreview, ScanSaveJob } from '@/lib/types';
 import type { Robot } from '@/lib/ws';
 import CloudView from './CloudView';
@@ -102,7 +101,7 @@ export default function ScanReview({ robot, rules, dark, onSaved, onLog }: Props
     setError('');
     const r = await api.scanSave(scan.run_id);
     setBusy(false);
-    if (!r.data) return setError(r.error ?? '웹 서버 답이 없어요');
+    if (!r.data) return setError(r.error ?? NO_WEB);
     setJob({ job_id: r.data.job_id, state: 'running', run_id: scan.run_id });
     onLog('button', '스캔 저장 — AI가 역할 · 순서 · 잡기를 채우고 검사해요');
   };

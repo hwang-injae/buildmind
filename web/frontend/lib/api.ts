@@ -1,5 +1,6 @@
 // REST 한 곳(SDD 3.3 — 화면은 backend 의 REST · /ws 만 쓴다, E-41).
 // 운영: backend 가 이 화면을 같은 주소에서 내려 주므로 BASE 는 빈 글자. 개발(next dev :3000): NEXT_PUBLIC_BACKEND=http://localhost:8000
+import { NO_WEB } from '@/lib/names';
 import type { Cmd, CmdResult, Design, DesignSummary, GenJob, Rules, ScanMatch, ScanSaveJob } from './types';
 
 export const BASE = process.env.NEXT_PUBLIC_BACKEND ?? '';
@@ -16,7 +17,7 @@ export function setReqTimeout(s: number) {
 async function post(path: string, body?: unknown): Promise<CmdResult> {
   if (reqTimeoutS == null) {
     // 화면을 막 열어 아직 웹 서버와 한 번도 못 붙음 — 배너와 같은 안내(얼마나 기다릴지도 모르는 채 보내지 않는다)
-    return { success: false, reason: 'ERROR', message: '웹 서버와 아직 연결 전 — 잠시 뒤 다시. 급하면 정지는 로봇 PC Ctrl+C · 펜던트로' };
+    return { success: false, reason: 'ERROR', message: NO_WEB };
   }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), reqTimeoutS * 1000 + MARGIN_MS);
@@ -27,10 +28,10 @@ async function post(path: string, body?: unknown): Promise<CmdResult> {
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: ctrl.signal,
     });
-    if (!res.ok) return { success: false, reason: 'ERROR', message: `backend 응답 ${res.status}` };
+    if (!res.ok) return { success: false, reason: 'ERROR', message: `웹 서버가 오류로 답했어요(${res.status}) → backend 로그 → 웹 PC 에서 docker compose logs web` };
     return (await res.json()) as CmdResult;
   } catch {
-    return { success: false, reason: 'ERROR', message: 'backend 에 닿지 않음' };
+    return { success: false, reason: 'ERROR', message: NO_WEB };
   } finally {
     clearTimeout(timer);
   }
@@ -99,7 +100,7 @@ async function postJson<T>(path: string, body: unknown, timeoutMs = AI_TIMEOUT_M
     if (!res.ok) return { error: (json && typeof json.detail === 'string' ? json.detail : null) ?? `웹 서버 응답 ${res.status}` };
     return { data: json as T };
   } catch {
-    return { error: '웹 서버에 닿지 않거나 너무 오래 걸려요' };
+    return { error: NO_WEB };
   } finally {
     clearTimeout(timer);
   }
