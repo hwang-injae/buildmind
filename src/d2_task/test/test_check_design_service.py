@@ -27,7 +27,7 @@ def attached(**kw):
 def blocks_of(model_id):
     doc = RecipeDocument.load(RECIPES, model_id)
     _, family, _ = IDS[model_id]
-    request = RecipeToParts(model_id, family, BLOCK_MM).convert(doc.recipe, doc.placements)     # 실제 설계의 design_id = 모델 ID(변환기 ①이 model_id 로 쓴다)
+    request = RecipeToParts(model_id, BLOCK_MM).convert(doc.recipe, doc.placements)     # 실제 설계의 design_id = 모델 ID(변환기 ①이 model_id 로 쓴다)
     return doc, dict(request, base_recipe=copy.deepcopy(doc.recipe))        # 실제 요청처럼 그 Template 의 V000 레시피를 통째로 싣는다
 
 

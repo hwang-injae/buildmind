@@ -9,7 +9,7 @@
   ros2 run d2_motion run_recipe <lv2.json> <lv4.json> --auto             # 두 설계를 세트로 (의자 앞에 책상)
   ros2 run d2_motion run_recipe --grasp-test 1-6 --repeat 3              # 잡기 폭 시험: 칸마다 집어 같은 자리에 다시 놓기 (6가지 잡기)
 시작할 때 한 번만 y 를 묻고 블록 사이에는 기다리지 않는다: 로봇이 놓으러 간 사이에 사람이 같은 공급 칸을 다시 채운다.
---slots 없음 = 블록 잡기에 정해진 칸(p1~p6)으로, --slots 1,3 = 공급 칸 1, 3, 1, 3 ... 번갈아 (사람이 가져간 칸을 다시 채운다). Ctrl+C = 지금 목표 취소 -> pick_place 가 세운다.
+--slots 없음 = 블록 잡기에 정해진 칸(p1~p6)으로, --slots 1,3 = 공급 칸 1, 3, 1, 3 ... 번갈아 (사람이 가져간 칸을 다시 채운다). Ctrl+C = 정지 노드에 세우기 요청(/d2/safety/stop — 잠기므로 이어 하려면 사람이 '다시 시작') -> 지금 목표 취소.
 """
 import argparse
 import csv
@@ -22,7 +22,7 @@ import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from d2_interfaces.action import PickPlace
-from d2_interfaces.srv import GripperCommand, MoveTo
+from d2_interfaces.srv import GripperCommand, MoveTo, StopRequest
 from moveit_msgs.msg import PlanningSceneComponents
 from moveit_msgs.srv import GetPlanningScene
 from rclpy.action import ActionClient
@@ -197,6 +197,7 @@ def main():
     ac = ActionClient(node, PickPlace, '/d2/motion/pick_place')
     mv = node.create_client(MoveTo, '/d2/motion/move_to')
     grip = node.create_client(GripperCommand, '/d2/gripper/command')
+    stop = node.create_client(StopRequest, '/d2/safety/stop')
     rows, gh, t_start = [], None, time.monotonic()
 
     def wait(fut, timeout=None):
@@ -229,7 +230,8 @@ def main():
             ok = False
         if not ok:
             return 1
-        r = wait(grip.call_async(GripperCommand.Request(width_m=0.1, force_n=20.0)), 10.0)
+        # '활짝' · 힘은 robot.yaml 한 곳(gripper.max_width_m · force_n — E-108). 예전엔 0.1 m · 20 N 을 박아 두었다(10/14 점검 ② 4)
+        r = wait(grip.call_async(GripperCommand.Request(width_m=cfg['gripper']['max_width_m'], force_n=cfg['gripper']['force_n'])), 10.0)
         if r is None or not r.success:
             print(f'[오류] 그리퍼를 못 열었다 ({getattr(r, "reason", "응답 없음")})')
             return 1
@@ -273,7 +275,12 @@ def main():
         else:
             go_home()                     # 모든 블록을 놓았으면 홈으로 (실패하면 그 자리에 둔다 — 사람이 보고 판단)
     except KeyboardInterrupt:
-        print('\n[Ctrl+C] 지금 목표를 취소한다 (pick_place 가 로봇을 세운다)')
+        # 늘 정지 노드에 먼저 세우기를 부탁한다 — 홈 이동(move_to) 중이면 취소할 목표가 없어 아무것도 안 세웠다(10/14 점검 ② 4).
+        # 정지 노드가 잠그므로 이어 하려면 사람이 화면 '다시 시작'으로 푼다
+        print('\n[Ctrl+C] 정지 노드에 세우기를 부탁하고 지금 목표를 취소한다')
+        r = wait(stop.call_async(StopRequest.Request(source='task', reason='CTRL_C')), 3.0) if stop.service_is_ready() else None
+        if r is None or not r.success:
+            print(f'[오류] 정지 노드가 답하지 않았다 ({getattr(r, "message", "응답 없음")}) — 펜던트로 세운다')
         if gh is not None:
             wait(gh.cancel_goal_async(), 3.0)
     finally:

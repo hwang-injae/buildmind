@@ -24,7 +24,7 @@ LIVE_RUN_ID = 'live'          # 작업 관리자 state 에 run_id 가 없을 때
 
 
 def live_target(state, only_during_scan=True):
-    """지금 실시간 점군을 낼지와 그 run_id. 입력: state = 마지막 /d2/task/state(state/1 dict, 아직 못 받았으면 None).
+    """지금 실시간 점군을 낼지와 그 run_id. 입력: state = 마지막 /d2/task/state(state/2 dict, 아직 못 받았으면 None).
     only_during_scan(기본) 이면 state 가 'SCAN_' 으로 시작할 때만(SCAN_MOVE · SCAN_CAPTURE · SCAN_INFER · SCAN_REVIEW) — 평소엔 계산하지 않는다.
     출력: (낼지 bool, run_id 글자 — state 의 run_id, 없으면 LIVE_RUN_ID). 바깥 영향 없음."""
     st = (state or {}).get('state') or ''

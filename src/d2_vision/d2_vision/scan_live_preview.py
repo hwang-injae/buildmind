@@ -5,7 +5,7 @@ wrist_block 은 고치지 않고 따로 노드(E-82 '따로 노드'). 계산(깊
 
 입력(구독)
   <cam_prefix>/aligned_depth_to_color/image_raw(깊이 16UC1 mm 또는 32FC1 m) · <cam_prefix>/color/camera_info(내부값) — wrist_block 과 같은 토픽
-  /d2/task/state(state/1 JSON, TRANSIENT_LOCAL) — state 가 'SCAN_' 으로 시작할 때만 낸다(only_during_scan, 기본). run_id = state 의 run_id(없으면 'live')
+  /d2/task/state(state/2 JSON, TRANSIENT_LOCAL) — state 가 'SCAN_' 으로 시작할 때만 낸다(only_during_scan, 기본). run_id = state 의 run_id(없으면 'live')
   TF base_link → rg2_tcp(robot.yaml frame_id · tcp_link) — **깊이 사진 시각**으로 묻고(최대 TF_WAIT_S), 못 구하면 그 장은 건너뜀
   카메라 자세 = tcp_pose.camera_pose_mm(TF × 손목 보정값 T_rg2tcp2camera · 기울기 밀림 고침) — wrist_block 과 같은 함수 · 같은 보정 파일
 내보내기
@@ -123,7 +123,7 @@ class ScanLivePreview(Node):
         self.intr = (msg.k[0], msg.k[4], msg.k[2], msg.k[5])
 
     def on_state(self, msg):
-        """작업 관리자 state/1 JSON → dict(못 읽으면 그대로 둠)."""
+        """작업 관리자 state/2 JSON → dict(못 읽으면 그대로 둠)."""
         try:
             self.state = json.loads(msg.data)
         except ValueError:

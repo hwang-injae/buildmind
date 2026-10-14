@@ -74,6 +74,14 @@ def test_subscribes_states_alive_intent_responses_and_robot_requests(mc):
             'd2/task/check_design/res', 'd2/hmi/get_design/req', 'd2/hmi/save_build/req'} <= subs
 
 
+def test_broker_disconnect_is_sent_to_screen_at_once(mc):
+    """브로커가 끊기면 바로 broker connected false(화면 '브로커' 점 · 배너), 다시 붙으면 true(10/14 PM 점검 — 전엔 끊겨도 초록)."""
+    mc._on_connect(mc.client, None, None, 0)
+    mc.client.on_disconnect(mc.client, None, 1)
+    mc._on_connect(mc.client, None, None, 0)
+    assert [e['data'] for e in mc.events if e['type'] == 'broker'] == [{'connected': True}, {'connected': False}, {'connected': True}]
+
+
 def test_request_pairs_by_req_id(mc):
     """요청 = …/req + req_id. 같은 req_id 의 …/res 가 오면 그 칸을 돌려준다(req_id 는 뺌)."""
     def robot_answers(topic, body):
@@ -314,7 +322,8 @@ class FakeGen:
         on_progress('filled', {'attempt': 1, 'design_id': '001_CHAIR_BENCH_V001', 'parent_id': '001_CHAIR_BENCH_V000'})
         if scan_result.get('fail'):
             raise GenError('OUT_OF_SCOPE', '블록이 너무 많아 저장할 수 없어요', [{'part': None, 'reason': 'OUT_OF_SCOPE', 'kind': 'scope'}])
-        return {'design_id': '001_CHAIR_BENCH_V001', 'version': 'V001', 'parent_id': '001_CHAIR_BENCH_V000'}
+        return {'design_id': '001_CHAIR_BENCH_V001', 'version': 'V001', 'parent_id': '001_CHAIR_BENCH_V000',
+                'ai_template': '001_CHAIR_BENCH', 'ai_reason': '블록 수 · 층 구성이 가장 가까운 벤치'}
 
     def save(self, result, index, made_by='web'):
         if not result['candidates'][index]['check']['ok']:
@@ -413,6 +422,7 @@ def test_scan_save_route_job(store):
             break
         threading.Event().wait(0.02)
     assert view['state'] == 'saved' and view['saved']['design_id'] == '001_CHAIR_BENCH_V001' and view['run_id'] == run
+    assert view['saved']['ai_reason'] == '블록 수 · 층 구성이 가장 가까운 벤치'   # 화면이 부모를 고른 까닭을 한 줄로(10/14 PL)
     fake.scan = {**fake.scan, 'fail': True}
     job = client.post('/api/designs/scan/save', json={'run_id': run}).json()['job_id']
     for _ in range(100):
@@ -458,8 +468,8 @@ def test_ws_sends_snapshot_first(store):
 
 
 # ---------- 저장소(DesignStore, W111 최소형) ----------
-def test_store_registers_four_bases_as_design_2(store):
-    """기본 설계 4개 = 레시피 두 파일 → 변환기 ② → design/4.0(v1.0 · made_by cad · 부모 없음 · recipe · placements · parts/4.0)."""
+def test_store_registers_four_bases_as_design_4(store):
+    """기본 설계 4개 = 레시피 두 파일 → 변환기 ② → design/4.0(V000 · made_by cad · 부모 없음 · recipe · placements · parts/4.0)."""
     assert store.registered == BASES
     d = store.get_design('001_CHAIR_BENCH_V000')
     assert d['schema'] == 'design/4.0' and d['family'] == 'chair' and d['version'] == 'V000'
@@ -658,7 +668,7 @@ def test_designs_rest_and_robot_handlers(store):
     client, fake = make_client(store)
     assert [r['design_id'] for r in client.get('/api/designs').json()] == BASES
     assert [r['design_id'] for r in client.get('/api/designs?family=').json()] == BASES      # 빈 값 = 거르지 않음
-    assert client.get('/api/designs/rules').json() == {'block_size_mm': [75.0, 25.0, 15.0], 'assembly_area_half_mm': 150.0}
+    assert client.get('/api/designs/rules').json() == {'block_size_mm': [75.0, 25.0, 15.0], 'assembly_area_half_mm': 150.0, 'store': 'json'}
     assert client.get('/api/designs/002_CHAIR_BACK_V000').json()['design_id'] == '002_CHAIR_BACK_V000'
     assert client.get('/api/designs/nope').status_code == 404
     assert set(fake.handlers) == {'/d2/hmi/get_design', '/d2/hmi/save_build'}
@@ -688,3 +698,33 @@ def test_frontend_pages_are_not_reused_from_cache(store, tmp_path, monkeypatch):
     page = client.get('/')
     assert page.status_code == 200 and '새 화면' in page.text and page.headers['cache-control'] == 'no-cache'
     assert 'cache-control' not in client.get('/_next/static/chunks/a1b2.js').headers
+
+
+def test_display_name_set_clear_and_kept_on_reregister(store):
+    """표시 이름(W197): 붙이기(앞뒤 빈칸 뗌) · 목록 칸 · 기본 설계를 다시 등록해도 남음 · 빈 글자로 지움 · 꼴이 틀리면 저장 안 함.
+    design_id · 레시피는 그대로(로봇 쪽 영향 없음)."""
+    recipe = store.get_design(BENCH)['recipe']
+    assert store.set_display_name(BENCH, '  젠가 탑 4층 ') == '젠가 탑 4층'
+    assert store.get_design(BENCH)['display_name'] == '젠가 탑 4층' and store.get_design(BENCH)['recipe'] == recipe
+    assert next(r for r in store.list_designs() if r['design_id'] == BENCH)['display_name'] == '젠가 탑 4층'
+    store.register_bases()
+    assert store.get_design(BENCH)['display_name'] == '젠가 탑 4층'
+    for bad in ('가' * 41, '두 줄\n이름', 3):
+        with pytest.raises(ValueError):
+            store.set_display_name(BENCH, bad)
+    with pytest.raises(KeyError):
+        store.set_display_name('001_CHAIR_BENCH_V077', '없는 설계')
+    assert store.set_display_name(BENCH, '') is None and 'display_name' not in store.get_design(BENCH)
+    logs = [json.loads(f.read_text(encoding='utf-8')) for f in sorted(store.gen_logs_dir.glob('*_rename.json'))]
+    assert [(g['design_id'], g['old_name'], g['new_name']) for g in logs] == [(BENCH, None, '젠가 탑 4층'), (BENCH, '젠가 탑 4층', None)]
+    assert logs[0]['kind'] == 'rename' and logs[0]['model'] == '-'   # 이름 바꿈 이력(10/14 PL — 지움도, 같은 이름 · 실패는 안 남김)
+
+
+def test_rename_route(store):
+    """PUT /api/designs/{id}/name — 붙이기 · 지우기(null) · 없는 설계 404 · 꼴 틀림 400."""
+    client, _ = make_client(store)
+    assert client.put(f'/api/designs/{BENCH}/name', json={'name': '젠가 탑'}).json() == {'design_id': BENCH, 'display_name': '젠가 탑'}
+    assert client.get(f'/api/designs/{BENCH}').json()['display_name'] == '젠가 탑'
+    assert client.put(f'/api/designs/{BENCH}/name', json={'name': None}).json() == {'design_id': BENCH, 'display_name': None}
+    assert client.put('/api/designs/001_CHAIR_BENCH_V077/name', json={'name': '이름'}).status_code == 404
+    assert client.put(f'/api/designs/{BENCH}/name', json={'name': '가' * 41}).status_code == 400

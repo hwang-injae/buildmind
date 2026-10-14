@@ -9,7 +9,7 @@
         /d2/safety/stop (StopRequest — 시간 초과 · Ctrl+C 때 먼저 정지 요청),
         /d2/vision/scan_capture · scan_infer (JsonQuery — 촬영 점군 수집과 추론),
         /d2/hmi/save_build (JsonQuery — 끝난 조립의 build/2 요약, 저장이 확인될 때까지 TaskManager 가 들고 있고 여기서 비동기로 보낸다)
-내보내는 것: /d2/task/state (JSON state/1), /d2/task/progress (JSON progress/2.0) — 늦게 붙는 쪽(다리)도 마지막 값을 받게 TRANSIENT_LOCAL
+내보내는 것: /d2/task/state (JSON state/2), /d2/task/progress (JSON progress/2.0) — 늦게 붙는 쪽(다리)도 마지막 값을 받게 TRANSIENT_LOCAL
         /d2/task/scan_result (JSON scan_result/2.0 — 구조 검사·저장은 HMI에서 진행)
 기록(CSV): ROS 파라미터 log_dir 아래 <run_id>.csv — 기본은 홈 아래 d2_data/runs(저장소 밖), `~` 는 홈으로 바뀐다. 빈 값을 주면 파일 기록이 꺼지고 run_id 만 만든다
 설계 조회: 설계 선택 때(출발은 받아 둔 설계, E-55 ①) /d2/hmi/get_design (JsonQuery, design/4.0) 을 비동기로 부르고 timeout.service_s 안에 답이 없으면 실패로 본다.
@@ -30,7 +30,7 @@ import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from d2_interfaces.action import PickPlace
-from d2_interfaces.srv import CheckProgress, HmiCommand, JsonQuery, MoveTo, SceneAttach, StopRequest
+from d2_interfaces.srv import CheckProgress, GripperCommand, HmiCommand, JsonQuery, MoveTo, SceneAttach, StopRequest
 from d2_safety.safe_stop import init_ros
 from geometry_msgs.msg import Pose
 from rclpy.action import ActionClient
@@ -113,6 +113,7 @@ class TaskNode(Node):
         self.infer_cli = self.create_client(JsonQuery, '/d2/vision/scan_infer', callback_group=cb)
         self.find_cli = self.create_client(JsonQuery, '/d2/vision/find_blocks', callback_group=cb)      # supply_mode: scatter 일 때만 쓴다
         self.stop_cli = self.create_client(StopRequest, '/d2/safety/stop', callback_group=cb)
+        self.gripper_cli = self.create_client(GripperCommand, '/d2/gripper/command', callback_group=cb)   # 정지 중 화면 gripper_open 만 쓴다(W183)
         self.attach_cli = self.create_client(SceneAttach, '/d2/motion/scene/attach', callback_group=cb)    # 출발 때 남은 쥔 상자 떼기(받침 경유)
         self.service_s = cfg['timeout']['service_s']      # 서비스 한 번의 제한 시간 · save_build 다시 보내기 간격 (robot.yaml)
         self.move_to_s = cfg['timeout']['move_to_s']
@@ -229,6 +230,8 @@ class TaskNode(Node):
             for client, name in ((self.capture_cli, '/d2/vision/scan_capture'), (self.infer_cli, '/d2/vision/scan_infer')):
                 if not client.service_is_ready():
                     waiting.append(name)
+            if not self.stop_cli.service_is_ready():
+                waiting.append('/d2/safety/stop')              # 스캔도 촬영 자세로 팔을 움직인다 — 시간 초과 · Ctrl+C 때 세울 곳(10/14 점검 ③-5)
             return waiting
         if not self.check_cli.service_is_ready():
             waiting.append('/d2/vision/check_progress')
@@ -269,7 +272,7 @@ class TaskNode(Node):
         return self._scan_query(self.capture_cli, dict(pose_id=pose_id, run_id=run_id), should_abort)
 
     def scan_infer(self, run_id, should_abort):
-        """run_id의 점군 추론을 요청한다. 결과 좌표는 blocks/1의 mm, 제한 시간·실패는 _scan_query와 같다."""
+        """run_id의 점군 추론을 요청한다. 결과 좌표는 blocks/2의 mm, 제한 시간·실패는 _scan_query와 같다."""
         return self._scan_query(self.infer_cli, dict(run_id=run_id), should_abort)
 
     def find_blocks(self, run_id, should_abort, **opts):
@@ -366,6 +369,9 @@ class TaskNode(Node):
             repo = share.resolve().parents[3]
             folder = Path.home() / 'd2_data' / 'runs' / f'w144_{design_id}_{time.strftime("%m%d_%H%M%S")}'
             trace = {}
+            # 촬영 문맥은 기록기를 만들기 전에 둔다 — 준비 · 녹화 시작이 실패해도 기록기(덜 된 기록 ZIP 용)는 남고, 그 뒤 RECOVER 로
+            # 이어 가면 촬영(w144_after_place)이 이 문맥을 쓴다. 예전엔 성공 때만 만들어 그 경우 예외가 났다(#152 리뷰 5)
+            self._w144_ctx = trace
 
             def move_observe():
                 tr = trace.get('t')
@@ -377,7 +383,9 @@ class TaskNode(Node):
                 return ok
 
             def stop_robot():
-                self.request_stop('W144 촬영 실패')
+                # reason 은 계약 값만(StopRequest: TIMEOUT · CTRL_C, 비우면 정지 노드가 STOP_TASK) — 까닭 글은 로그로(10/14 점검 ③-5)
+                self.get_logger().error('W144 촬영 실패 — 정지 요청(STOP_TASK)')
+                self.request_stop('')
 
             rec = cls(folder, move_observe, stop_robot)
             tr = W144Trace(folder, run_id, self._ros_ns)
@@ -418,7 +426,6 @@ class TaskNode(Node):
             self._w144, self._w144_trace = rec, tr
             if not ok:
                 return False, f'W144 녹화 시작 실패: {why}'
-            self._w144_ctx = trace
             self.get_logger().info(f'[W144] 기록 폴더: {folder} · bag: {tr.bag_dir}')
             return True, ''
         except Exception as e:
@@ -558,6 +565,28 @@ class TaskNode(Node):
         res, why = self._call(self.stop_cli, req, lambda: not rclpy.ok(), self.service_s)
         return (False, why or 'ERROR') if res is None else (res.success, res.message)
 
+    def gripper_open(self, width_m, force_n, on_done):
+        """정지 중 화면 gripper_open: /d2/gripper/command 로 폭 width_m(m) · 힘 force_n(N)을 보내고 곧바로 돌아온다. 반환: (보냈나, reason).
+
+        팔은 움직이지 않는다. 그리퍼 서버의 실제 답은 언제 오든 on_done(성공, reason)으로 한 번 알린다(기다리지 않고 future 를 버리지 않는다).
+        서버가 없으면 보내지 않고 (False, 'GRIPPER_NO_RESPONSE') — 이때 on_done 은 부르지 않는다(호출자가 처리).
+        """
+        if not self.gripper_cli.service_is_ready():
+            return False, 'GRIPPER_NO_RESPONSE'
+        req = GripperCommand.Request()
+        req.width_m, req.force_n = float(width_m), float(force_n)
+
+        def finished(f):
+            try:
+                res = f.result()
+                ok, why = (bool(res.success), res.reason) if res is not None else (False, 'ERROR')
+            except Exception as e:     # noqa: BLE001 — 답을 못 읽어도 대기는 풀어야 한다
+                self.get_logger().error(f'그리퍼 응답 실패: {e!r}')
+                ok, why = False, 'ERROR'
+            on_done(ok, why)
+        self.gripper_cli.call_async(req).add_done_callback(finished)
+        return True, ''
+
     def check_progress(self, part_ids, should_abort):
         """진행 확인을 service_s 초 안에 받는다. 반환: (성공, reason, 블록별 관측). 중단 · 시간 초과 · 실패 때 관측은 빈 dict."""
         req = CheckProgress.Request()
@@ -603,8 +632,11 @@ class TaskNode(Node):
             if not wait_until(accepted, should_abort, timeout_s=max(0.0, deadline - time.monotonic())):
                 sent.add_done_callback(self._cancel_late)      # 아직 답이 없던 목표는 받아지는 대로 바로 취소
                 return False, ('STOPPED' if should_abort() else 'TIMEOUT')
-        except KeyboardInterrupt:                              # Ctrl+C: 받아지는 대로 취소하고 끝낸다
-            sent.add_done_callback(self._cancel_late)
+        except KeyboardInterrupt:                              # Ctrl+C: 먼저 세우고, 받아지는 대로 취소하고 끝낸다(10/14 점검 ③-5)
+            try:
+                self._stop_on_interrupt()
+            finally:                                           # 정지 요청이 실패 · 예외여도 취소 예약은 반드시 건다
+                sent.add_done_callback(self._cancel_late)
             raise
         handle = sent.result()
         if not handle.accepted:
@@ -630,8 +662,11 @@ class TaskNode(Node):
                 return False, ('CANCELED' if should_abort() else 'TIMEOUT')
             r = result.result().result
             return r.success, r.reason
-        except KeyboardInterrupt:                              # Ctrl+C: _active 를 지우기 전에 목표를 취소한다
-            self.cancel_active()
+        except KeyboardInterrupt:                              # Ctrl+C: 먼저 세우고(정지 요청) _active 를 지우기 전에 목표를 취소한다(10/14 점검 ③-5)
+            try:
+                self._stop_on_interrupt()
+            finally:                                           # 정지 요청이 실패 · 예외여도 목표 취소는 반드시 시도한다
+                self.cancel_active()
             raise
         finally:
             with self._active_lock:
@@ -643,6 +678,18 @@ class TaskNode(Node):
         handle = sent.result()
         if handle is not None and handle.accepted:
             handle.cancel_goal_async()
+
+    def _stop_on_interrupt(self):
+        """Ctrl+C 를 받은 pick_place 안에서 정지 노드에 먼저 세우라고 요청한다(CTRL_C). 반환 없음.
+
+        실패 · 예외는 로그만 남기고 삼킨다 — 부르는 쪽이 이어서 목표 취소를 해야 하고, 원래 KeyboardInterrupt 를 덮으면 안 된다.
+        """
+        try:
+            ok, message = self.request_stop('CTRL_C')
+            if not ok:
+                self.get_logger().error(f'Ctrl+C 정지 요청 거절 · 실패: {message}')
+        except Exception as e:                                 # noqa: BLE001
+            self.get_logger().error(f'Ctrl+C 정지 요청 예외: {e!r}')
 
     def cancel_active(self):
         """Ctrl+C 때: 진행 중인 pick_place 목표의 취소 요청이 나갈 때까지 잠깐 기다린다."""
@@ -664,7 +711,8 @@ class TaskNode(Node):
 
 
 def main():
-    """task 상태표와 executor 를 돌린다. Ctrl+C 는 목표 취소 · 정지 서비스 요청 뒤 제한 있는 기록 마무리를 한다."""
+    """task 상태표와 executor 를 돌린다. Ctrl+C 는 정지 서비스 요청(CTRL_C) → 목표 취소, 예상 못 한 예외는 정지 요청(빈 reason = STOP_TASK) → 목표 취소 뒤
+    다시 던진다. 끝날 때 제한 있는 기록 마무리를 한다."""
     logging.basicConfig(level=logging.INFO, format='[%(name)s] %(message)s')
     init_ros()
     node = TaskNode()
@@ -687,6 +735,24 @@ def main():
                 break
             except KeyboardInterrupt:
                 node.get_logger().warn('정지 요청 중 Ctrl+C — 정지 요청부터 다시 보낸다')
+    except Exception as e:                         # 예상 못 한 예외로 노드가 끝난다 — 세 단계를 따로 시도하고 원래 예외를 다시 던진다(10/14 점검 ③-5)
+        log = node.get_logger()
+        log.error(f'[작업 관리자] 예상 못 한 예외로 끝남({e!r}) — 정지 요청부터')
+        try:
+            node.manager.shutdown()                # ① 새 이동 · 목표를 막는다(_shutdown 플래그 → halted() 참, 로봇 명령은 안 보냄)
+        except Exception as step_error:            # noqa: BLE001 — 실패해도 정지 요청은 보낸다
+            log.error(f'종료 ① 새 작업 막기 실패: {step_error!r}')
+        try:
+            ok, message = node.request_stop('')    # ② 먼저 세운다(빈 reason → 정지 노드가 STOP_TASK)
+            if not ok:
+                log.error(f'종료 ② 정지 요청 거절 · 실패: {message}')
+        except Exception as step_error:            # noqa: BLE001 — 실패해도 목표 취소는 시도한다
+            log.error(f'종료 ② 정지 요청 예외: {step_error!r}')
+        try:
+            node.cancel_active()                   # ③ 진행 중인 집기 · 놓기 목표 취소
+        except Exception as step_error:            # noqa: BLE001
+            log.error(f'종료 ③ 목표 취소 실패: {step_error!r}')
+        raise
     finally:
         node.manager.finalize(LOG_FLUSH_S)
         node.w144_finish(False)                    # 조립 기록이 꺼져 있어도 W144 녹화는 닫는다(이미 닫혔으면 아무것도 안 함)

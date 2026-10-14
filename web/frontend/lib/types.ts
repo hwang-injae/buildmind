@@ -118,7 +118,7 @@ export interface ScanSaveJob {
   code?: string;
   message?: string;
   actions?: ('cancel' | 'rescan')[];
-  saved?: { design_id: string; version: string; parent_id: string | null };
+  saved?: { design_id: string; version: string; parent_id: string | null; ai_template?: string | null; ai_reason?: string | null };
 }
 
 /** 버튼 응답 — 다리가 넘긴 ROS 응답 칸 그대로(명령은 success · reason, 정지 · 다시 시작은 success · message) */
@@ -150,6 +150,7 @@ export interface Design {
   version: string;
   parent_id: string | null;
   made_by: string;
+  display_name?: string | null; // 사람이 붙인 표시 이름(W197 — 없으면 '벤치 V001'만)
   parts: { schema: string; parts: DesignPart[] };
   placements: { steps: { part_id: string; sequence: number }[] };
 }
@@ -161,6 +162,7 @@ export interface DesignSummary {
   version: string;
   parent_id: string | null;
   made_by: string;
+  display_name?: string | null;
   block_count: number;
   size_mm: [number, number, number];
 }
@@ -169,6 +171,7 @@ export interface DesignSummary {
 export interface Rules {
   block_size_mm: [number, number, number];
   assembly_area_half_mm: number;
+  store: 'json' | 'postgres'; // 웹이 쓰는 저장소(W088 — .env DATABASE_URL 로 고름)
 }
 
 /** AI 생성 — 후보 하나의 검사 결과(check_result/3.0 중 화면이 쓰는 칸, 레시피는 backend 에만) */

@@ -111,7 +111,7 @@ def test_음성_출발의_잘못된_응답이면_출발하지_않는다():
 def test_조회_실패나_시간_초과면_새_조립을_시작하지_않는다(why):
     m, io = make()
     io.lookup_script = [(False, why, None)]
-    assert m.command('select_design', 'bench') == (False, why) and m.state == 'IDLE'
+    assert m.command('select_design', 'bench') == (False, why if why == 'TIMEOUT' else '') and m.state == 'IDLE'   # E-111 A3: TIMEOUT · STOPPED · BUSY 밖은 빈 값
     io.lookup_script = [(False, why, None)]
     m.on_intent('start', 'bench')                                   # 설계를 포함한 음성 출발도 조회가 실패하면 시작하지 않는다
     assert m.state == 'IDLE' and m.run_id is None
@@ -121,7 +121,7 @@ def test_조회_실패나_시간_초과면_새_조립을_시작하지_않는다(
 def test_조회_함수가_예외를_내도_시작하지_않는다():
     m, io = make()
     io.lookup_script = [lambda *_: 1 / 0]
-    assert m.command('select_design', 'bench') == (False, 'ERROR') and m.state == 'IDLE'
+    assert m.command('select_design', 'bench') == (False, '') and m.state == 'IDLE'      # E-111 A3: 맞는 코드 없는 거절 = 빈 값
 
 
 def test_로컬_파일로_몰래_대신하지_않는다():

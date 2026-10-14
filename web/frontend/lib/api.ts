@@ -1,5 +1,6 @@
 // REST 한 곳(SDD 3.3 — 화면은 backend 의 REST · /ws 만 쓴다, E-41).
 // 운영: backend 가 이 화면을 같은 주소에서 내려 주므로 BASE 는 빈 글자. 개발(next dev :3000): NEXT_PUBLIC_BACKEND=http://localhost:8000
+import { NO_WEB } from '@/lib/names';
 import type { Cmd, CmdResult, Design, DesignSummary, GenJob, Rules, ScanMatch, ScanSaveJob } from './types';
 
 export const BASE = process.env.NEXT_PUBLIC_BACKEND ?? '';
@@ -16,7 +17,7 @@ export function setReqTimeout(s: number) {
 async function post(path: string, body?: unknown): Promise<CmdResult> {
   if (reqTimeoutS == null) {
     // 화면을 막 열어 아직 웹 서버와 한 번도 못 붙음 — 배너와 같은 안내(얼마나 기다릴지도 모르는 채 보내지 않는다)
-    return { success: false, reason: 'ERROR', message: '웹 서버와 아직 연결 전 — 잠시 뒤 다시. 급하면 정지는 로봇 PC 키 · 펜던트로' };
+    return { success: false, reason: 'ERROR', message: NO_WEB };
   }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), reqTimeoutS * 1000 + MARGIN_MS);
@@ -27,10 +28,10 @@ async function post(path: string, body?: unknown): Promise<CmdResult> {
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: ctrl.signal,
     });
-    if (!res.ok) return { success: false, reason: 'ERROR', message: `backend 응답 ${res.status}` };
+    if (!res.ok) return { success: false, reason: 'ERROR', message: `웹 서버가 오류로 답했어요(${res.status}) → backend 로그 → 웹 PC 에서 docker compose logs web` };
     return (await res.json()) as CmdResult;
   } catch {
-    return { success: false, reason: 'ERROR', message: 'backend 에 닿지 않음' };
+    return { success: false, reason: 'ERROR', message: NO_WEB };
   } finally {
     clearTimeout(timer);
   }
@@ -68,6 +69,9 @@ async function getJson<T>(path: string): Promise<T | null> {
 export const listDesigns = () => getJson<DesignSummary[]>('/api/designs');
 /** design/4.0 하나(3D 보기용). 없으면 null */
 export const getDesign = (id: string) => getJson<Design>('/api/designs/' + encodeURIComponent(id));
+/** 표시 이름 붙이기 · 지우기(빈 글자) — W197. design_id · 레시피는 그대로. 실패면 {error}(없는 설계 · 40자 넘음 등 — backend 글 그대로) */
+export const renameDesign = (id: string, name: string) =>
+  postJson<{ design_id: string; display_name: string | null }>('/api/designs/' + encodeURIComponent(id) + '/name', { name }, AI_TIMEOUT_MS, 'PUT');
 /** 설계 규칙 숫자 — 3D 블록 크기(robot.yaml block_size_m 한 곳, 10/9 PL E-78) */
 export const getRules = () => getJson<Rules>('/api/designs/rules');
 /** 스캔 '추천 설계' — 지금 스캔(run_id)과 저장된 설계 전부의 일치율 높은 순 3개. 옛 스캔 · 못 받음은 null */
@@ -84,13 +88,13 @@ export const scanPreviewUrl = (kind: 'capture' | 'live', seq: number) => `${BASE
 // ---------- AI 생성(W108 · W112) ----------
 const AI_TIMEOUT_MS = 15000; // 생성 시작 · 저장 요청 기본 기다림(생성 자체는 뒤에서 돌고 진행은 /ws 로 온다)
 
-/** POST 하고 JSON 을 받는다. 실패면 {error} — FastAPI 의 {detail} 글을 그대로(예: 409 '이미 설계를 만드는 중이에요') */
-async function postJson<T>(path: string, body: unknown, timeoutMs = AI_TIMEOUT_MS): Promise<{ data?: T; error?: string }> {
+/** POST(또는 method) 하고 JSON 을 받는다. 실패면 {error} — FastAPI 의 {detail} 글을 그대로(예: 409 '이미 설계를 만드는 중이에요') */
+async function postJson<T>(path: string, body: unknown, timeoutMs = AI_TIMEOUT_MS, method = 'POST'): Promise<{ data?: T; error?: string }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(BASE + path, {
-      method: 'POST',
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: ctrl.signal,
@@ -99,7 +103,7 @@ async function postJson<T>(path: string, body: unknown, timeoutMs = AI_TIMEOUT_M
     if (!res.ok) return { error: (json && typeof json.detail === 'string' ? json.detail : null) ?? `웹 서버 응답 ${res.status}` };
     return { data: json as T };
   } catch {
-    return { error: '웹 서버에 닿지 않거나 너무 오래 걸려요' };
+    return { error: NO_WEB };
   } finally {
     clearTimeout(timer);
   }

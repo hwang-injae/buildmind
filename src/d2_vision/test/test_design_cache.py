@@ -334,7 +334,7 @@ def generated_design(model_id, family, design_id, made_by):
     cfg = robot_cfg()
     block_mm = [v * 1000.0 for v in cfg['block_size_m']]
     base = rd.RecipeDocument.load(ROOT / 'src/recipe_manager/recipes', model_id)
-    blocks = copy.deepcopy(rb.RecipeToParts(model_id, family, block_mm).convert(base.recipe, base.placements))
+    blocks = copy.deepcopy(rb.RecipeToParts(model_id, block_mm).convert(base.recipe, base.placements))
     blocks['design_id'] = design_id
     out = b2r.PartsToRecipe(dc.DesignChecker(cfg).grasp_options, block_mm).convert(blocks)
     doc = rd.RecipeDocument(out['recipe'], out['placements']).design(design_id)
@@ -350,8 +350,8 @@ def base_tops(model_id):
 
 
 @pytest.mark.parametrize('model_id, family, design_id, made_by', [
-    ('001_CHAIR_BENCH_V000', 'chair', 'ai_chair_v1_1', 'ai'),
-    ('004_DESK_PEDESTAL_V000', 'desk', 'scan_desk_0001', 'scan'),
+    ('001_CHAIR_BENCH_V000', 'chair', '001_CHAIR_BENCH_V001', 'ai'),        # E-84 이름 — 같은 Template 의 다음 번호
+    ('004_DESK_PEDESTAL_V000', 'desk', '004_DESK_PEDESTAL_V002', 'scan'),
 ])
 def test_mock이_get_design의_AI_스캔_설계로_블록_이름과_윗면_높이를_낸다(tmp_path, model_id, family, design_id, made_by):
     """recipe_dir 에는 이 설계가 없다 — 오직 get_design(design/4.0) 으로만 알 수 있다. 블록 이름은 설계 이름 대문자 + 역할 · 부품 · 번호,

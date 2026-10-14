@@ -8,8 +8,7 @@
 // 실패면 backend 가 준 버튼만 남긴다(블록 수 초과 = [취소]만 · 그 밖 = [다시 스캔] · [취소] — 레시피 초안 7-1). [AI로 고치기]는 챌린지(10/14 뒤).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '@/lib/api';
-import { designName } from '@/lib/names';
-import { stateName } from '@/lib/names';
+import { NO_WEB, designName, stateName } from '@/lib/names';
 import type { Cmd, Rules, ScanPreview, ScanSaveJob } from '@/lib/types';
 import type { Robot } from '@/lib/ws';
 import CloudView from './CloudView';
@@ -102,7 +101,7 @@ export default function ScanReview({ robot, rules, dark, onSaved, onLog }: Props
     setError('');
     const r = await api.scanSave(scan.run_id);
     setBusy(false);
-    if (!r.data) return setError(r.error ?? '웹 서버 답이 없어요');
+    if (!r.data) return setError(r.error ?? NO_WEB);
     setJob({ job_id: r.data.job_id, state: 'running', run_id: scan.run_id });
     onLog('button', '스캔 저장 — AI가 역할 · 순서 · 잡기를 채우고 검사해요');
   };
@@ -117,7 +116,10 @@ export default function ScanReview({ robot, rules, dark, onSaved, onLog }: Props
   if (live) status = st?.message || stateName(st?.state);
   else if (job?.state === 'running')
     status = 'AI가 역할 · 순서 · 잡기를 채우고 검사하는 중…' + ((job.attempt ?? 1) > 1 ? ` (다시 채우기 ${job.attempt}/${MAX_TRIES})` : '');
-  else if (job?.state === 'saved') status = `${designName(job.saved?.design_id)}(으)로 저장했어요 — 구조물을 치우고 위 설계 3D 에서 [조립]`;
+  else if (job?.state === 'saved')
+    status = `${designName(job.saved?.design_id)}(으)로 저장했어요 — 구조물을 치우고 위 설계 3D 에서 [조립]`
+      // AI 가 부모(바탕 설계)를 고른 까닭 한 줄(10/14 PL · 민범진 — 전엔 생성 기록에만)
+      + (job.saved?.ai_reason ? ` · 바탕 ${designName(job.saved.parent_id)} — AI가 고른 까닭: ${job.saved.ai_reason}` : '');
   else if (job?.state === 'failed') status = job.message || '저장하지 못했어요';
   const failed = job?.state === 'failed';
   const can = (a: 'cancel' | 'rescan') => !failed || (job?.actions ?? ['rescan', 'cancel']).includes(a);

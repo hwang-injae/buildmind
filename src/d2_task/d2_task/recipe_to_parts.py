@@ -36,16 +36,16 @@ class RecipeToParts:
     두 값은 **허용 오차 없이 같아야** 길이_i 가 표 6개 중 정확히 하나와 맞아 방향이 정해진다(지금 둘 다 설계 기준값 75 · 25 · 15 mm — 젠가 하나로 고정).
     """
 
-    def __init__(self, design_id, family, block_mm):
-        """design_id · family 는 레시피에 없으므로 부르는 쪽이 정해서 넣는다(규칙을 새로 만들지 않는다).
+    def __init__(self, design_id, block_mm):
+        """RecipeToParts(design_id, block_mm) — design_id 는 레시피에 없으므로 부르는 쪽이 넣는다(10/14 PL: 옛 family 인자 없앰).
 
         block_mm: 블록 크기 [길이, 폭, 두께] mm — robot.yaml block_size_m × 1000. 방향 코드 표를 만드는 데 쓴다.
         레시피 stocks[].size_mm 와 허용 오차 없이 같아야 한다(다르면 convert 가 방향을 못 골라 ValueError).
+        실패: design_id 가 비었으면 ValueError, 인자 수가 틀리면 TypeError(파이썬 기본).
         """
-        if not design_id or not family:
-            raise ValueError('design_id 와 family 가 필요하다')
+        if not design_id:
+            raise ValueError('design_id 가 필요하다')
         self.design_id = design_id
-        self.family = family
         self.extent = ori_extents(block_mm)
 
     def convert(self, recipe, placements):

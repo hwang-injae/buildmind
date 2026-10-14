@@ -26,17 +26,18 @@ TABLE_THICK_M = 0.02
 PLACED_SHRINK_M = 0.0005     # 놓인 블록 상자를 면마다 줄인다 — 면끼리 맞닿은 블록(좌판 틈 0 mm)을 충돌로 보지 않게
 PLACED_RGBA, HELD_RGBA = (0.85, 0.65, 0.3, 1.0), (0.25, 0.5, 0.95, 1.0)
 PROGRESS_QOS = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL,
-                          history=HistoryPolicy.KEEP_LAST, depth=1)   # IRD 6장 progress/1 (10/4 확정)
+                          history=HistoryPolicy.KEEP_LAST, depth=1)   # IRD 6장 progress/2.0 (10/9 E-75)
 
 
 class SceneManagerNode(Node):
     """MoveIt2 장면을 고치는 유일한 노드. 다른 노드는 apply_planning_scene 을 부르지 않는다.
 
     받는 것: /d2/motion/scene/attach (SceneAttach — 잡은 뒤 붙이기 / 놓은 뒤 떼기 = 놓인 블록으로),
-             /d2/task/progress (JSON progress/1 — 놓인 블록 blk_<part_id> 를 관측 자세로 맞춤)
+             /d2/task/progress (JSON progress/2.0 — 놓인 블록 blk_<part_id> 를 관측 자세로 맞춤)
     부르는 것: MoveIt2 apply_planning_scene, get_planning_scene
     파라미터 recipe: 레시피 파일 경로 (여럿이면 쉼표로, 세트 배치) — 요청에 쥔 상자 · 놓은 자리가 없을 때(옛 방식)만 여기서 계산한다(E-76).
                     비우면 share/d2_bringup/recipes/ 의 레시피(*_recipe.json)를 하나씩(세트 배치 없이) 모두 읽는다 — run_recipe 가 번호로 고를 때.
+                    이때 못 읽는 파일은 그 파일만 빼고 경고한다(직접 지정한 recipe 를 못 읽으면 켜질 때 실패).
     """
 
     def __init__(self):
@@ -55,8 +56,15 @@ class SceneManagerNode(Node):
         else:
             # 설치된 레시피를 하나씩 읽는다: part_id 에 모델 이름이 붙어 있어(001_CHAIR_BENCH_V000_LEG_001_01) 한 사전에 넣어도 겹치지 않는다.
             # 레시피 하나를 쌓는 자리는 layout_designs 의 설계 1개 = 조립 원점 그대로라, run_recipe 에서 하나를 골라도 자리가 같다
+            # 못 읽는 파일 하나(다시 빌드 안 한 옛 형식 · 짝 해시 어긋남)로 노드가 죽으면 장면이 안 떠 블록마다 붙이기가 실패한다 →
+            # 그 파일만 빼고 경고(10/14 점검 ④1). 직접 지정한 recipe 는 사람이 고른 것이라 위에서 그대로 실패시킨다
             for path in recipe_files(os.path.join(share, 'recipes')):
-                self.parts.update({b['part_id']: b for design, _ in layout_designs(self.cfg, [load_recipe(path)]) for b in design})
+                try:
+                    parts = {b['part_id']: b for design, _ in layout_designs(self.cfg, [load_recipe(path)]) for b in design}
+                except (OSError, KeyError, TypeError, ValueError, IndexError) as e:
+                    self.get_logger().warn(f'레시피를 못 읽어 뺀다: {path} — {e} (다시 빌드: colcon build --packages-select d2_bringup)')
+                    continue
+                self.parts.update(parts)
                 self.get_logger().info(f'레시피: {path}')
             if not self.parts:
                 self.get_logger().warn('레시피가 없다 — 쥔 블록·놓은 블록을 장면에 넣지 못한다')

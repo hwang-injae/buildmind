@@ -17,7 +17,7 @@
 
 - **설계 상세는 `designs/[id]`가 아니라 `designs?id=…`:** Next.js 정적 내보내기(`output: 'export'`)는 동적 경로를 빌드 때 아는 ID만 만든다 — AI가 새로 만든 설계가 열리지 않는다(SDD 3.1.1 고칠 것, 8장).
 - 3D 블록 크기 = `robot.yaml` `block_size_m`(backend가 `GET /api/designs/rules`로 줌 — 10/9 PL 결정 ①). `parts/4.0`(저장 설계) · `blocks/2`(스캔 추론, 위치 · 방향 + `inferred`) 둘 다 같은 칸(`x` · `y` · `z` · `ori`)으로 같은 `Preview3D`가 그린다.
-- 진행도 색은 `progress/2.0.parts[].state`(`present` 초록 · `occluded` · `unknown` 주황 · 그 밖 = 아직, 흐린 회색) + 지금 블록(`state/2.part_id`) 노랑 — 조립 전에는 모든 블록이 `absent`라 빨강은 쓰지 않는다(경고로 읽혀서, 10/9). 블록 이름 ↔ 3D 블록은 `placements.steps[].sequence` = `blocks[].order`로 잇는다. 진행도 색은 `state/2.run_id`와 `progress.run_id`가 같을 때만. **판정은 하지 않는다**(dx · dy는 측정값만 — 지금은 NaN). % = `present` 수 / 설계 블록 수, `DONE`이면 100 %.
+- 진행도 색은 `progress/2.0.parts[].state`(`present` 초록 · `occluded` · `unknown` 주황 · 그 밖 = 아직, 흐린 회색) + 지금 블록(`state/2.part_id`) 노랑 — 안 놓인 블록은 `absent`(첫 관측 전엔 잠깐 `unknown` — 작업 판단 `TaskPlanner`, E-111 A5)라 빨강은 쓰지 않는다(경고로 읽혀서, 10/9). 블록 이름 ↔ 3D 블록은 `placements.steps[].sequence` = `parts[].sequence`로 잇는다. 진행도 색은 `state/2.run_id`와 `progress.run_id`가 같을 때만. **판정은 하지 않는다**(dx · dy는 측정값만 — 지금은 NaN). % = `present` 수 / 설계 블록 수, `DONE`이면 100 %.
 - 카메라 표시기는 넣지 않는다 — `camera_status`는 MQTT로 넘기지 않는다(IRD 10.1).
 
 ## 1-B. 실행 (compose 전 — 웹 PC 또는 개발 PC 호스트)
@@ -36,7 +36,7 @@ python3 web/backend/mock_robot.py --step 1.0
 cd web/frontend && NEXT_PUBLIC_BACKEND=http://localhost:8000 npm run dev
 ```
 
-브라우저: `http://<웹 PC IP>:8000`. 로봇 PC 에서는 `ros2 run d2_bridge bridge --ros-args -p mqtt_host:=<웹 PC IP>`(웹 없이 로봇만 시험할 땐 `mock_bridge`).
+브라우저: 웹 PC 에서 `http://127.0.0.1:8000`(화면은 웹 PC localhost 만 — #136, LAN 에 안 열림). 로봇 PC 에서는 `ros2 run d2_bridge bridge --ros-args -p mqtt_host:=<웹 PC IP>`(웹 없이 로봇만 시험할 땐 `mock_bridge`).
 
 ## 1-C. 설계 생성 AI 중계 `claude_bridge` (10/13 PL 승인 — GPT-4o → Claude)
 
@@ -60,7 +60,7 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 
 ## 2. 기능 ↔ 통신 대응표
 
-브라우저 → REST → backend → MQTT(`…/req`) → 다리 → ROS 서비스 → 답이 거꾸로. 상태는 MQTT retained → backend → `/ws`로 브라우저에 밀어 준다. REST는 SDD 3.1.1 `routes/` 세 파일로 나눈다(`robot.py` · `designs.py` · `ws.py`).
+브라우저 → REST → backend → MQTT(`…/req`) → 다리 → ROS 서비스 → 답이 거꾸로. 상태는 MQTT retained → backend → `/ws`로 브라우저에 밀어 준다. REST는 SDD 3.1.1 `routes/` 파일로 나눈다(`robot.py` · `designs.py` · `ws.py` · `voice.py`).
 
 | 화면 기능 | REST(backend) | MQTT(IRD 10.1) | ROS(IRD 4장) |
 |---|---|---|---|
@@ -120,24 +120,25 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 ```text
 ①  설계 목록에서 바탕 설계를 고름 → 글 창 [AI 생성]  또는  마이크 → 음성 request_design 문장 → 글 창에 넣고 바로 생성(10/13 PL)
 ②  바탕(10/13 PL): 고른 설계 = 새 설계의 parent_id, Template = 그 앞부분. 요청 글에 고른 설계의 블록 목록을 넣고,
-    같은 Template 의 다른 설계는 store.list_designs 요약 + 도구 get_design(최대 2번, 읽기는 골라서 — tool_choice auto)으로 참고만(E-72)
+    같은 Template 의 다른 설계는 store.list_designs 요약 + 도구 get_design(첫 차례 tool_choice required + 선택지 SKIP '안 읽음', 그다음 auto — 중계가 auto 면 도구를 버리고 바로 답해 읽기는 사실상 한 번, 10/14)으로 참고만(E-72)
     → 화면 "바탕 … · 참고한 설계 …". 도구 단계가 실패하면 examples_for(template)(바탕 설계는 뺌). 다른 설계가 없으면 도구 없이 바로
 ③  Claude 1번 호출 → 후보 3개(parts/4.0 — 부품마다 sequence · x · y · z · ori + role · group · stage · grasp, 구조화 출력 candidates[3])
-    프롬프트: 역할 · 옵션 목록(src/d2_task/d2_task/roles.json) · 잡기 규칙(SDD 6.6) · 설계 규칙 숫자(robot.yaml — 10/9 ①) · RAG 예시
+    프롬프트: 역할 · 옵션 목록(src/d2_task/d2_task/roles.json) · 잡기 규칙(SDD 6.6) · 설계 규칙 숫자(robot.yaml — 10/9 ①) · RAG 예시 · 요청 글에 [Template 규칙](그 V000 레시피 composition 의 count · revision 을 사람 말로 — 21번이 보는 것, 10/14 PL)
     칸이 빠지거나 틀리면 check_design이 CHECK_FAILED — 코드가 대신 채우지 않음(E-69 ②). OUT_OF_SCOPE → 안내, 끝
 ④  화면에 3개 3D + "디자인을 고르세요" — 동시에 check_design × 3(차례로, 각 3초 목표) → 오는 대로 합격 · min_margin / 불합격 회색 + detail
 ⑤  3개 다 불합격 → errors[].detail 피드백으로 ③부터(최대 2번) → 그래도 실패 GEN_FAILED(이유 + 기본 설계 권함)
+    생성 전체 상한 5분(GEN_LIMIT_S — 10/14 PL): 남은 시간 < 60초면 더 만들지 않음 · 호출 제한 = 남은 시간. 하나도 못 통과하면 떨어진 까닭(만들 수 없는 모양 등)을 보여 줌 — 더 만들기 호출이 시간 초과여도 그것으로 덮지 않음
 ⑥  사람이 1개 고름 → "설계도 만드는 중" → 그 후보의 check_result/3.0(recipe · placements)로 save_design
     (아직 검사 중이면 기다림) → 고른 1개만 designs(안 고른 후보는 메모리에서 버림 — E-84 ⑥, rejected 기록 없음) → "저장됨 — 위 설계 3D 에서 [조립]"
 ⑦  설계 3D 의 [조립] → hmi/command select_design → 작업 관리자가 get_design → READY → 이어서 hmi/command start(한 번 누름 — 10/13 PL)
 ```
 
-- 시간: LLM(Claude, 10/13 — 고르기 · 읽기 각 3초쯤 + 후보 작성 1 ~ 2분 반, 호출당 제한 260초 — 중계는 240초에 먼저 끊음) + 검사 3번(≈ 10초). 후보는 backend 메모리(`job_id`)에만 — 새로고침하면 사라져도 된다(저장 전).
+- 시간(생성 전체 상한 5분 — 10/14): LLM(Claude, 10/13 — 고르기 · 읽기 각 3초쯤 + 후보 작성 1 ~ 2분 반, 호출당 제한 260초 — 중계는 240초에 먼저 끊음) + 검사 3번(≈ 10초). 후보는 backend 메모리(`job_id`)에만 — 새로고침하면 사라져도 된다(저장 전).
 - `design_id` = `<Template ID>_V<3자리>`(10/10 E-84 · IRD 2장): Template = 기본 설계 4개 이름(`001_CHAIR_BENCH` …), 기본 = `_V000`, AI · 음성 · 스캔 = 같은 Template의 다음 번호(그 Template의 가장 큰 V + 1 — 부모와 상관없이 만든 차례). 부모 · 만든 방법은 `parent_id` · `made_by`에만, `version` = V 번호(`V001`). 저장 설계는 바뀌지 않는다(E-55 — 고치면 다음 번호). `gen_path` 칸 없음(E-71).
 - **ID는 검사 전에 정한다**(10/10, W111): 변환기 ①이 그 ID로 레시피 `design_id` · `part_id`를 만들기 때문. ③ 전에 `store.new_design_id(template, parent_id)`(AI = 고른 설계의 Template, 스캔 = 부모의 Template) → 후보 3개를 같은 ID로 `check_design` → 고른 1개만 `save_design`. 저장 때 다른 요청이 먼저 같은 ID를 쓰면 거절 → ID부터 다시 · 검사도 다시.
 - **연짝 잡기 = FLAT_LONG**(E-104, 10/13 PL — 설계 자체를 고침): `check_design`에 보내기 직전 `design_gen._check`가 연짝(같은 층에 긴 면을 맞댄 눕힌 블록 — `d2_task.row_grasp.row_orders`)을 찾아, 놓는 순간 손가락이 들어가는 블록(검사 묶음 `grasp_options`)만 `grasp`를 FLAT_LONG으로 바꾼다(생성 · 스캔 [저장] 둘 다). 검사 · 변환기 ①이 바뀐 잡기로 보고 placements `grasp_axis`도 LENGTH로 나온다. 안 되는 블록은 그대로(생성 기록 `row_grasp.kept`), AI가 처음 쓴 답은 생성 기록 원문에 그대로.
 - **참고 설계는 그 Template 안에서만**(E-84 ③): GPT 목록 요약 · 도구 `get_design` 허용 목록 = `store.list_designs(template=…)`, 자동 전환 = `store.examples_for(template)`(그 V000 + 최근 파생 3). 다른 Template 설계를 읽고 만든 후보는 저장에서 거절되기 때문.
-- `save_design`이 거절하는 것(저장하지 않음, 마지막 방어선): 검사 불합격(SR-09) · `made_by`가 web · voice · scan 아님 · ID가 E-84 꼴이 아님 · V000(기본 설계 몫) · 모르는 Template · 레시피 짝(`model_id` · `recipe_sha256` — 로봇 작업 판단과 같은 `RecipeDocument` 확인) · 부모 없음 · 부모가 다른 Template. 저장 칸 = `design/4.0` + `prompt` · `check`(ok · min_margin_mm · errors) · `created`(FR-D02).
+- `save_design`이 거절하는 것(저장하지 않음, 마지막 방어선): 검사 불합격(SR-09) · `made_by`가 web · voice · scan 아님 · ID가 E-84 꼴이 아님 · V000(기본 설계 몫) · 모르는 Template · 레시피 짝(`design_id` · `recipe_sha256` — 로봇 작업 판단과 같은 `RecipeDocument` 확인) · 부모 없음 · 부모가 다른 Template. 저장 칸 = `design/4.0` + `prompt` · `check`(ok · min_margin_mm · errors) · `created`(FR-D02).
 - 검사 요청 · 응답은 IRD 그대로(`parts/4.0`만 → `check_result/3.0`). **형식 버전 규칙(IRD 6장):** 앞자리 같으면 받고 모르는 칸 무시, 다르면 거절(이유에 받은 schema). 형식 이름 상수는 `design_store.py` 한 곳. 옛 `cad_structure/1.0` · `cad_recipe/1.0` · `blocks/2` 설계는 거절(변환 안 함, E-69 ⑧).
 
 ### 4-B. 스캔 → [AI로 고치기] (W125 챌린지, 10/9 PL ③ — **10/10 PL: 10/14 이후로 보류, 지금 만들지 않음**)
@@ -147,9 +148,9 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 ### 4-C. 스캔 → [그대로 저장] (IRD 8.4 ⑦, 10/9 PL ②)
 
 ```text
-scan_result/1.x 의 blocks/2(위치 · 방향 + inferred, family = 추론기 값) + nearest_base(추론기가 고른 기본 설계, 선택 칸 — 8장)
+scan_result/2.0 의 blocks/2(위치 · 방향 + inferred, 임시 이름 scan_<family>_NN · family = 가장 가까운 기본 설계 것(모르면 unknown) — 저장 때 버림) + nearest_base(추론기가 고른 기본 설계, 선택 칸 — 8장)
 → design_gen이 Claude 1번 호출: 4-A ②와 같은 RAG(DB 목록 요약 + 도구 get_design) → 가장 비슷한 설계를 골라 읽음
-   → 그 설계를 참고해 role · group · order · stage · grasp만 채움(inferred는 '추측' 힌트). 블록 위치 · 방향은 바꾸지 않는다(복제가 목적)
+   → 그 설계를 참고해 role · group · sequence · stage · grasp만 채움(inferred는 '추측' 힌트). 블록 위치 · 방향은 바꾸지 않는다(복제가 목적)
    → 고른 설계 = parent_id, family = GPT 판단
 → 코드 규칙: 부모는 같은 family만 — 다르거나 도구 실패면 nearest_base(추론기 값)를 부모로, family도 그것을 따름
    (nearest_base 는 선택 칸 — 없으면 같은 family 기본 설계 중 블록 수가 가장 가까운 것)
@@ -168,19 +169,20 @@ web/backend/
 │   ├── robot.py      /api/robot(W126 ✅) command · stop · resume · state → MqttClient. 로봇 PC 끊김이면 start · scan 은 안 보냄
 │   │                 (스캔 사진 · 점군 · 손목 영상은 W127 나머지 뒤)
 │   ├── designs.py    /api/designs 목록 · 상세 · 규칙 숫자(W111 최소형 ✅) · 생성 · 고르기 · 스캔 저장(W108 · W112 · W116) → DesignGenerator · DesignStore
-│   └── ws.py         /ws(W126 ✅) {"type", "data"} 한 겹 — 붙으면 들고 있는 값 먼저, 그 뒤 바뀔 때마다(밀리면 오래된 것부터 버림)
+│   ├── ws.py         /ws(W126 ✅) {"type", "data"} 한 겹 — 붙으면 들고 있는 값 먼저, 그 뒤 바뀔 때마다(밀리면 오래된 것부터 버림)
+│   └── voice.py      /api/voice — 화면 마이크 → d2/hmi/voice/listen → 호스트 voice(Whisper → 의도 → MQTT d2/hmi/intent). 음성은 HMI 밖(10/13 PL)
 ├── mqtt_client.py    MqttClient(W126 ✅) — 브로커와 통신 한 곳: req/res(req_id · req_timeout_s, 자동 재전송 없음) · 상태 마지막 값 ·
 │                     d2/web/alive 1초(LWT false) · 다리 연결 신호 3초 끊김 · serve()로 등록한 함수가 get_design · save_build 답함
 │                     (토픽 이름 · req/res 짝은 d2_bridge/bridge_codec.py 를 같이 씀)
 ├── design_gen.py     DesignGenerator — LLM(Claude) 호출 한 곳(4-A · 4-C) — 주소는 중계 D2_LLM_URL
-├── design_store.py   DesignStore — 저장 한 곳(JSON 폴더 → PostgreSQL) + 형식 이름 상수 · 기본 설계 등록(d2_task 변환기 ② import, E-59)
+├── design_store.py   DesignStore(JSON 폴더) · PgDesignStore(PostgreSQL — .env DATABASE_URL 이 있을 때, W088) — 저장 · DB 접근 한 곳 + 형식 이름 상수 · 기본 설계 등록(d2_task 변환기 ② import, E-59)
 │                     W111 ✅(10/9 · 10/10): register_bases · list_designs(+ last_build) · children · get_design · builds_for · examples_for ·
 │                     new_design_id · save_design(E-84 이름) · save_build(같은 run_id 한 번) + 로봇 get_design · save_build 답.
 │                     기본 설계는 도면에서 온 것이라 등록 때 check_design 을 부르지 않는다(로봇 PC 없이도 목록이 떠야 함)
-├── prompts/          design_system.txt(설계 직접 작성 + 역할 목록 + 잡기 규칙 · 스캔 채우기 절) · blocks_schema.json(parts/4.0 후보 3개)
+├── prompts/          design_system.txt(설계 직접 작성 + 역할 목록 + 잡기 규칙 · 스캔 채우기 절). 후보 3개 JSON Schema 는 design_gen._candidates_format(코드)
 ├── voice.py          VoiceListener — 호스트(마이크 버튼 → 시동어 → STT → d2/hmi/intent · '멈춰'면 d2/safety/stop/req, 점검 --check)
 ├── mock_robot.py     가짜 로봇 PC(W126 ✅, MQTT 만): 다리 연결 신호 · 처음 상태 · 가짜 조립(블록마다 progress) · 정지 · 스캔(→ SCAN_REVIEW +
-│                     scan_result, 추정 2개) · check_design 늘 합격(벤치). 실행 python3 web/backend/mock_robot.py --step 1.0
+│                     scan_result, 추정 2개) · check_design = 진짜 검사 묶음(DesignChecker + 변환기 ①). 실행 python3 web/backend/mock_robot.py --step 1.0
 ├── requirements.txt  fastapi · uvicorn[standard] · paho-mqtt · pyyaml (W108 openai · W088 psycopg 더함)
 └── data/             designs/ · builds/ · scan/<run_id>/ (gitignore)
 ```
@@ -227,6 +229,14 @@ sudo bash tools/mqtt_access.sh apply 172.24.0.137 172.24.2.213
 sudo bash tools/mqtt_access.sh check 172.24.0.137 172.24.2.213
 D2_WEB_IPV4=172.24.2.213 WEB_UID=$(id -u) WEB_GID=$(id -g) docker compose -f web/compose.yaml up -d
 ```
+
+**DB(W088 — PostgreSQL `db` 컨테이너) 켜기 · 끄기.** 저장소 함수 이름 · 반환 모양은 JSON 폴더와 같다(`design_store.PgDesignStore`, 표 = `web/db/init/001_schema.sql` — 정본 PM 설계_DB 부록 A + 형식 4.0 + `gen_logs.extra`).
+- 켜기: `web/.env`에 `COMPOSE_PROFILES=db` · `POSTGRES_PASSWORD=<비밀번호>` · `DATABASE_URL=postgresql://d2:<비밀번호>@db:5432/d2` → 위 `docker compose … up -d --build`(이미지에 psycopg — 처음 한 번 `--build`). 첫 시작 때 빈 `web/db/data/`에 표를 만들고, web 이 기본 설계 4개를 다시 등록한다. web 은 DB 를 최대 30초 기다린다(`DB_TRIES`).
+- **표시 이름(W197, 10/14 PL):** 설계 기록 칸 `display_name`(DB 칸 같은 이름, 40자 이하 · 한 줄) — `PUT /api/designs/{id}/name {name}`(빈 글자 · null = 지움). 화면 이름은 `names.ts designName()` 한 곳에서 '이름 · 벤치 V001'(없으면 '벤치 V001'), 설계 3D 제목 옆 [이름 고치기]. design_id · 레시피 · part_id 는 그대로, 기본 설계를 다시 등록해도 이름은 남음(저장한 설계에서 고칠 수 있는 칸은 이것뿐 — E-55 예외, 결정 기록은 PM). 바꿀 때마다(지움 포함) 생성 기록 gen_logs 에 kind `rename` 한 줄(design_id · 바꾼 때 · 이전 · 새 이름 — DB 는 extra 칸, model · prompt_sha = '-')
+- 어느 저장소인지는 화면 위 연결 표시 줄 '저장소: DB(PostgreSQL) / JSON 폴더'(`GET /api/designs/rules` 의 `store`, 10/14 PL)와 backend 로그 '[웹] 저장소 = …'. `DATABASE_URL` 이 있는데 DB 에 못 붙으면 JSON 으로 자동으로 돌아가지 않고 web 이 서서 다시 켜진다(기록이 두 곳으로 갈라지지 않게).
+- 끄기(JSON 폴더로 되돌리기 — 시연 중 DB 가 말썽일 때): `DATABASE_URL=` 비우고 `docker compose … up -d web`. DB 데이터(`web/db/data/` — gitignore, 웹 PC 로컬 폴더)는 그대로 남는다. JSON 폴더와 DB 사이에 설계를 옮기지 않는다(옛 3.0 설계는 E-111 로 버림).
+- `recipe` 칸만 `json` 형(넣은 글자 그대로 — `-0.0` 이 남아 `recipe_sha256` 이 맞음, 설계_DB 8절 A). DB 끊김 = `OSError`(save_build 일시 실패 → 로봇이 다시 보냄), 키 겹침 · 제약 · 외래 키 = `ValueError`(409 · save_build 영구 거절).
+- 시험: `D2_TEST_DATABASE_URL=<빈 시험 DB> python3 -m pytest tests/test_design_store_pg.py`(표를 비운다 — 시연 DB 에 쓰지 않는다). 없으면 건너뜀(CI).
 
 위 규칙은 ORIGINAL 요청 방향만 검사한다. 응답도 원본 목적지와 일치하므로 방향을 제한하지 않으면 허용 로봇의 SYN-ACK까지 거부된다. 첫 번째 로봇 허용, 두 번째 다른 출발지 거부와 방향 설정을 검사한다. 방화벽 검사 실패 시 브로커를 공개하지 않는다. 장치/토픽 확인과 로봇 이동을 같은 시험으로 집계하지 않는다.
 

@@ -22,7 +22,7 @@ for p in (ROOT / 'web' / 'backend', ROOT / 'src' / 'd2_task', ROOT / 'src' / 'd2
 from d2_task.parts_to_recipe import PartsToRecipe  # noqa: E402
 from d2_task.design_checker import DesignChecker  # noqa: E402
 import design_gen  # noqa: E402
-from design_gen import MAX_REGEN, MODEL, DesignGenerator, GenError, scan_actions  # noqa: E402
+from design_gen import MAX_REGEN, MODEL, SKIP_READ, DesignGenerator, GenError, scan_actions  # noqa: E402
 from design_store import DesignStore, split_design_id  # noqa: E402
 
 RECIPES = ROOT / 'src' / 'd2_robot' / 'd2_bringup' / 'recipes'
@@ -45,6 +45,9 @@ class FakeOpenAI:
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
+        # 중계(claude_bridge)처럼: 도구 호출은 tool_choice 'required' 일 때만 온다('auto' · 'none' 이면 도구를 버리고 답 — 10/14 PM 점검,
+        # 옛 가짜는 auto 에도 도구를 돌려줘 '한 번도 안 읽음'을 못 잡았다)
+        assert not getattr(reply, 'tool_calls', None) or kw.get('tool_choice') == 'required', f"도구 호출은 required 일 때만: {kw.get('tool_choice')}"
         return SimpleNamespace(choices=[SimpleNamespace(message=reply)], usage=SimpleNamespace(total_tokens=100))
 
 
@@ -129,9 +132,10 @@ def test_generate_reads_reference_checks_and_saves_chosen(store, good, bad):
     assert events == ['reading', 'candidates', 'checked', 'checked', 'checked', 'retry', 'candidates', 'checked']
     assert '후보 2개는 통과해 남겨 둔다' in client.calls[2]['messages'][-1]['content'] and '새 후보 1개만' in client.calls[2]['messages'][-1]['content']
     first, second, _ = client.calls
-    assert first['model'] == MODEL and first['temperature'] == 0 and first['tool_choice'] == 'auto'   # 바탕은 줬으니 참고는 골라서
+    assert first['model'] == MODEL and first['temperature'] == 0 and first['tool_choice'] == 'required'   # 첫 차례는 required(중계가 auto 면 안 읽음)
+    assert second['tool_choice'] == 'auto'                                           # 읽은 뒤는 auto — 중계가 바로 답(한 번만 읽음)
     assert first['parallel_tool_calls'] is False and first['response_format']['json_schema']['strict'] is True
-    assert first['tools'][0]['function']['parameters']['properties']['design_id']['enum'] == [v1]   # 같은 Template 의 다른 설계만
+    assert first['tools'][0]['function']['parameters']['properties']['design_id']['enum'] == [v1, SKIP_READ]   # 같은 Template 의 다른 설계 + 안 읽음
     request = first['messages'][1]['content']
     assert '[바탕 설계 — 사용자가 고름]\n- 001_CHAIR_BENCH_V000 |' in request and json.dumps(good, ensure_ascii=False, separators=(',', ':')) in request
     assert f'- {v1} |' in request.split('[DB 목록')[1]
@@ -158,7 +162,7 @@ def test_parent_is_chosen_design_not_what_gpt_read(store, good):
     gen, client = make(store, [tool_call(BENCH), answer([good] * 3)])
     r = gen.generate('좌판을 넓혀 줘', v1)
     assert (r['parent_id'], r['reference'], r['design_id'], r['template']) == (v1, [BENCH], '001_CHAIR_BENCH_V002', TEMPLATE)
-    assert client.calls[0]['tools'][0]['function']['parameters']['properties']['design_id']['enum'] == [BENCH]
+    assert client.calls[0]['tools'][0]['function']['parameters']['properties']['design_id']['enum'] == [BENCH, SKIP_READ]
     assert gen.save(r, 1)['parent_id'] == v1
     back = store.get_design('002_CHAIR_BACK_V000')['parts']['parts']
     gen, client = make(store, [answer([back] * 3)])
@@ -231,18 +235,20 @@ def test_out_of_scope(store):
     assert [r['design_id'] for r in store.list_designs(template=TEMPLATE)] == [BENCH]
 
 
-def test_tool_answers_only_template_designs_and_stops_after_two(store, good):
-    """목록 밖 설계(다른 Template · 바탕 설계 자신)를 부르면 이유만 돌려주고(읽지 않음), 2번 읽으면 그다음은 도구를 못 부르게(none)."""
+def test_tool_answers_only_template_designs_then_answers(store, good):
+    """목록 밖 설계(다른 Template · 바탕 설계 자신)를 부르면 이유만 돌려주고(읽지 않음), 첫 차례 뒤는 auto(중계가 바로 답 — 읽기 한 번에
+    Claude 를 한 번 더 부르므로 더 안 물음, 10/14 민범진), SKIP 을 고르면 안 읽고 답 차례(none)."""
     v1 = derive(store)
-    gen, client = make(store, [tool_call('002_CHAIR_BACK_V000'), tool_call(v1, 'c2'), tool_call(v1, 'c3'), answer([good] * 3)])
-    r = gen.generate('벤치', BENCH)                            # 3라운드 내내 도구만 부름 → 예시를 코드가 넣는 길로(E-72)
-    assert r['reference'] == [] and r['parent_id'] == BENCH and 'tools' not in client.calls[-1]
-    gen, client = make(store, [tool_call(v1), tool_call(v1, 'c2'), answer([good] * 3)])
+    for wrong in ('002_CHAIR_BACK_V000', BENCH):
+        gen, client = make(store, [tool_call(wrong), answer([good] * 3)])
+        r = gen.generate('벤치', BENCH)
+        assert 'error' in client.calls[1]['messages'][-1]['content'] and r['reference'] == [] and r['parent_id'] == BENCH
+    gen, client = make(store, [tool_call(v1), answer([good] * 3)])
     r = gen.generate('벤치', BENCH)
-    assert [c['tool_choice'] for c in client.calls] == ['auto', 'auto', 'none'] and r['reference'] == [v1, v1]
-    gen, client = make(store, [tool_call(BENCH), tool_call(v1, 'c2'), answer([good] * 3)])
+    assert [c['tool_choice'] for c in client.calls] == ['required', 'auto'] and r['reference'] == [v1]
+    gen, client = make(store, [tool_call(SKIP_READ), answer([good] * 3)])
     r = gen.generate('벤치', BENCH)
-    assert 'error' in client.calls[1]['messages'][-1]['content'] and r['reference'] == [v1] and r['parent_id'] == BENCH
+    assert [c['tool_choice'] for c in client.calls] == ['required', 'none'] and r['reference'] == [] and r['parent_id'] == BENCH
 
 
 def test_falls_back_to_examples_when_tool_phase_fails(store, good):
@@ -309,17 +315,26 @@ def test_bridge_down_is_gen_failed(store, monkeypatch):
 
 
 def test_bridge_down_and_usage_limit_messages(store):
-    """중계(claude_bridge)가 꺼져 있거나 Claude 사용 한도면 '잠시 뒤 다시' 대신 그 이유를 알린다(기다려도 안 풀려서)."""
+    """중계(claude_bridge)가 꺼져 있거나 Claude 사용 한도(중계 429)면 '잠시 뒤 다시' 대신 그 이유를 알린다(기다려도 안 풀려서).
+    한도는 상태 코드 429 로만 가른다 — 502 글에 'limit' 이 있어도 한도가 아니다(10/14 PM 점검 · E-99 덧붙임, 중계가 한도 글만 429)."""
     class APIConnectionError(Exception):   # openai 의 같은 이름 예외 흉내 — 이름으로 가른다
         pass
-    gen, _ = make(store, [APIConnectionError('Connection error.'),
-                          RuntimeError("Error code: 502 - {'error': {'message': \"claude 실패: You've hit your usage limit\"}}")])
+
+    class APIStatusError(Exception):
+        def __init__(self, status, message):
+            super().__init__(f'Error code: {status} - {message}')
+            self.status_code, self.body = status, {'message': message}
+    gen, _ = make(store, [APIConnectionError('Connection error.'), APIStatusError(429, "claude 실패: You've hit your usage limit"),
+                          APIStatusError(502, 'claude 실패: context length limit')])
     with pytest.raises(GenError) as e:
         gen.generate('벤치', BENCH)
     assert e.value.code == 'GEN_FAILED' and 'claude_bridge' in e.value.message
     with pytest.raises(GenError) as e:
         gen.generate('벤치', BENCH)
-    assert e.value.code == 'GEN_FAILED' and '사용 한도' in e.value.message
+    assert e.value.code == 'GEN_FAILED' and '사용 한도' in e.value.message and e.value.final
+    with pytest.raises(GenError) as e:
+        gen.generate('벤치', BENCH)
+    assert '사용 한도' not in e.value.message and 'context length limit' in e.value.message
 
 
 
@@ -463,7 +478,7 @@ def test_save_scan_stops_at_position_and_scope(store, good, bad):
 
 def test_four_bases_pass_real_check_with_their_base_recipe(store):
     """W163 완료 기준(기본 4개 통과): 기본 설계 4개를 새 ID 로 검사 요청하면 각자 V000 레시피(base_recipe)로 진짜 검사 묶음(21번 포함)을 통과한다.
-    다른 Template 의 base_recipe 를 실으면 REQUEST_INVALID(웹 쪽 잘못 — 21번이 model_id 로 대조)."""
+    다른 Template 의 base_recipe 를 실으면 REQUEST_INVALID(웹 쪽 잘못 — 21번이 레시피 design_id 로 대조)."""
     gen, _ = make(store, [])
     for t in ('001_CHAIR_BENCH', '002_CHAIR_BACK', '003_DESK_STAND', '004_DESK_PEDESTAL'):
         design_id, _ = store.new_design_id(t, f'{t}_V000')
@@ -476,7 +491,7 @@ def test_four_bases_pass_real_check_with_their_base_recipe(store):
 
 # ---------- 스캔 [저장] 채우기(W177 · IRD 8.4 ⑦ · E-79) ----------
 def scan_answer(parts, parent, reason='블록 수 · 다리 벽이 같다', drop=0):
-    """GPT 의 스캔 채우기 답(W177 진짜 scan_fill 시험용) — scan_num 마다 채울 칸만(scan_of 의 번호 규칙: 거꾸로 = n − order + 1).
+    """GPT 의 스캔 채우기 답(W177 진짜 scan_fill 시험용) — scan_num 마다 채울 칸만(scan_of 의 번호 규칙: 거꾸로 = n − sequence + 1).
     drop 개만큼 뒤에서 뺀다(모양 틀린 답)."""
     n = len(parts)
     rows = [{'scan_num': n - p['sequence'] + 1, **{k: p[k] for k in ('sequence', 'role', 'group', 'stage', 'grasp')}} for p in parts]
@@ -601,4 +616,65 @@ def test_relay_reason_is_shown(store):
     gen, _ = make(store, [RelayError(502, 'claude 가 정해진 형식으로 답하지 않았다: 블록 3개')])
     with pytest.raises(GenError) as e:
         gen.generate('벤치', BENCH)
-    assert e.value.message == '설계 AI 실패 — claude 가 정해진 형식으로 답하지 않았다: 블록 3개' and not e.value.final
+    assert e.value.message.startswith('설계 AI 실패(claude 가 정해진 형식으로 답하지 않았다: 블록 3개) →') and not e.value.final   # 거절 글 형식(10/14 PL)
+
+
+def test_where_reads_only_part_numbers(good):
+    """피드백 위치 설명은 'N번'(부품 sequence)만 — 'N번째 항목'(목록 차례) · '21번 형태 · 범위'(Template 검사) 줄은 위치를 안 붙인다(10/14 PM 점검)."""
+    by_seq = {p['sequence']: p for p in good}
+    from d2_task.recipe_to_parts import ori_extents
+    extent = ori_extents([75, 25, 15])
+    assert DesignGenerator._where('5번 공중', by_seq, extent).startswith(' [5번 (')
+    assert DesignGenerator._where('형식: 2번째 항목에 grasp 없음', by_seq, extent) == ''
+    assert DesignGenerator._where('21번 범위: LEG 가운데 기준 좌우 대칭이 아니다 — 3번 부품의 맞은편 자리에 같은 부품이 없다', by_seq, extent) == ''
+
+
+def test_request_carries_template_rules(store, good):
+    """요청 글에 [Template 규칙](21번이 보는 V000 composition — 사람 말)이 들어간다(10/14 PL W108: 규칙을 모르고 떨어진 뒤에야 배워 10분 넘게 돌았다)."""
+    gen, client = make(store, [answer([good] * 3)])
+    gen.generate('벤치', BENCH)
+    request = client.calls[0]['messages'][1]['content']
+    assert '[Template 규칙' in request and '- 다리(LEG): 묶음 2개 · 놓기 = 눕혀 위로 쌓기' in request
+    assert '깊이(앞뒤) = SEAT.depth' in request and '- 좌판(SEAT): 묶음 1개' in request and '좌우 대칭' in request
+    assert '7. 사용자 메시지의 [Template 규칙]' in client.calls[0]['messages'][0]['content']
+
+
+class SlowOpenAI(FakeOpenAI):
+    """부를 때마다 가짜 시계를 step 초 앞으로(LLM 한 번이 그만큼 걸림) — 생성 상한 시험용."""
+
+    def __init__(self, replies, now, step):
+        super().__init__(replies)
+        self.now, self.step = now, step
+
+    def create(self, **kw):
+        self.now[0] += self.step
+        return super().create(**kw)
+
+
+def shape_bad(good):
+    """21번 형태에서 떨어지는 후보 — 다리 블록 하나를 다른 묶음(group 3)으로: 다리 묶음 3개 ≠ Template 2개."""
+    b = copy.deepcopy(good)
+    next(p for p in b if p['role'].startswith('LEG'))['group'] = 3
+    return b
+
+
+def test_generation_stops_at_five_minutes_and_shows_why(store, good):
+    """생성 전체 5분(GEN_LIMIT_S, 10/14 PL): 첫 후보에 250초 쓰면 남은 50초로는 더 만들지 않고, 떨어진 까닭(만들 수 없는 모양)에 상한 안내를 붙인다.
+    호출마다 시간 제한 = 남은 시간(상한 260초보다 작으면)."""
+    now = [0.0]
+    client = SlowOpenAI([answer([shape_bad(good)] * 3), answer([good] * 3)], now, 250)
+    gen = DesignGenerator(store, real_check(), RULES, client=client, clock=lambda: now[0])
+    with pytest.raises(GenError) as e:
+        gen.generate('다리를 하나 더', BENCH)
+    assert len(client.calls) == 1 and client.calls[0]['timeout'] == design_gen.CALL_TIMEOUT_S
+    assert e.value.code == 'TEMPLATE_SHAPE' and '5분' in e.value.message
+
+
+def test_regen_timeout_does_not_hide_why_candidates_failed(store, good):
+    """더 만들기 호출이 시간 초과여도 화면에는 앞 후보가 떨어진 까닭(만들 수 없는 모양)을 — '시간 안에 답하지 않았어요'로 덮지 않는다(10/14 W108)."""
+    class APITimeoutError(Exception):
+        pass
+    gen, client = make(store, [answer([shape_bad(good)] * 3), APITimeoutError('timed out')])
+    with pytest.raises(GenError) as e:
+        gen.generate('다리를 하나 더', BENCH)
+    assert e.value.code == 'TEMPLATE_SHAPE' and '더 만들기 실패' in e.value.message and len(client.calls) == 2

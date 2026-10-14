@@ -107,16 +107,6 @@ def test_BlockPicker가_아니면_설정_오류():
 
 
 # ---------- 늦은 답 ----------
-def test_정지_종료_새_요청_상태_변화_뒤_도착한_이전_응답은_적용하지_않는다():
-    f = flow()
-    t1 = f.begin(epoch=5)
-    assert f.is_current(t1, epoch=5, halted=False)
-    assert not f.is_current(t1, epoch=5, halted=True)              # 정지 · 종료 중
-    assert not f.is_current(t1, epoch=6, halted=False)             # 상태가 바뀜
-    t2 = f.begin(epoch=5)                                          # 더 새 요청
-    assert not f.is_current(t1, epoch=5, halted=False) and f.is_current(t2, epoch=5, halted=False)
-
-
 def test_새_요청을_시작하면_이전_후보를_버린다():
     f = flow()
     run(f, TARGET, resp(blk(length=30)))

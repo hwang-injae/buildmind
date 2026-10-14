@@ -10,13 +10,28 @@ export function setTemplateNames(list: { id: string; name: string }[]) {
 
 const DESIGN_RE = /^(\d{3}(?:_[A-Z]+)+)_V(\d{3})$/; // <Template ID>_V<3자리>(E-84)
 
-/** '001_CHAIR_BENCH_V001' → '벤치 V001', V000 → '벤치 (기본)'. 꼴이 다르면 받은 그대로 */
+let displayNames: Record<string, string> = {}; // 사람이 붙인 표시 이름(W197) — 설계 ID → 이름
+
+/** backend 설계 목록의 표시 이름을 기억한다(page 가 처음 붙을 때 · 목록을 받을 때마다) */
+export function setDisplayNames(list: { design_id: string; display_name?: string | null }[]) {
+  displayNames = Object.fromEntries(list.filter((d) => d.display_name).map((d) => [d.design_id, d.display_name as string]));
+}
+
+/** 이름 고치기 뒤 한 설계만 바꾼다(null = 지움) */
+export function setDisplayName(id: string, name: string | null) {
+  if (name) displayNames[id] = name;
+  else delete displayNames[id];
+}
+
+/** '001_CHAIR_BENCH_V001' → '벤치 V001', V000 → '벤치 (기본)', 표시 이름이 있으면 '젠가 탑 4층 · 벤치 V001'(10/14 PL '나' — 원래 판도 같이).
+ *  목록 · 3D 제목 · 로봇 패널 · 진행 줄 · 생성 · 스캔 글이 모두 이 한 곳을 쓴다. 꼴이 다르면 받은 그대로 */
 export function designName(id?: string | null): string {
   if (!id) return '';
   const m = DESIGN_RE.exec(id);
   if (!m) return id;
   const name = templateNames[m[1]] ?? m[1];
-  return m[2] === '000' ? `${name} (기본)` : `${name} V${m[2]}`;
+  const base = m[2] === '000' ? `${name} (기본)` : `${name} V${m[2]}`;
+  return displayNames[id] ? `${displayNames[id]} · ${base}` : base;
 }
 
 /** 역할 → 한국어 · 3D 색(설계 3D · 후보 미리보기 · 블록 이름이 같이 쓴다) */
@@ -71,4 +86,25 @@ export function checkReasonKo(detail: string): string {
     ['group', '부품 그룹 규칙 위반'], ['형식', '형식 오류'], ['상한', '블록이 너무 많음'],
   ];
   return table.find(([k]) => detail.includes(k))?.[1] ?? '규칙 위반';
+}
+
+// ---------- 거절 · 실패 글(10/14 PL — '무엇이 문제 → 무엇을 확인 → 어떻게 확인' 한 줄) ----------
+// 화면이 직접 만드는 글만 여기. 작업 관리자(state/2 · 응답 message)와 backend 가 보낸 글은 고치지 않고 그대로 보인다.
+export const URGENT_STOP = '급한 정지는 로봇 PC Ctrl+C · 펜던트';
+export const NO_WEB = `웹 서버(backend)와 연결이 안 돼요 → 웹 PC 의 web 컨테이너가 켜져 있는지 → 위 연결 표시의 '웹 서버' 점, 웹 PC 에서 docker compose ps · logs web. ${URGENT_STOP}`;
+
+/** 거절 까닭 코드 → 안내(응답에 message 가 없을 때). '' = 맞는 코드 없는 거절 — 까닭 글은 작업 관리자가 상태 칸에 보냄(E-111 A3) */
+const REJECT_HINT: Record<string, string> = {
+  STOPPED: '정지 잠금이 걸려 있어요 → 정지 까닭이 없어졌는지 → 위 상태 칸의 정지 까닭을 확인하고 왼쪽 [다시 시작]',
+  BUSY: '로봇이 다른 일을 하는 중이에요 → 지금 상태가 이 버튼을 받는지 → 위 상태 칸을 보고, 끝난 뒤 다시',
+  TIMEOUT: "로봇 PC 답이 늦어요 → 명령이 늦게 먹었는지 · 로봇 PC 가 살아 있는지 → 위 상태 칸이 바뀌었는지, 연결 표시의 '로봇 PC' 점",
+  ERROR: '로봇 PC 가 처리하다 실패했어요 → 작업 관리자 · 다리가 살아 있는지 → 로봇 PC 터미널 로그',
+  '': '작업 관리자가 받지 않았어요 → 까닭 글 → 위 상태 칸',
+};
+
+/** 버튼 하나의 거절 한 줄. message 가 있으면 그대로(보낸 쪽 글), 없으면 까닭 코드 안내. 입력: 버튼 이름 · 응답(success false) */
+export function rejectText(label: string, r: { reason?: string | null; message?: string | null }): string {
+  if (r.message) return `${label} 안 됨 — ${r.message}`;
+  const hint = REJECT_HINT[r.reason ?? ''] ?? `까닭 코드 ${r.reason} → 위 상태 칸 → 로봇 PC 작업 관리자 터미널 로그`;
+  return `${label} 안 됨 — ${hint}`;
 }

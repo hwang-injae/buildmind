@@ -11,7 +11,7 @@
 // retained 로 그대로). 여는 중 · 끝(gripper_done) 문구는 작업 관리자 message 그대로 보인다 — 실패 까닭이 거기 있다(10/13 20시 PL).
 import { useState } from 'react';
 import * as api from '@/lib/api';
-import { designName, stateName, stopReasonKo } from '@/lib/names';
+import { designName, rejectText, stateName, stopReasonKo } from '@/lib/names';
 import type { CmdResult } from '@/lib/types';
 import { gripperOpening, type Robot } from '@/lib/ws';
 
@@ -57,8 +57,11 @@ export default function RobotPanel({ robot, onLog }: Props) {
   const label = (name: string, text: string) => (busy === name ? '보내는 중…' : text);
 
   const grasped = !!robot.gripper?.grasped;
-  // 그리퍼 열기 진행 · 결과('그리퍼 열기 실패: …' 포함) — 잠김 중엔 위 상태 칸이 정지 까닭만 보여서 따로 꺼낸다. 고르는 건 message_id 로만
+  // 그리퍼 열기 진행 · 결과('그리퍼 열기 실패: …' 포함) — [초기화] 알림 안에 보인다. 고르는 건 message_id 로만
   const gripMsg = opening || robot.state?.message_id === 'gripper_done' ? robot.state?.message : null;
+  // 잠김 중 상태 칸에 더 보일 작업 관리자 글 — 일반 정지 알림(message_id stopped — 정지 까닭 줄과 같은 뜻)만 빼고 그대로: 거절 까닭
+  // (message_id 없음 + 글 — E-111 A3) · 그리퍼 열기 · 초기화 안내. 전엔 잠김 중 거절 까닭이 어디에도 안 보였다(10/14 한석형 · PL)
+  const taskMsg = robot.state?.message_id !== 'stopped' ? robot.state?.message : null;
 
   /** [초기화]: cancel → 받으면 '블록을 치워 주세요'(잠금 유지). 바깥 영향: 이번 조립 기록을 닫는다(로봇은 안 움직임) */
   async function reset() {
@@ -73,13 +76,14 @@ export default function RobotPanel({ robot, onLog }: Props) {
   async function cleared() {
     const u = await send('정리 끝 — 잠금 풀기', api.resume);
     if (u.success) setClearNotice(false);
-    else setNoticeErr(`잠금을 못 풀었어요 — ${u.message ?? u.reason}`);
+    // 화면이 만드는 글(10/14 PL 형식) — 까닭(보낸 쪽 글 또는 코드)을 앞에 그대로
+    else setNoticeErr(`잠금을 못 풀었어요(${u.message || u.reason || '까닭 없음'}) → 정지 원인이 남아 있는지(펜던트 비상정지 · 로봇 알람 · 정지 노드) → 위 상태 칸의 정지 까닭, 펜던트 화면`);
   }
   /** [그리퍼 열기]: 사람이 블록을 받친 뒤 — cmd gripper_open(작업 관리자가 STOPPED 일 때만 연다). 바깥 영향: 그리퍼가 열림 */
   async function openGripper() {
     setAskOpen(false);
     const r = await send('그리퍼 열기', () => api.command('gripper_open'));
-    if (!r.success) setNoticeErr(`그리퍼를 못 열었어요 — ${r.message ?? r.reason}`);
+    if (!r.success) setNoticeErr(`그리퍼를 못 열었어요(${r.message || r.reason || '까닭 없음'}) → 로봇이 멈춤(잠금)인지 · 그리퍼가 연결돼 있는지 → 위 상태 칸 '멈춤', 아래 '그리퍼' 줄(신호 없음이면 그리퍼 연결 · 전원)`);
   }
   const gripperButton = locked && grasped && (
     <button className="warn" disabled={!!busy || opening} onClick={() => setAskOpen(true)} title="정지 중에 그리퍼가 쥔 블록을 빼요 — 한 사람이 블록을 받치고 누르세요">
@@ -98,7 +102,7 @@ export default function RobotPanel({ robot, onLog }: Props) {
         {locked ? (
           <>
             <div className="status-msg">{stopReasonKo(robot.safety!.reason)}. 원인을 없앤 뒤 [다시 시작]을 누르세요.</div>
-            {gripMsg && <div className="status-msg">{gripMsg}</div>}
+            {taskMsg && <div className="status-msg">{taskMsg}</div>}
           </>
         ) : (
           robot.state?.message && <div className="status-msg">{robot.state.message}</div>
@@ -200,7 +204,7 @@ export default function RobotPanel({ robot, onLog }: Props) {
 
       {last && !last.r.success && (
         <div className="result bad" title={[last.r.reason, last.r.message].filter(Boolean).join(' — ')}>
-          {last.label} 안 됨{last.r.message ? ` — ${last.r.message}` : ' — 위 상태 안내를 보세요'}
+          {rejectText(last.label, last.r)}
         </div>
       )}
 

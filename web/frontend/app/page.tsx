@@ -14,7 +14,7 @@ import ScanRecommend from '@/components/ScanRecommend';
 import ThemeToggle from '@/components/ThemeToggle';
 import WristCamera from '@/components/WristCamera';
 import * as api from '@/lib/api';
-import { setTemplateNames } from '@/lib/names';
+import { setDisplayNames, setTemplateNames } from '@/lib/names';
 import { useTheme } from '@/lib/theme';
 import type { Rules } from '@/lib/types';
 import { useRobot } from '@/lib/ws';
@@ -25,14 +25,16 @@ export default function Home() {
   const [picked, setPicked] = useState<string | null>(null);
   const [rules, setRules] = useState<Rules | null>(null);
   const [named, setNamed] = useState(false); // 모양 이름을 받았나 — 받으면 다시 그려 설계 ID 대신 '벤치 V001'
+  const [, setNameVer] = useState(0); // 표시 이름을 고치면 올려 page 전체를 다시 그린다(designName 이 모듈 표를 읽어서, W197)
   const robotDesign = robot.state?.design_id ?? null;
 
   useEffect(() => {
     if (robot.ws && !rules) api.getRules().then(setRules); // backend 가 늦게 떠도 붙는 순간 다시 받는다
     if (robot.ws && !named)
-      api.getTemplates().then((t) => {
+      Promise.all([api.getTemplates(), api.listDesigns()]).then(([t, list]) => {
         if (!t) return;
         setTemplateNames(t);
+        if (list) setDisplayNames(list); // 표시 이름(W197)도 같이 — 로봇 패널 · 진행 줄이 처음부터 이름으로
         setNamed(true);
       });
   }, [robot.ws, rules, named]);
@@ -45,7 +47,7 @@ export default function Home() {
       <header className="topbar">
         <div className="top-left">
           <h1>D2 젠가 가구</h1>
-          <ConnectionDots robot={robot} />
+          <ConnectionDots robot={robot} store={rules?.store} />
         </div>
         <ProgressTop robot={robot} />
         <ThemeToggle dark={dark} onChange={setDark} />
@@ -60,7 +62,8 @@ export default function Home() {
             <WristCamera robot={robot} />
           </div>
           <div className="col">
-            <DesignView robot={robot} viewId={picked ?? robotDesign} rules={rules} dark={dark} onPick={setPicked} onLog={addLog} />
+            <DesignView robot={robot} viewId={picked ?? robotDesign} rules={rules} dark={dark} onPick={setPicked} onLog={addLog}
+              onRenamed={() => setNameVer((v) => v + 1)} />
             <GeneratePanel robot={robot} baseId={picked ?? robotDesign} rules={rules} dark={dark} onSaved={setPicked} onLog={addLog} />
           </div>
         </div>
@@ -72,7 +75,7 @@ export default function Home() {
               <section className="panel">
                 <div className="panel-head">
                   <h2>추천 설계</h2>
-                  <span className="muted small">저장된 설계 중 스캔과 가장 비슷한 것 — GPT 없이 바로 조립</span>
+                  <span className="muted small">저장된 설계 중 스캔과 가장 비슷한 것 — AI 없이 바로 조립</span>
                 </div>
                 <ScanRecommend robot={robot} onView={setPicked} onLog={addLog} />
               </section>

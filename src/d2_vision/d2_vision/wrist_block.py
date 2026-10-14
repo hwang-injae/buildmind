@@ -19,7 +19,7 @@
       (capture_scene 과 같은 칸 — intrinsics_px · depth_unit · T_base2cam_m(m) · tcp + run_id · index)을 남긴다. 같은 자세 다시 찍으면 덮어씀.
       컬러는 요청 뒤 들어온 것이 있을 때만(답 시간이 늘지 않게 기다리지 않음). 실패는 경고 로그만. 스캔이 저절로 구조물 사진 자료가 되게.
   `/d2/vision/scan_infer`(JsonQuery) {"run_id"} → infer() → `<scan_dir>/<run_id>/` 에 color.png · cloud.ply(≤ 2 MB) · blocks.json
-      → {"ok":true,"blocks":blocks/2,"inferred_count","image_path","cloud_path"}. 설계 이름 scan_<family>_<번호>(IRD 2장) —
+      → {"ok":true,"blocks":blocks/2,"inferred_count","image_path","cloud_path"}. 임시 설계 이름 scan_<family>_<번호>(저장 때 웹이 V 번호로 바꾼다) —
       family 는 recipe_dir 의 기본 설계(이름에 CHAIR · DESK) 중 블록 수 · 외곽이 가장 가까운 것, 못 구하면 unknown.
       번호 = scan_dir 에 이미 있는 blocks.json 수 + 1(노드를 다시 켜도 이름이 겹치지 않게). 추론이 끝난 run_id 는 메모리에서 지운다.
   `/d2/vision/find_blocks`(JsonQuery) {"run_id"} → 요청 뒤 컬러 · 깊이(scan_frames 장 평균) + TF 자세 × 보정 → BlockFinder(block_finder.py)
@@ -39,7 +39,7 @@
 
 설계 · 블록 이름 (E-52, 10/7)
   요청 design_id 칸으로 설계를 고른다(블록 이름에서 잘라 내지 않는다). part_ids 는 전체 블록 이름
-  `<design_id>_<역할>_<부품 3자리>_<블록 2자리>`(예 001_CHAIR_BENCH_V000_LEG_001_01)를 그대로 받아 레시피가 만든 이름과 맞춘다.
+  `<DESIGN_ID>_<역할>[_<옵션>]_<그룹 3자리>_<부품 2자리>`(예 001_CHAIR_BENCH_V000_LEG_001_01, 10/13 용어 B)를 그대로 받아 레시피가 만든 이름과 맞춘다.
   design_id 칸이 비면 설계를 고를 수 없어 실패로 답한다(success=false, reason=ERROR — 아래 '실패 때').
   한 요청은 한 설계다 — 그 설계 레시피에 없는 블록은 그 블록만 unknown.
 
@@ -408,7 +408,7 @@ class WristBlock(Node):
     # ---------- 로봇 ----------
     def _call(self, cli, req, wait_s=SERVICE_WAIT_S):
         """서비스를 부르고 답을 기다린다(멀티스레드 실행기 + 재진입 그룹이라 콜백 중에도 됨). 서버 기다림 wait_s + 답 기다림 wait_s
-        (초 — 두산 서비스는 SERVICE_WAIT_S, get_design 은 timeout.service_s)만큼 막힌다. 시간 안에 못 받으면 보낸 요청을 치우고 None."""
+        (초 — get_design 은 timeout.service_s, 기본 SERVICE_WAIT_S)만큼 막힌다. 시간 안에 못 받으면 보낸 요청을 치우고 None."""
         if not cli.wait_for_service(timeout_sec=wait_s):
             return None
         done = threading.Event()
@@ -642,7 +642,7 @@ class WristBlock(Node):
             rid, index, pose_id, msg['points'], size / 1024, (time.monotonic() - t0) * 1000))
 
     def _next_scan_number(self):
-        """스캔 설계 번호 = scan_dir 에 이미 저장된 blocks.json 수 + 1 (scan_<family>_<번호>, IRD 2장 — 노드를 다시 켜도 안 겹치게)."""
+        """스캔 임시 이름 번호 = scan_dir 에 이미 저장된 blocks.json 수 + 1 (scan_<family>_<번호> — 노드를 다시 켜도 안 겹치게)."""
         try:
             return len(list(self.scan_dir.glob('*/blocks.json'))) + 1
         except OSError:
@@ -792,7 +792,7 @@ class WristBlock(Node):
 
 
 def main(args=None):
-    """노드를 멀티스레드 실행기로 돌린다(서비스 콜백 안에서 두산 서비스를 부르기 위해). 로봇에 명령이 없어 서기 처리는 없다."""
+    """노드를 멀티스레드 실행기로 돌린다(서비스 콜백 안에서 get_design 서비스 · TF 를 기다리기 위해). 로봇에 명령이 없어 서기 처리는 없다."""
     rclpy.init(args=args)
     node = WristBlock()
     exe = MultiThreadedExecutor(num_threads=4)

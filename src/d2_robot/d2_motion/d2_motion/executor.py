@@ -316,7 +316,10 @@ class MoveItExecutor:
 
         공급 칸 블록은 장면에 없어서, 안 넣으면 공중 이동이 다른 칸 블록(세운 블록 75 mm) 위를 낮게 지나갈 수 있다.
         skip_slot (1부터) = 지금 집으러 가거나 방금 집은 칸 — 그 칸으로는 내려가야 하므로 뺀다.
+        robot.yaml supply_mode 가 slots 가 아니면(흩뿌림 — 10/13 공급 칸 없앰) 빈 목록: 없는 칸 블록을 장애물로 넣지 않는다(10/14 점검 ② 5).
         """
+        if self.cfg.get('supply_mode', 'slots') != 'slots':
+            return []
         out = []
         size = [v + 2 * pad_m for v in self.cfg['block_actual_m']]
         for k in range(len(self.cfg['supply_slots'])):
@@ -457,8 +460,12 @@ class MoveItExecutor:
 
         halted(): 멈춰야 하면 이유 글자, 아니면 None. 실행 중 계속 보고, 이유가 생기면 SafeStop 으로 바로 세운다.
         바깥 영향: 로봇 팔이 움직인다. RViz 에 경로 선을 그리고 (초록), 성공하면 지우고, 실패하면 빨강으로 남긴다.
-        반환: (성공하면 True, 실패 이유 코드 또는 '').
+        반환: (성공하면 True, 실패 이유 코드 또는 ''). 보내기 전에 이미 멈춰야 하면 보내지 않고 (False, 이유).
         """
+        why = halted()
+        if why:
+            # 길 계획 · 그리퍼 닫기 중에 정지가 오면 정지 노드가 이미 세웠다 — 다음 궤적을 보내면 팔이 출발했다가 다시 선다(10/14 점검 ② 1)
+            return False, why
         path = self.positions(jt)
         # 미리 계산한 궤적은 계획 때 출발 자세(앞 궤적의 끝)에서 시작한다. 실제 도착은 그와 ARRIVE_TOL_DEG 안에서 다를 수 있는데
         # MoveIt 은 출발 차이가 0.01 rad 를 넘으면 실행을 거절하므로 첫 점을 지금 관절값으로 맞춘다(그보다 멀면 엉뚱한 자세 — 안 움직임)

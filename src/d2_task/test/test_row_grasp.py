@@ -31,7 +31,7 @@ def base_parts(model_id):
     steps = [{'part_name': r['part_name'], 'part_id': r['part_id'], 'sequence': int(r['sequence']), 'stage': int(r['stage']),
               'grasp': r['grasp'], 'grasp_axis': r['grasp_axis'], 'supports': [x for x in r['supports'].split(';') if x]} for r in rows]
     placements = {'schema': 'placements/4.0', 'design_id': model_id, 'recipe_sha256': rows[0]['recipe_sha256'], 'steps': steps}
-    parts = RecipeToParts(model_id, 'test', BLOCK_MM).convert(recipe, placements)['parts']
+    parts = RecipeToParts(model_id, BLOCK_MM).convert(recipe, placements)['parts']
     return parts, {s['sequence']: s['part_name'] for s in steps}
 
 

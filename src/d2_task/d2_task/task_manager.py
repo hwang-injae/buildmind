@@ -12,7 +12,7 @@ task 는 로봇 PC 에서 돈다. 웹 화면 · 음성은 웹 PC 에 있고 다�
   pick_place(goal, should_abort, on_feedback, on_result) -> (ok, reason)    goal = TaskPlanner.next_block 의 FOUND dict. 피드백 step · 결과 수신 시각을 콜백으로 알린다
   request_stop(reason) -> (ok, message)             정지 노드에 먼저 세우라고 요청(응답은 접수 여부)
   publish_state(dict) · publish_progress(dict)
-move_to · check_progress · pick_place 는 io 가 robot.yaml 의 제한 시간(service_s 3 · move_to_s 45 · pick_place_s 90)을 건다.
+move_to · check_progress · pick_place 는 io 가 robot.yaml 의 제한 시간(service_s 3 · move_to_s 45 · pick_place_s 120 — 10/13 W188)을 건다.
 시간 초과 때 request_stop(reason) 으로 정지 노드에 먼저 요청하고, stopped 신호를 확인하기 전에는 복구하지 않는다. 기다리는 동안
 should_abort() 가 참이 되면(정지 신호 · Ctrl+C) 곧바로 빠져나와 (False, 'STOPPED') 로 돌려주고, 진행 중인 pick_place 목표는 취소한다.
 
@@ -36,7 +36,7 @@ import threading
 import time
 
 from d2_task.block_picker import BlockPicker
-from d2_task.recipe_document import same_major
+from d2_task.recipe_document import PLACEMENTS_SCHEMA, RECIPE_SCHEMA, same_major    # 형식은 정본(10/14 점검 ③-5)
 from d2_task.recipe_to_parts import ORIS
 from d2_task.run_logger import RunLogger, _reject_constant
 from d2_task.scatter_pick import REOBSERVE, REPLAN_SAME, ScatterFlow, StepTracker, contact_phase, grasped_now
@@ -44,8 +44,6 @@ from d2_task.task_planner import TaskPlanner
 
 PLAN_STREAK = 3                            # 받침 경유: 움직이기 전 길 계산 거절이 연달아 이만큼이면 사람(10/12 실기 — 장면에 남은 블록으로 20번 헛돎)
 
-RECIPE_SCHEMA = 'recipe/4.0'
-PLACEMENTS_SCHEMA = 'placements/4.0'
 DESIGN_SCHEMA = 'design/4.0'
 
 GRIPPER_POLL_S = 0.05                          # gripper 상태 대기 간격(s) — 정지가 끼면 이 안에 알아본다
@@ -56,6 +54,11 @@ RUN_STATES = ('CHECK', 'SELECT', 'PICK_PLACE', 'WAIT_SUPPLY', 'WAIT_HMI', 'VERIF
 # 로봇이 서야 하는 결과 — 정지 노드가 세웠다(STOPPED · CANCELED). 그리퍼 응답 없음(GRIPPER_NO_RESPONSE) · 피드백 없음(NO_FEEDBACK)은
 # 정지 노드가 잠그지 않으니 신호를 기다리지 않고 작업 관리자가 ERROR 로 멈춘다(E-74, 10/9 PL)
 STOP_REASONS = ('STOPPED', 'CANCELED')
+GRIPPER_OPEN_M = 0.0865   # 정지 중 그리퍼 열기 폭(m) — 복구 절차 4절 2 명령과 같은 값(10/13 16:30 PL). 쥔 블록(최대 75 mm)을 뺄 수 있게 연다
+# 시작 점검 화면 글의 노드 이름표 — 서비스 경로는 로그에만 남기고 화면에는 사람이 알아볼 이름으로(10/14 점검 ③ 안내 정리)
+SERVICE_LABEL = {'/d2/motion/move_to': '로봇 이동 · 집기 기능', '/d2/motion/pick_place': '로봇 이동 · 집기 기능',
+                 '/d2/vision/check_progress': '손목 카메라 기능', '/d2/vision/scan_capture': '손목 카메라 기능',
+                 '/d2/vision/scan_infer': '손목 카메라 기능', '/d2/vision/find_blocks': '손목 카메라 기능'}
 
 
 def wait_until(event, should_abort, poll_s=0.05, timeout_s=None):
@@ -86,10 +89,8 @@ class TaskManager:
     정지 노드가 멈추면(safety/state stopped) 어느 상태에서든 STOPPED 로 가고, 잠금이 풀린 신호가 새로 오면 RECOVER 로 간다.
     """
 
-    def __init__(self, cfg, io, logger=None, clock=time.monotonic, monitor_hmi=False, open_width_m=None, allow_reorient=False):
+    def __init__(self, cfg, io, logger=None, clock=time.monotonic, monitor_hmi=False, open_width_m=None):
         """cfg = robot.yaml dict, io = 위 설명의 바깥 일 담당, logger = RunLogger(없으면 파일 없이 run_id 만 만든다), clock = 단조 시계(시험용).
-        allow_reorient 는 흩뿌림 세우기(눕힌 블록을 빈 자리에 세움) 허용 — 기본 False(운영 보류: W131 두 grasp 지원 · W146 정식 좌표 ·
-        W131 과 맞춘 손가락 · 회전 · 접근 · 후퇴 공간 판정이 끝나기 전). 시험만 True 로 만든다. task 노드는 넘기지 않으므로 운영에서는 세우기 요청을 만들지 않는다(10/11 W130).
         monitor_hmi 는 웹 연결 신호 감시 여부. 이 클래스의 기본은 False(시험 · 웹 없이 동작)이고, task 노드는 design_source 와 따로 노드 파라미터 monitor_hmi(기본 true)로 정해 넘긴다(E-62).
         공급 방식은 cfg['supply_mode'](없으면 slots): slots = 공급 칸 6개(기본), scatter = 흩뿌린 공급(관측 → 후보 고르기, E-55). scatter 는 open_width_m(m)을 명시로 받아야
         집기 요청을 만든다 — task 노드는 0 을 넘기고, 0 은 'pick_place 가 robot.yaml grasp_open_pick_m.<잡기>를 쓴다'는 뜻이다(IRD PickPlace.srv). None(안 넘김)이면 scatter 선택은 ERROR 로 끝난다.
@@ -129,8 +130,6 @@ class TaskManager:
         self._pending_start = False               # WAIT_SUPPLY 에서 받은 [계속]
         self._supply_moved = False                # WAIT_SUPPLY 에서 관측 자세에 이미 도착했나(도착해야 알림 · [계속]을 받는다)
         self._reobserved = False                  # UNKNOWN_BLOCK 재관측을 이미 한 번 했나
-        self._allow_reorient = allow_reorient     # 운영 기본 False — 위 설명
-        self._reoriented = set()                  # 이번 조립(run)에서 세우기를 이미 보낸 목표 part_id — 목표당 최대 1회(10/11 PL). 출발 때만 비운다
         self._plan_retry = 0                      # PLAN_FAILED 다시 계획 횟수
         self._grasp_stage = 0                     # GRASP_FAILED: 1 = 같은 칸 재시도 중, 2 = 다음 칸 시도 중
         self._shutdown = False
@@ -144,6 +143,9 @@ class TaskManager:
                          if self.supply_mode == 'scatter' else None)
         # 받침 경유(robot.yaml scatter.via_spare, 10/13): 공급 → 받침에 눕힘 → 받침 위에서 깊이로 재기 → 레시피 잡기로 곧게 다시 집어 조립
         self._spare_on = None                     # 받침에 놓아 둔 블록의 목표 part_id(있으면 다음 SELECT 가 공급 대신 받침부터 마무리한다)
+        self._w144_due = None                     # 닫을 W144 기록(조립 결과 DONE 인가) — 잠금 밖 작업 스레드가 닫는다(10/14 #152 리뷰 3)
+        self._w144_starting = False               # 출발했고 W144 기록을 아직 안 열었다 — CHECK 첫 단계가 잠금 밖에서 연다(#152 리뷰 3)
+        self._spare_centers = 0                   # 받침 위 이 블록에 받침 맞추기를 한 수 — 맞춘 뒤 다시 재서 2 mm 넘으면 다시(scatter_pick.CENTER_MAX 번까지)
         self._spare_failed = []                   # 이번 블록에서 받침으로 옮기다 안 된 시도 [(x_m, y_m, 잡기, 각도 °, 옮김 m)] — 같은 후보를 다시 고르지 않게
         self._plan_streak = 0                     # 움직이기 전 길 계산 거절이 연달아 몇 번(받침 경유) — PLAN_STREAK 번이면 사람
         self._spare_empty = 0                     # 받침에 놓았는데 안 보인 수(연달아) — 1번째는 사람이 보고 [계속](다시 잼), 2번째는 비었다고 보고 공급에서
@@ -168,6 +170,9 @@ class TaskManager:
         self._hmi_recheck = False                 # WAIT_HMI 의 start 는 SELECT 에서 진행표부터 다시 확인한다
         self._scan_run = False                    # 스캔 CSV 는 남기되 조립 결과 build/2 로 보내지 않는다
         self._scan_poses, self._scan_index = (), 0
+        self._in_handler = False                  # 작업 스레드가 STOPPED 밖의 단계(이동 · 집기 결과 처리 등)를 돌리는 중 — 그동안 정리 취소는 받지 않는다
+        self._gripper_seq = 0                     # 그리퍼 열기 요청 번호 — 답이 한 번만 대기를 풀게 한다
+        self._gripper_busy = False                # 정지 중 그리퍼 열기를 보냈고 서버의 실제 답이 아직 없다 — TIMEOUT 으로는 풀지 않는다(10/13 사용자 결정)
         for run_id, summary in self.logger.load_pending():
             self.pending_builds[run_id] = summary
             self._build_ready.add(run_id)         # 이미 디스크에 있다
@@ -180,11 +185,17 @@ class TaskManager:
 
     # ---------- 콜백 스레드에서 들어오는 것 ----------
     def on_safety(self, st):
-        """정지 노드의 safety_state/1(dict)을 적는다. 상태 전이는 작업 스레드가 run_once 에서 한다(콜백은 변수만)."""
+        """정지 노드의 safety_state/1(dict)을 적는다. 상태 전이는 작업 스레드가 run_once 에서 한다(콜백은 변수만).
+
+        객체(dict)가 아니면 버리고 경고만 남긴다 — 적어 두면 halted() 등이 .get 에서 터져 작업 스레드(노드)가 멈춘다(10/14 점검 ③-5).
+        """
+        if not isinstance(st, dict):
+            LOG.warning('safety/state 가 객체가 아니라 버린다: %r', st)
+            return
         with self._lock:
             self.safety = st
             self.safety_count += 1
-            if isinstance(st, dict) and st.get('stopped'):
+            if st.get('stopped'):
                 self._stop_count += 1
                 if self._scatter is not None:
                     self._scatter.invalidate()        # 관측 · 조회 중이던 흩뿌림 답은 정지 뒤에 적용하지 않는다
@@ -374,21 +385,28 @@ class TaskManager:
         reason 은 IRD 7장에 이미 있는 코드만 쓴다: 운전 중 'BUSY', 정지 중 'STOPPED', 조회 시간 초과 'TIMEOUT'. 맞는 코드가 없는 거절(설계 없음 ·
         점검 실패 · 아직 없는 명령)은 reason 을 빈 값으로 두고 이유를 state/2 의 message 글자로만 알린다.
         """
+        with self._lock:
+            if self._gripper_busy and cmd in ('select_design', 'start', 'scan'):     # 팔을 움직이게 하는 요청 — 그리퍼가 실제로 다 열렸다는 답이 올 때까지 받지 않는다
+                return self._reject('BUSY', '그리퍼가 열리는 중이에요. 완료 안내 뒤 다시 누르세요')
         if cmd == 'select_design':
             return self._lookup_then(design_id, 'select')
         if cmd == 'start':
             return self._lookup_then(design_id, 'start')
+        if cmd == 'gripper_open':
+            return self._gripper_open()
         with self._lock:
             if cmd == 'scan':
                 return self._begin_scan()
+            if cmd == 'cancel' and self.state == 'STOPPED':
+                return self._cleanup_stopped()
             if cmd == 'cancel':
                 if not self._cancel_to_idle():
-                    return self._reject(self._busy_reason(), '준비·오류·스캔 검토 상태에서만 취소할 수 있다')
+                    return self._reject(self._busy_reason(), '지금은 [취소]할 수 없어요(준비 · 오류 · 스캔 검토에서만). 움직이는 중이면 [정지]를 누르세요')
                 return True, ''
             return self._reject('', f'모르는 명령: {cmd}')
 
     def on_intent(self, intent, design_id=None):
-        """음성 의도(intent/1, 다리가 ROS 토픽으로 낸다). start·select_design은 버튼과 같고 cancel은 READY·ERROR·SCAN_REVIEW에서 받는다.
+        """음성 의도(intent/1, 다리가 ROS 토픽으로 낸다). start·select_design은 버튼과 같고 cancel은 READY·ERROR·SCAN_REVIEW와 STOPPED(정리 확인 — 화면 cancel과 같은 함수)에서 받는다.
 
         그 밖(request_design 등)은 무시. 출발할 수 없는 때의 음성 start 는 무시하고 알림 voice_start_ignored 만 낸다(IRD 8.5).
         설계 조회가 있는 동작은 잠금 밖에서 command 로 한다.
@@ -407,7 +425,65 @@ class TaskManager:
                     self._publish('voice_start_ignored', '관측 자세로 가는 중이라 음성 출발을 무시했다')
         elif intent == 'cancel':
             with self._lock:
-                self._cancel_to_idle()
+                if self.state == 'STOPPED':
+                    self._cleanup_stopped()      # 화면 [초기화]와 같은 함수(10/13 19:45 PL) — 기록 닫기 · 잠금 유지, 팔 이동 없음
+                else:
+                    self._cancel_to_idle()
+
+    def _cleanup_stopped(self):
+        """(잠금 안) STOPPED 의 화면 cancel = 사람이 쥔 블록 · 구조물을 정리했다는 확인(W183, 10/13 16:30 PL). 반환: (success, reason).
+
+        조립 기록을 STOPPED 로 닫고 조립 상태 · 설계 · 진행표 · 목표를 비운다. 상태는 STOPPED 그대로 두고 안전 잠금을 풀지 않으며 로봇을 움직이지 않는다.
+        이어서 화면이 /d2/safety/resume 을 부르면 기존 RECOVER 의 비조립 경로로 IDLE 에 간다(조립이 비었으니 CHECK · 자동 재개로 갈 수 없다).
+        다시 눌러도 기록은 이미 닫혀 새 기록 · 종료 줄을 만들지 않는다. 작업 단계가 아직 정지 결과를 처리하는 중이면 BUSY 로 거절한다(다시 누르면 된다).
+        """
+        if self._in_handler:
+            return self._reject('BUSY', '멈추는 중인 동작을 정리하고 있어요. 잠시 뒤 다시 누르세요')
+        self.logger.log('cleanup', None, 'STOPPED 정리 확인')     # 닫기 전에 남긴다(run 이 없으면 아무것도 안 함)
+        self.planner, self.design_id, self.part_id, self.goal = None, None, None, None
+        self._assembling = False
+        self._clear_run()
+        self._publish('stopped', '정리를 확인했어요. 다 치웠으면 [정리 끝]을 누르세요 — 대기로 돌아갑니다')
+        return True, ''
+
+    def _gripper_open(self):
+        """화면 gripper_open: STOPPED 에서만 그리퍼 열기를 보낸다(사람이 쥔 블록을 빼기 위해, W183). 반환: (접수했나, reason). 팔은 움직이지 않는다.
+
+        폭 · 힘은 복구 절차(docs 복구절차_정지뒤다시시작 4절 2)와 같은 GRIPPER_OPEN_M · robot.yaml gripper.force_n.
+        접수되면 곧바로 (True, '')로 답하고(10/13 PL — 그리퍼가 다 멈출 때까지 화면 명령을 붙잡지 않는다), 실제 결과는 그리퍼 서버의 답이 올 때
+        _gripper_done 이 gripper_done 알림으로 낸다. 그때까지 _gripper_busy 를 유지하며 state/2 는 모두 message_id gripper_opening 으로 나간다
+        (retained 마지막 값으로 다시 붙은 화면도 대기 중임을 안다). 대기 중 반복 open · select_design · start · scan 은 BUSY,
+        조립 RECOVER 는 CHECK 로 가지 않고 기다린다. 정지 · resume · cancel 은 막지 않는다. 상태 · 안전 잠금 · 조립 기록은 바꾸지 않는다.
+        보내지 못하면(서버 없음 · 예외) 바로 gripper_done(실패)을 내고 (False, reason).
+        답이 끝내 오지 않으면 대기(차단)를 스스로 풀지 않는다 — 사람이 그리퍼 장비를 확인한 뒤 task 를 다시 켠다(10/13 19:45 PL, 복구 절차 4-1).
+        """
+        with self._lock:
+            if self.state != 'STOPPED':
+                return self._reject(self._busy_reason(), '그리퍼 열기는 정지 상태에서만 할 수 있다')
+            if self._gripper_busy:
+                return self._reject('BUSY', '그리퍼가 이미 열리는 중이에요. 완료 안내를 기다리세요')
+            self._gripper_busy = True
+            self._gripper_seq += 1
+            seq = self._gripper_seq
+            self._publish('gripper_opening', '그리퍼를 여는 중이에요. 완료 안내까지 기다리세요')
+        try:
+            accepted, why = self.io.gripper_open(GRIPPER_OPEN_M, self.cfg['gripper']['force_n'],
+                                                 lambda done_ok, done_why: self._gripper_done(seq, done_ok, done_why))
+        except Exception as e:                 # noqa: BLE001 — 보내지도 못했다: 답이 올 일이 없으니 바로 푼다
+            accepted, why = False, f'ERROR({e!r})'
+        if not accepted:
+            self._gripper_done(seq, False, why or 'ERROR')
+            return False, ('ERROR' if (why or '').startswith('ERROR') else (why or 'ERROR'))
+        return True, ''
+
+    def _gripper_done(self, seq, ok, why):
+        """그리퍼 서버의 실제 답(또는 보내기 실패)을 받았다 — 대기를 풀고 gripper_done 을 알린다. 한 요청에 한 번만, 늦게 와도 같다."""
+        with self._lock:
+            if not self._gripper_busy or seq != self._gripper_seq:
+                return
+            self._gripper_busy = False
+            self.logger.log('gripper_open', None, 'ok' if ok else (why or 'ERROR'))
+            self._publish('gripper_done', '그리퍼를 열었어요' if ok else f'그리퍼 열기 실패: {why or "이유 없음"}')
 
     def _cancel_to_idle(self):
         """(잠금 안) READY·ERROR·SCAN_REVIEW 에서 취소해 IDLE 로 간다. 반환: 취소했나. 화면 cancel 과 음성 cancel 이 같이 쓴다(S-16).
@@ -433,21 +509,42 @@ class TaskManager:
         self._apply_safety()
         self.poll_hmi()
         with self._lock:
+            due, self._w144_due = self._w144_due, None
+        if due is not None:
+            # W144 녹화 닫기(rosbag 정상 종료 · ZIP 은 수십 초)는 잠금 밖에서 — 잠금 안에서 기다리면 그동안 정지 신호 · 명령 처리가 막힌다(#152 리뷰 3)
+            self.io.w144_finish(due)
+        with self._lock:
             if self._hmi_pause and self.state in ('CHECK', 'SELECT', 'PICK_PLACE', 'WAIT_SUPPLY'):
                 self._enter_wait_hmi()
-        handler = self._handlers.get(self.state)
-        if handler is None:
-            return
+        with self._lock:
+            handler = self._handlers.get(self.state)
+            if handler is None:
+                return
+            # 정지 직후에도 이 단계는 끝까지 돈다(늦은 결과를 STOPPED 로 정리). 그 사이 정리 취소가 goal · planner 를 비우면 단계가 깨지므로 표시해 둔다
+            self._in_handler = self.state != 'STOPPED'
         try:
             handler()
         except Exception as e:        # noqa: BLE001 — 어떤 오류든 멈추고 사람을 부른다
             LOG.exception('상태 %s 에서 예상 못 한 오류', self.state)
             self._to_error(f'예상 못 한 오류({e!r})')
+        finally:
+            with self._lock:
+                self._in_handler = False
 
     # ---------- 상태별 일 ----------
     def _check(self):
         """CHECK: 관측 자세로 → 모든 블록을 진행 확인 → 어긋남이 있으면 ERROR, 없으면 SELECT.
-        받침 경유 출발 직후에는 먼저 장면을 정리하고 홈으로 간다(_clean_start)."""
+        받침 경유 출발 직후에는 먼저 장면을 정리하고 홈으로 간다(_clean_start). W144 기록은 출발 직후 여기서(잠금 밖에서) 연다 —
+        필수 자료가 없으면 움직이기 전에 ERROR(INTEGRATION.md). 출발 명령(잠금 안)에서 열면 토픽 확인 · 녹화 시작을 기다리는 동안
+        정지 신호 처리가 막혔다(#152 리뷰 3)."""
+        if self._w144_starting:
+            self._w144_starting = False
+            ok, why = self.io.w144_start(self.design_id, self.run_id)
+            if not ok:
+                # 덜 된 기록은 닫아 둔다(다음 run_once 가 잠금 밖에서 ZIP) — 열린 채 [다시 시작]으로 이어 가면 촬영이 반쯤 연 기록을 썼다(10/14 점검 ② 3)
+                with self._lock:
+                    self._w144_due = False
+                return self._to_error(why)
         if self._fresh and self._scatter is not None and self._scatter.via_spare:
             self._fresh = False
             if not self._clean_start():
@@ -465,16 +562,19 @@ class TaskManager:
 
     def _clean_start(self):
         """흩뿌림 출발 직후(one_pick 시작과 같음): ① 장면에 남은 쥔 상자 떼기(앞 실행이 쥔 채 멈췄으면 모든 계획이 막혔다 — 10/12 실기)
-        ② 빈 진행표(parts [])를 내 장면 관리가 앞 실행의 놓인 블록을 지우게 하고 1 s 기다림 ③ 홈 자세로. 반환: 이어 가도 되나(이동 실패면 처리 뒤 False)."""
+        ② 홈 자세로 — 앞 실행의 놓인 블록이 남은 장면 그대로 계획한다(실물이 남아 있어도 피하게, #152 리뷰 2). 못 가면 평소 실패 처리(사람)이고
+        장면을 비워 다시 가지 않는다 ③ 빈 진행표(parts [])로 장면 관리가 앞 실행의 놓인 블록을 지우게 하고 1 s 기다림(이 뒤 CHECK 가 진행을 다시 본다).
+        반환: 이어 가도 되나(이동 실패면 처리 뒤 False)."""
         detach = getattr(self.io, 'scene_detach', None)
         if detach is not None and not detach():
             LOG.warning('출발: 장면 관리가 답하지 않아 쥔 상자를 못 뗐다 — 그대로 진행')
-        self.io.publish_progress({'schema': 'progress/2.0', 'stamp': time.time(), 'design_id': self.design_id, 'run_id': self.run_id,
-                                  'obs_stamp': time.time(), 'parts': []})
-        self._sleep(1.0)
         ok, why = self.io.move_to('home', self.halted)
         if not ok:
             self._failed(why, '출발 홈 자세 이동')
+            return ok
+        self.io.publish_progress({'schema': 'progress/2.0', 'stamp': time.time(), 'design_id': self.design_id, 'run_id': self.run_id,
+                                  'obs_stamp': time.time(), 'parts': []})
+        self._sleep(1.0)
         return ok
 
     def _move_via(self, target):
@@ -523,7 +623,16 @@ class TaskManager:
                 return self._failed(why, '웹 재연결 뒤 관측 자세 이동')
             if not self._observe([b['part_id'] for b in self.planner.parts]):
                 return
-            problems = self.planner.judge(expect_present=[self.placed] if self.placed else ())
+            # 받침 경유는 VERIFY 와 같은 엄격 판정(높이 place_dz_m · strict) — 놓은 뒤 확인을 기다리던 중 웹이 끊겼다 이어 가면
+            # 느슨한 판정으로 고치지 않은 블록 위로 진행했다(10/14 점검 ② 2ⓐ). 걸리면 VERIFY 처럼 사람이 고치고 [계속]
+            via = self._scatter is not None and self._scatter.via_spare
+            dz = (self.cfg.get('scatter') or {}).get('place_dz_m') if via else None
+            problems = self.planner.judge(expect_present=[self.placed] if self.placed else (), placed_dz_m=dz, strict=via)
+            if problems and via and self.placed:
+                self._hmi_recheck = False
+                first = problems[0]
+                return self._hold(self.placed, f'{first["part_id"]}: {first["detail"]} — 손으로 바로 놓은 뒤 [계속]을 누르면 다시 확인합니다',
+                                  then='verify')
             if problems:
                 return self._offset_over(problems)
             if self.placed:
@@ -541,7 +650,7 @@ class TaskManager:
             self._start_goal(r)
             self._set('PICK_PLACE', None, f'{r["part_id"]} 를 집으러 갑니다')
         elif status == 'DONE':
-            with self._lock:               # DONE 방송과 요약 확정 사이에 새 설계 선택 · 출발이 끼어들지 못하게 한 잠금 안에서(파일 I/O 없음)
+            with self._lock:               # DONE 방송과 요약 확정 사이에 새 설계 선택 · 출발이 끼어들지 못하게 한 잠금 안에서. 요약 CSV 는 쓰기 스레드가 쓰지만, w144_record 가 켜져 있으면 w144_finish(녹화 종료 · ZIP)가 이 잠금 안에서 돈다(점검 ② 3번 — 박진용)
                 self.part_id = None
                 self._set('DONE', 'done', '조립이 끝났어요')
                 self._finish_run('DONE')
@@ -571,7 +680,7 @@ class TaskManager:
         return None
 
     def _spread_target(self, target):
-        """받침 경유일 때 목표의 놓는 중심을 같은 층 1 mm 띄운 값으로 바꾼 복사본(pick_rank.spread_parts — 설계 25 mm 간격에 실제 폭 24.8 mm 라
+        """흩뿌림 조립이면(받침 경유 여부와 상관없이 — 호출 쪽 _select) 목표의 놓는 중심을 같은 층 1 mm 띄운 값으로 바꾼 복사본(pick_rank.spread_parts — 설계 25 mm 간격에 실제 폭 24.8 mm 라
         틈 0.2 mm 뿐이어서 놓을 때 옆 블록을 밀어 줄이 틀어졌다, 10/13 실기). 진행표 · 확인(check_progress)은 설계 중심 그대로."""
         if self._spread is None:
             from d2_task.pick_rank import spread_parts
@@ -616,12 +725,14 @@ class TaskManager:
             self._failed('STOPPED' if self.halted() else why, 'find_blocks 조회')
             return
         if from_spare:
-            result = self._scatter.prepare_from_spare(target, body)
+            result = self._scatter.prepare_from_spare(target, body, self._spare_centers)
+            if 'offset_mm' in result:                # 맞춘 뒤 다시 잰 어긋남 — 왜 못 맞추는지 숫자로 보려고 늘 남긴다(10/14 실기)
+                self.logger.log('spare', target['part_id'], f'받침 맞춤 {self._spare_centers}번 뒤 다시 잼: 받침 자리에서 {result["offset_mm"]} mm')
         elif self._scatter.via_spare:
             self._spare_seen = (target, body)
             result = self._scatter.prepare_spare(target, body, self._spare_failed)
         else:
-            result = self._scatter.prepare(target, body, allow_reorient=self._allow_reorient and target['part_id'] not in self._reoriented)
+            result = self._scatter.prepare(target, body)
         with self._lock:
             applied = self._scatter.commit(ticket, lambda: ((self._epoch, self._stop_count), self.halted()), result)
             if applied:
@@ -633,7 +744,7 @@ class TaskManager:
     def _apply_scatter_result(self, target, result, pick_message):
         """(잠금 안) commit 이 적용된 흩뿌림 결과를 상태에 반영한다: PICK → 목표 + PICK_PLACE, 비었음 · 맞는 블록 없음 → WAIT_SUPPLY, 그 밖은 ERROR."""
         status, part_id = result['status'], target['part_id']
-        if status in ('PICK', 'SPARE', 'SPARE_TIP', 'SPARE_CENTER', 'REORIENT'):
+        if status in ('PICK', 'SPARE', 'SPARE_TIP', 'SPARE_CENTER', 'SPARE_STAND'):
             self._w144_event('candidate_selected', part_id, status=status, tag=result.get('tag'), candidate=result.get('candidate'))
         if status == 'PICK' and self._spare_on is not None:      # 받침 경유 2단계 — 받침에서 레시피 잡기로 다시 집어 조립
             self._spare_empty = 0
@@ -650,10 +761,14 @@ class TaskManager:
             self._spare_empty = 0
             self._start_goal(dict(result['request'], status='FOUND'))
             self._set('PICK_PLACE', None, f'{part_id} 에 쓸 받침 위 블록({result["candidate"].get("up")})을 눕힙니다')
-        elif status == 'SPARE_CENTER':             # 받침 맞추기 — 반대 폭으로 물었다 놓은 뒤 같은 잰 값으로 레시피 잡기(request['then'])
+        elif status == 'SPARE_CENTER':             # 받침 맞추기 — 잰 자리에서 반대 폭으로 집어 받침 가운데에 놓는다(끝나면 다시 잼)
             self._spare_empty = 0
             self._start_goal(dict(result['request'], status='FOUND'))
             self._set('PICK_PLACE', None, f'{part_id} 를 받침에서 가운데로 맞춥니다')
+        elif status == 'SPARE_STAND':              # 받침 가운데에 맞은 눕힌 블록을 세우기 교시 동작으로 세운다(세운 뒤 다시 잼)
+            self._spare_empty = 0
+            self._start_goal(dict(result['request'], status='FOUND', from_spare=True))
+            self._set('PICK_PLACE', None, f'{part_id} 에 쓸 받침 위 블록을 세웁니다')
         elif status == 'SPARE_EMPTY':
             # 방금 받침에 놓은 블록이 안 보인다 — 비었다고 보고 다음 블록을 그 위에 놓으면 부딪힌다(one_pick 10/13 가상). 사람이 본다:
             # 1번째는 받침을 확인하고 [계속]이면 다시 잰다, 연달아 2번째면 받침 기록을 지우고 [계속]이면 공급에서 다시 고른다
@@ -672,10 +787,6 @@ class TaskManager:
             self._to_error(f'{part_id}: 이 자세(세움 · 옆세움)로 세우는 교시 동작이 robot.yaml standup_taught 에 없다(세우기 W131) — 사람이 확인해 주세요')
         elif status == 'SPARE_NOT_FLAT':
             self._to_error(f'{part_id}: 받침 위 블록 자세를 모른다({result["block"].get("up")}) — 받침 위 블록을 확인해 주세요')
-        elif status == 'REORIENT':                 # 맞는 자세가 없어 눕힌 블록을 빈 자리에 세운다 — 보내는 순간 1회로 센다(실패해도 다시 세우지 않음)
-            self._reoriented.add(part_id)
-            self._start_goal(dict(result['request'], status='FOUND'))
-            self._set('PICK_PLACE', None, f'{part_id} 에 맞는 자세의 블록이 없어 눕힌 블록을 빈 자리에 세웁니다')
         elif status == 'EMPTY':
             self._enter_wait_supply(part_id, ('supply_empty', '공급 영역에 블록이 없어요. 블록을 흩뿌린 뒤 [계속]을 누르세요'))
         elif status == 'NO_MATCH' and self._scatter.via_spare and self._no_match == 0:
@@ -689,7 +800,6 @@ class TaskManager:
             # 기울어진 블록이 있고 제외 이유가 tilted · under 뿐이면 IRD 알림 tilted_block(E-68 — 덮인 블록이 같이 있어도 사람이 기울어진 것을 바로 놓으면 된다).
             # under 만이거나 다른 제외 이유가 섞이면 no_match_block(E-73) — 이유는 글자(message)로 같이 보낸다
             only_tilted = counts.get('tilted', 0) > 0 and all(n == 0 for k, n in counts.items() if k not in ('tilted', 'under'))
-            only_tilted = only_tilted and part_id not in self._reoriented     # 세운 뒤에도 후보가 없으면 맞는 블록 없음 알림(10/11 PL)
             self._enter_wait_supply(part_id, ('tilted_block' if only_tilted else 'no_match_block', result['message'] + ' — 정리한 뒤 [계속]을 누르세요'))
         elif status == 'NOT_CONFIGURED':
             self._to_error('흩뿌린 공급 설정(열림 폭)이 아직 정해지지 않았다')
@@ -737,14 +847,6 @@ class TaskManager:
             handled = self._via_spare_result(ok, why)
             if handled is not False:
                 return handled
-        if ok and self.goal.get('reorient'):
-            # 세우기는 조립이 아니다 — placed · 조립 기록 · VERIFY 없이 SELECT 로 돌아가 공급을 다시 보고 방금 세운 블록을 일반 선택으로 집는다
-            self.logger.log('reorient', self.goal['part_id'], '눕힌 블록을 빈 자리에 세움')
-            self.poll_hmi()
-            if self._hmi_pause:
-                return self._enter_wait_hmi()
-            self._set('SELECT', None, f'{self.goal["part_id"]} 에 쓸 블록을 세웠다. 공급을 다시 봅니다')
-            return None
         if ok:
             self.placed = self.goal['part_id']
             self.logger.record_placed(self.placed, self.goal['supply_slot'])
@@ -775,13 +877,22 @@ class TaskManager:
         max_attempts 번), 움직이기 전 길 계산 거절은 세지 않고 다음 후보로 — 연달아 PLAN_STREAK 번이면 사람을 부른다."""
         part, goal = self.goal['part_id'], self.goal
         moved = self.last_pick['step'] is not None
-        if goal.get('spare_center') and (ok or (why == 'PLAN_FAILED' and not moved)):
-            # 맞추기는 블록을 들지 않는다 — 됐으면, 또는 움직이기 전에 길이 안 나왔으면(맞추기 없이) 같은 잰 값으로 바로 레시피 잡기(one_pick 과 같음)
-            if not ok:
-                self.logger.log('spare', part, '받침 맞추기 길이 안 나와 건너뜀')
-            self._start_goal(dict(goal['then'], status='FOUND', from_spare=True))
-            if goal['then'].get('spare_stand'):     # 세움 · 옆세움 레시피: 맞춘 뒤 교시 동작으로 세운다(조립은 다시 잰 뒤)
-                return self._set('PICK_PLACE', None, f'{part} 에 쓸 받침 위 블록을 세웁니다')
+        if goal.get('spare_center') and ok:
+            # 맞추기 = 받침 가운데로 옮겨 놓기(10/14) — 다시 재서 2 mm 안인지 본다(scatter_pick.CENTER_TOL_M). 맞춘 뒤 다시 안 재고 세웠더니
+            # 남은 어긋남을 몰랐다(10/14 실기: 맞추기 → 세우기 뒤 4.7 mm)
+            self._spare_centers += 1
+            self.poll_hmi()
+            if self._hmi_pause:
+                return self._enter_wait_hmi()
+            return self._set('SELECT', None, f'{part} 받침 맞춘 자리를 다시 잽니다')
+        if goal.get('spare_center') and why == 'PLAN_FAILED' and not moved:
+            # 움직이기 전에 길이 안 나왔으면 블록은 잰 자리 그대로라 잰 값으로 레시피 잡기(skip). 세우기는 교시 경로가 받침 가운데 기준이라
+            # 건너뛸 수 없다 → 사람
+            if goal.get('skip') is None:
+                return self._hold(part, f'{part}: 받침 위 블록을 가운데로 못 옮겨 세우지 못해요(움직이기 전 길 거절) — 블록을 받침 가운데에 '
+                                        '두고 [계속]을 누르면 다시 잽니다')
+            self.logger.log('spare', part, '받침 맞추기 길이 안 나와 건너뜀')
+            self._start_goal(dict(goal['skip'], status='FOUND', from_spare=True))
             return self._set('PICK_PLACE', None, f'{part} 를 받침에서 다시 집어 조립합니다')
         if ok and goal.get('spare_stand'):         # 받침 위 블록을 세움(W131 교시 동작) — 조립이 아니다. 다음 SELECT 가 받침을 다시 재서 레시피 잡기로 집는다
             self._plan_streak = 0
@@ -791,14 +902,14 @@ class TaskManager:
                 return self._enter_wait_hmi()
             return self._set('SELECT', None, f'{part} 에 쓸 받침 위 블록을 세웠다. 다시 잽니다')
         if ok and goal.get('spare_tip'):           # 받침 위 블록을 눕힘 — 조립이 아니다. 다음 SELECT 가 받침을 다시 잰다
-            self._plan_streak = 0
+            self._plan_streak, self._spare_centers = 0, 0
             self.logger.log('spare', part, '받침 위 블록을 눕힘')
             self.poll_hmi()
             if self._hmi_pause:
                 return self._enter_wait_hmi()
             return self._set('SELECT', None, f'{part} 에 쓸 받침 위 블록을 눕혔다. 다시 잽니다')
         if ok and goal.get('via_spare'):           # 받침에 눕힘 — 조립이 아니다(placed · 기록 · VERIFY 없음). 다음 SELECT 가 받침을 잰다
-            self._spare_on, self._plan_streak = part, 0
+            self._spare_on, self._plan_streak, self._spare_centers = part, 0, 0
             self._spare_failed.clear()
             self.logger.log('spare', part, '받침에 눕힘')
             self.poll_hmi()
@@ -806,9 +917,13 @@ class TaskManager:
                 return self._enter_wait_hmi()
             return self._set('SELECT', None, f'{part} 에 쓸 블록을 받침에 놓았다. 받침 위에서 잽니다')
         if ok:                                     # 받침에서 다시 집어 조립 — 평소 성공 처리(placed · VERIFY)로
-            self._spare_on, self._plan_streak = None, 0
+            self._spare_on, self._plan_streak, self._spare_centers = None, 0, 0
             return False
         self.logger.log('fail', part, f'pick_place {why}{"" if moved else "(움직이기 전)"}')
+        if goal.get('via_spare') and self.last_pick['step'] in ('place', 'retreat'):
+            # 받침에 내려놓는 중 · 뒤에 실패 · 정지 · 시간 초과 — 실물은 받침에 있을 수 있다. 기록을 남겨 다음 SELECT 가 받침부터 잰다
+            # (비어 있으면 SPARE_EMPTY 사람 확인). 안 남기면 같은 자리에 또 놓을 수 있었다(#152 리뷰 1)
+            self._spare_on = part
         if why == 'PLAN_FAILED' and not moved:
             self._plan_streak += 1
             if goal.get('via_spare'):
@@ -846,22 +961,35 @@ class TaskManager:
     def _spare_regrasp(self, goal):
         """받침 경유 헛잡음 뒤 그 블록을 다시 찍어 위치를 고쳐 같은 잡기로 한 번 더(one_pick try_goal · see_block): 집기 위(노드가 열고 올라온 자리)에서
         find_blocks → 온전한 같은 자세 블록(확신도 0.5 이상 · 덮이지 않음 · 40 mm 안)이 없으면 공급 관측 자세로 가서 한 번 더.
-        반환: 적용했으면 True(PICK_PLACE), 못 찾았거나 정지 · 오류면 False(부르는 쪽이 평소대로). 바깥 영향: 팔 이동(observe_supply) · find_blocks."""
+        반환: 적용했으면 True(PICK_PLACE — 이 관측을 _spare_seen 으로 바꿔 둠), observe_supply 이동 · find_blocks 가 실패하면 평소 실패 처리
+        (_failed — TIMEOUT 은 먼저 세움)를 하고 True, 못 찾았거나 정지 중이면 False(부르는 쪽이 평소대로). 바깥 영향: 팔 이동(observe_supply) · find_blocks."""
         token = (self._epoch, self._stop_count)
         cand = goal.get('seen') or {}                  # 고를 때 본 블록(헛잡음 판단 뒤에는 ScatterFlow 후보가 비워진다)
         for go in (False, True):
             if go:
-                ok, _why = self.io.move_to('observe_supply', self.halted)
+                ok, why = self.io.move_to('observe_supply', self.halted)
                 if not ok:
-                    return False
-            ok, _why, body = self.io.find_blocks(self.run_id, self.halted, height_map=True)
-            if not ok or self.halted():
+                    if self.halted():
+                        return False
+                    # 이동 실패(TIMEOUT 포함)를 넘기고 다시 찍으러 가면 팔이 어디 있는지 모른 채 이어 갔다(#152 리뷰 4)
+                    self._failed(why, f'{goal["part_id"]} 헛잡음 뒤 공급 관측 자세 이동')
+                    return True
+            ok, why, body = self.io.find_blocks(self.run_id, self.halted, height_map=True)
+            if self.halted():
                 return False
+            if not ok:
+                # 조회 실패(TIMEOUT 포함)도 다른 조회처럼 평소 실패 처리 — 예전엔 정지 요청 없이 SELECT 로 갔다(10/14 점검 ② 2ⓑ)
+                self._failed(why, f'{goal["part_id"]} 헛잡음 뒤 find_blocks')
+                return True
             req = self._scatter.reseen_request(goal, cand, body)
             if req is not None:
                 with self._lock:
                     if self.halted() or (self._epoch, self._stop_count) != token:
                         return False
+                    if self._spare_seen is not None:
+                        # 이 다시 잡기가 움직이기 전에 거절되면 '같은 관측의 다음 후보'를 이 관측에서 고른다 — 밀리기 전 옛 관측으로 고르면
+                        # 빈 자리로 갔다(10/14 점검 ② 2ⓒ)
+                        self._spare_seen = (self._spare_seen[0], body)
                     self.logger.log('spare', goal['part_id'], '헛잡음 — 다시 찍은 자리로 같은 잡기 한 번 더')
                     self._start_goal(dict(req, status='FOUND', regrasp=True))
                     self._set('PICK_PLACE', None, f'{goal["part_id"]}: 헛잡음 — 다시 찍은 자리로 한 번 더 집습니다')
@@ -879,11 +1007,11 @@ class TaskManager:
                            retry_of=getattr(self, '_w144_last', {}).get(part_id) if aid else None, **fields)
 
     def _w144_leg(self):
-        """지금 목표가 받침 경유의 어느 단계인가 — 공급→받침 · 받침 눕히기 · 받침 맞추기 · 받침→조립 · 바로 조립 · 세우기."""
+        """지금 목표가 받침 경유의 어느 단계인가 — 공급→받침 · 받침 눕히기 · 받침 맞추기 · 받침 세우기 · 받침→조립 · 바로 조립."""
         g = self.goal
         return ('to_spare' if g.get('via_spare') else 'spare_tip' if g.get('spare_tip') else 'spare_center' if g.get('spare_center')
                 else 'spare_stand' if g.get('spare_stand')
-                else 'from_spare' if g.get('from_spare') else 'reorient' if g.get('reorient') else 'direct')
+                else 'from_spare' if g.get('from_spare') else 'direct')
 
     def _w144_before_pick(self):
         """집기 명령 직전: 이 부품의 열린 시도가 없으면 begin_attempt(재시도면 retry_of) → pick_requested 이벤트.
@@ -1017,6 +1145,9 @@ class TaskManager:
             self._clear_run()
             self._set('IDLE', None, '정지가 풀렸어요. 설계를 다시 고르세요')
             return None
+        with self._lock:
+            if self._gripper_busy:                # 열기 답 전에는 gripper/state 도 믿을 수 없고 팔도 움직이지 않는다 — 답이 오면 다음 단계가 이어 본다
+                return None
         grip = self.gripper
         if grip is None or grip.get('grasped'):
             return self._to_error('블록을 쥐고 있거나 그리퍼 상태를 모른다. 사람이 확인한 뒤 [다시 시작]')
@@ -1054,11 +1185,13 @@ class TaskManager:
         """
         # DONE 도 받는다(10/13 PL): 끝난 조립 기록은 이미 닫혀 있고 last_build · pending_builds 는 그대로 두며 새 run_id 로 시작한다
         if self.state not in ('IDLE', 'SCAN_REVIEW', 'DONE') or self._shutdown:
-            return self._reject(self._busy_reason(), '지금은 스캔을 시작할 수 없다')
+            return self._reject(self._busy_reason(), '지금은 스캔을 시작할 수 없어요(대기 · 조립 끝 · 스캔 검토에서만). 하던 일이 끝난 뒤 누르세요')
         poses = self.cfg.get('scan', {}).get('poses')
-        if not isinstance(poses, list) or not poses or any(
-                not isinstance(p, str) or f'{p}_pose' not in self.cfg for p in poses) or len(set(poses)) != len(poses):
-            return self._reject('ERROR', 'scan.poses가 없거나 촬영 자세 설정과 맞지 않는다')
+        bad_poses = not isinstance(poses, list) or not poses or any(
+            not isinstance(p, str) or f'{p}_pose' not in self.cfg for p in poses) or len(set(poses)) != len(poses)
+        if bad_poses:
+            LOG.warning('스캔 시작 거절: robot.yaml scan.poses %r 와 각 <이름>_pose 가 없거나 맞지 않는다', poses)   # 설정 키는 로그(담당자용)
+            return self._reject('', '스캔 촬영 자세 설정이 없거나 맞지 않아 시작할 수 없어요. 로봇 담당에게 설정 확인을 부탁하세요')     # 맞는 코드 없는 거절 = 빈 값 + 글(E-111 A3)
         ok, code, text = self._precheck(scan=True)
         if not ok:
             return self._reject(code, f'스캔 시작 점검 실패: {text}')
@@ -1388,9 +1521,9 @@ class TaskManager:
                 if design_id is None:
                     return self._start()
             if mode == 'select' and self.state not in ('IDLE', 'READY', 'DONE', 'SCAN_REVIEW'):
-                return self._reject(self._busy_reason(), '지금은 설계를 바꿀 수 없다')
+                return self._reject(self._busy_reason(), '작업 중에는 설계를 바꿀 수 없어요. 작업이 끝난 뒤 선택해 주세요')
             if not design_id:
-                return self._reject('', f'설계 파일을 못 읽었다: {design_id!r}')
+                return self._reject('', f'설계 파일을 못 읽었다: {design_id!r} — 설계를 고르지 않았어요. 화면 설계 목록에서 고른 뒤 다시 누르세요')
             self._lookup_token += 1
             token, epoch, was_halted = self._lookup_token, self._epoch, self.halted()    # 이미 정지 중이면 시작 점검이 이유를 알린다
         try:
@@ -1400,16 +1533,17 @@ class TaskManager:
             LOG.warning('설계 조회 중 예외: %r', e)
         with self._lock:
             if self._shutdown or (self.halted() and not was_halted):      # 조회하는 동안 정지 · 종료가 왔다
-                return self._reject('STOPPED', '정지 · 종료 중이라 설계 조회 결과를 버렸다')
+                return self._reject('STOPPED', '정지 또는 종료로 설계 조회를 중단했어요. 복구가 끝난 뒤 다시 선택해 주세요')
             if token != self._lookup_token or epoch != self._epoch:
-                return self._reject('BUSY', '조회하는 동안 다른 요청이나 상태 변화가 있어 이 조회 결과를 버렸다')
+                return self._reject('BUSY', '조회하는 동안 다른 요청이나 상태 변화가 있어 이 조회 결과를 버렸어요. 다시 눌러 주세요')
             if self._clock() - received > self.command_s:      # 늦은 출발 · 선택은 허용하지 않는다(웹은 이미 시간 초과로 보였다)
-                return self._reject('TIMEOUT', f'명령을 받은 뒤 {self.command_s} 초 안에 확정하지 못해 실행하지 않았다')
+                return self._reject('TIMEOUT', f'명령을 받은 뒤 {self.command_s} 초 안에 끝내지 못해 실행하지 않았어요. 웹 PC와 로봇 PC 연결(다리 · 브로커)을 확인하고 다시 누르세요')
             if not ok:
-                return self._reject(why, f'설계를 못 가져왔다: {design_id!r} ({why or "이유 없음"})')
+                code = why if why in ('TIMEOUT', 'STOPPED', 'BUSY') else ''      # E-111 A3: 이 셋만 코드, 나머지(ERROR · 서버 이유)는 빈 값 + 글
+                return self._reject(code, f'설계를 못 가져왔다: {design_id!r} ({why or "이유 없음"}) — 설계 목록에 이 설계가 있는지 확인하고 다시 골라 주세요. 계속 안 되면 설계 저장소(웹) 담당에게 알려 주세요')
             planner, problem = self._planner_from(design, design_id)
             if problem:
-                return self._reject('', problem)
+                return self._reject('', f'이 설계 레시피로는 조립 계획을 만들 수 없어요({problem}). 다른 설계를 고르세요')
             if mode == 'select':
                 return self._apply_select(planner, design_id)
             if self.state == 'IDLE':
@@ -1445,7 +1579,7 @@ class TaskManager:
     def _apply_select(self, planner, design_id):
         """(잠금 안) 조회한 설계로 시작 점검을 통과하면 READY. IDLE · READY · DONE 에서만."""
         if self.state not in ('IDLE', 'READY', 'DONE', 'SCAN_REVIEW'):
-            return self._reject(self._busy_reason(), '지금은 설계를 바꿀 수 없다')
+            return self._reject(self._busy_reason(), '작업 중에는 설계를 바꿀 수 없어요. 작업이 끝난 뒤 선택해 주세요')
         ok, code, text = self._precheck()
         if not ok:
             return self._reject(code, f'시작 점검 실패: {text}')
@@ -1476,50 +1610,51 @@ class TaskManager:
             return True, ''
         if self.state != 'READY':
             if self.state == 'IDLE':
-                return self._reject('', '설계를 먼저 고르세요')
-            return self._reject(self._busy_reason(), '지금은 출발할 수 없다')
+                return self._reject('', '설계를 먼저 고르세요 — 화면 설계 목록에서 고른 뒤 [조립]')
+            return self._reject(self._busy_reason(), '지금은 출발할 수 없어요(설계를 고른 준비 상태에서만). 하던 일이 끝난 뒤 누르세요')
         ok, code, text = self._precheck()
         if not ok:
             return self._reject(code, f'시작 점검 실패: {text}')
         self._reobserved = False
-        self._reoriented = set()                  # 새 조립에서만 비운다 — 정지 · 복구 · [계속]은 같은 조립이라 그대로 둔다
         self._spare_on, self._spare_failed, self._plan_streak, self._spread = None, [], 0, None
-        self._spare_empty = self._no_match = self._bad_blocks = 0
+        self._spare_empty = self._no_match = self._bad_blocks = self._spare_centers = 0
         self._fresh, self._hold_then, self._tally = True, None, {'sent': 0, 'ok': 0}
         self.placed = self.part_id = None
         self.run_id = self.logger.start_run(self.design_id, len(self.planner.parts))   # 실제 출발 때만 새 run_id
         self._w144_open, self._w144_last, self._w144_legs = {}, {}, {}    # W144 시도: 부품 → 열린 action_id · 마지막 실패 action_id, action → 단계 기록
-        if getattr(self.io, 'w144_start', None) is not None:
-            # W144 기록(촬영 폴더 · 설정 복사 · 필수 토픽 확인 · rosbag)을 첫 find_blocks 보다 먼저 연다. 필수 자료가 없으면 움직이기 전에 오류(INTEGRATION.md)
-            ok, why = self.io.w144_start(self.design_id, self.run_id)
-            if not ok:
-                self._to_error(why)
-                return True, ''
+        # W144 기록(촬영 폴더 · 설정 복사 · 필수 토픽 확인 · rosbag)은 CHECK 첫 단계에서(잠금 밖) 연다 — 첫 이동 · find_blocks 보다 먼저
+        self._w144_starting = getattr(self.io, 'w144_start', None) is not None
         self._set('CHECK', None, '진행 확인을 시작합니다')
         return True, ''
 
     def _precheck(self, scan=False):
         """시작 점검(M-06) 중 숫자 없는 항목. 반환: (통과, 거절 reason, 이유 글자).
 
-        ① 조립 또는 scan=True의 촬영·추론 서버가 떠 있다 ② 정지 노드 신호를 받았고 잠기지 않았다 ③ 그리퍼가 비었다.
+        ① 조립 또는 scan=True의 촬영·추론 서버가 떠 있다(정지 서비스가 없으면 사람이 할 일 중심 글, 경로는 로그) ② 정지 노드 신호를 받았고 잠기지 않았다 ③ 그리퍼가 비었다.
         신호가 몇 초 안에 왔는지(신선도)는 숫자가 필요해서 보지 않는다. 사람이 영역 밖인지는 누르는 사람이 확인한다.
         """
         missing = self.io.services_ready(scan=True) if scan else self.io.services_ready()
         if missing:
-            return False, '', f'서버가 안 떠 있다: {", ".join(missing)}'
+            LOG.warning('시작 점검: 안 떠 있는 서버 %s', ', '.join(missing))     # 기술 경로는 로그에만(화면 글은 사람이 할 일 중심)
+            if '/d2/safety/stop' in missing:
+                # 10/14 점검 ③: 정지 서비스 경로만 보이면 무엇을 해야 할지 모른다 — 팀 실행 절차(복구 절차 3-2, robot_nodes.launch.py)로 안내
+                LOG.warning('시작 점검: 정지 서비스 /d2/safety/stop 없음 — 로봇 PC 로봇 노드 실행(ros2 launch d2_bringup robot_nodes.launch.py) 확인(복구 절차 3-2)')
+                return False, '', '로봇을 멈추는 기능(정지 노드)이 준비되지 않아 시작할 수 없어요. 로봇 PC의 로봇 노드가 켜져 있는지 확인한 뒤 다시 누르세요'
+            names = sorted({SERVICE_LABEL.get(n, n) for n in missing})
+            return False, '', f'서버가 안 떠 있다: {" · ".join(names)} 준비 안 됨 — 로봇 PC에서 해당 기능이 켜져 있는지 확인한 뒤 다시 누르세요'
         if self._timeout_pending:
-            return False, 'STOPPED', '시간 초과 뒤 정지 상태 확인을 기다린다'
+            return False, 'STOPPED', '시간 초과로 로봇을 멈추라고 요청했고, 정지 확인을 기다리는 중이라 시작할 수 없어요. 확인 후 화면의 복구 안내를 따라 주세요'
         if not self._hmi_fresh():
-            return False, '', '웹 연결 신호를 못 받았어요. 연결을 확인하세요'      # IRD 7장 BUSY 는 '기다렸다 다시'라 웹이 자동 재시도한다 → 맞는 코드가 없어 비움(E-62)
+            return False, '', '웹 연결 신호를 못 받았어요. 웹 PC의 웹 · 브로커와 로봇 PC의 다리(bridge)가 켜져 있는지 확인한 뒤 다시 누르세요'      # IRD 7장 BUSY 는 '기다렸다 다시'라 웹이 자동 재시도한다 → 맞는 코드가 없어 비움(E-62)
         st = self.safety
         if st is None:
-            return False, '', '정지 노드 신호를 아직 못 받았다'
+            return False, '', '정지 노드 신호를 아직 못 받았어요. 로봇 PC의 로봇 노드가 켜져 있는지 확인한 뒤 다시 누르세요'
         if st.get('stopped') or st.get('locked'):
-            return False, 'STOPPED', '정지 상태다. [다시 시작]을 먼저 누르세요'
+            return False, 'STOPPED', '정지 상태예요. 원인을 없앤 뒤 [다시 시작]을 먼저 누르세요'
         if self.gripper is None:
-            return False, '', '그리퍼 신호를 아직 못 받았다'
+            return False, '', '그리퍼 신호를 아직 못 받았어요. 로봇 PC의 로봇 노드(그리퍼)와 그리퍼 전원 · 연결을 확인한 뒤 다시 누르세요'
         if self.gripper.get('grasped'):
-            return False, '', '그리퍼가 블록을 쥐고 있다'
+            return False, '', '그리퍼가 블록을 쥐고 있어 시작할 수 없어요. 로봇 담당자에게 정리 · 복구를 요청해 주세요'
         return True, '', ''
 
     # ---------- 상태 바꾸기 · 방송 ----------
@@ -1567,7 +1702,8 @@ class TaskManager:
             self.logger.log('tally', None, f'집기 · 놓기 요청 {self._tally["sent"]}번 중 성공 {self._tally["ok"]}번')   # one_pick 집계(W132)
         summary = self.logger.finish(result)
         if not self._scan_run and getattr(self.io, 'w144_finish', None) is not None:
-            self.io.w144_finish(result == 'DONE')          # W144 촬영 ZIP(one_pick finally — 멈춘 조립도 덜 된 기록을 보존)
+            # W144 촬영 ZIP(one_pick finally — 멈춘 조립도 덜 된 기록을 보존). 여기는 잠금 안이라 닫기는 작업 스레드(run_once)가 잠금 밖에서 한다
+            self._w144_due = result == 'DONE'
         if self._scan_run:
             return                                  # 스캔은 CSV 와 scan_result 로 남기고 조립 build/2 로 저장하지 않는다
         if summary is not None:
@@ -1606,6 +1742,10 @@ class TaskManager:
         """상태를 바꾸고 /d2/task/state 로 알린다."""
         with self._lock:
             LOG.info('%s → %s %s', self.state, state, message)
+            if self.state == 'WAIT_SUPPLY' and state != 'WAIT_SUPPLY':
+                # 사람 확인 뒤 할 일(_hold_then)은 그 WAIT_SUPPLY 의 [계속]에만 — 웹 끊김 · 정지로 떠나면 비운다. 남겨 두면 나중의 다른
+                # [계속]이 엉뚱하게 VERIFY 로 갔다(10/14 점검 ② 2ⓐ). [계속]이 쓰는 길은 바꾸기 전에 이미 꺼내 갔다
+                self._hold_then = None
             self.state = state
             self._epoch += 1
             self.logger.log('state', self.part_id, state)
@@ -1613,6 +1753,8 @@ class TaskManager:
 
     def _publish(self, message_id, message):
         """state/2 한 건을 보낸다. run_id 는 조립 중(끝난 직후 포함)에만 값, message_id 는 IRD 2장 값 또는 null."""
+        if self._gripper_busy and message_id != 'gripper_done':
+            message_id = 'gripper_opening'          # 그리퍼 열기 답 전에는 어떤 알림이든 대기 표시를 유지한다 — 화면은 이것으로 팔 이동 버튼을 끈다(10/13 PL)
         self.io.publish_state({'schema': 'state/2', 'stamp': time.time(), 'mode': 'auto', 'state': self.state,
                                'run_id': self.run_id, 'design_id': self.design_id, 'part_id': self.part_id,
                                'message_id': message_id, 'message': message})

@@ -8,7 +8,7 @@
 import threading
 import uuid
 from collections import OrderedDict
-from typing import Literal
+from typing import Literal, Optional
 
 from design_gen import GenError, scan_actions
 from design_store import split_design_id
@@ -31,7 +31,7 @@ class GenJobs:
     """AI 생성 작업 — 후보 3개를 backend 메모리에 들고 사람이 고를 때까지 기다린다(새로고침 · 재시작하면 사라져도 된다, E-84 ⑥).
 
     한 번에 하나만 돈다: 두 요청이 같은 새 ID(Template 다음 V)로 검사 · 저장하지 않게. 진행은 publish({type: gen, data}) 로 화면에 민다.
-    바깥 영향: OpenAI 호출 · check_design 요청(뒤 스레드), 고르면 저장. 로봇은 움직이지 않는다.
+    바깥 영향: 설계 AI 호출(Claude 중계 — E-99) · check_design 요청(뒤 스레드), 고르면 저장. 로봇은 움직이지 않는다.
     """
 
     def __init__(self, gen, publish):
@@ -82,7 +82,9 @@ class GenJobs:
             self.publish({'type': 'scan_save', 'data': {'job_id': job_id, 'stage': stage, **info}})
         try:
             rec = self.gen.save_scan(scan_result, on_progress=progress)
-            job.update(state='saved', saved={'design_id': rec['design_id'], 'version': rec['version'], 'parent_id': rec['parent_id']})
+            job.update(state='saved', saved={'design_id': rec['design_id'], 'version': rec['version'], 'parent_id': rec['parent_id'],
+                                             # AI 가 부모를 고른 까닭 — 화면에 한 줄(10/14 PL · 민범진 제안 1, 전엔 기록에만)
+                                             'ai_template': rec.get('ai_template'), 'ai_reason': rec.get('ai_reason')})
         except GenError as e:
             job.update(state='failed', code=e.code, message=e.message, detail=e.detail, actions=scan_actions(e.detail))
         except Exception as e:   # noqa: BLE001 — 저장소 · 검사 경로 고장도 화면에 실패로
@@ -236,10 +238,12 @@ def list_designs(request: Request, family: str | None = None):
 
 @router.get('/rules')
 def rules(request: Request):
-    """화면이 쓰는 설계 규칙 숫자(robot.yaml 에서 backend 가 읽은 값 — 10/9 PL E-78). 3D 블록 크기 · 작업공간(mm)."""
+    """화면이 쓰는 설계 규칙 숫자(robot.yaml 에서 backend 가 읽은 값 — 10/9 PL E-78). 3D 블록 크기 · 작업공간(mm) +
+    store = 지금 쓰는 저장소(json · postgres — 화면 연결 표시 줄, 10/14 PL. 화면이 처음 붙을 때 한 번 받음)."""
     r = request.app.state.rules
     return {'block_size_mm': [round(v * 1000, 3) for v in r['block_size_m']],
-            'assembly_area_half_mm': round(r['assembly_area_half_m'] * 1000, 3)}
+            'assembly_area_half_mm': round(r['assembly_area_half_m'] * 1000, 3),
+            'store': getattr(request.app.state.store, 'KIND', 'json')}
 
 
 @router.get('/templates')
@@ -258,6 +262,26 @@ def get_design(design_id: str, request: Request):
         raise HTTPException(404, f'{design_id} 설계가 없다') from None
     except ValueError as e:
         raise HTTPException(409, str(e)) from None
+
+
+class NameBody(BaseModel):
+    """표시 이름(W197) — 글자면 붙이고, 빈 글자 · null 이면 지운다."""
+    name: Optional[str] = None
+
+
+@router.put('/{design_id}/name')
+def rename(design_id: str, body: NameBody, request: Request):
+    """설계의 표시 이름을 붙이거나 지운다(W197 — design_id · 레시피는 그대로) → {design_id, display_name}.
+    없는 설계 404, 이름 꼴이 틀리면 400(글자 수 · 줄바꿈), 저장소 끊김 503. 바깥 영향: 저장소 한 칸 쓰기."""
+    try:
+        name = request.app.state.store.set_display_name(design_id, body.name)
+    except KeyError:
+        raise HTTPException(404, f'{design_id} 설계가 없다') from None
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    except OSError as e:
+        raise HTTPException(503, f'저장소에 못 썼어요 → DB · 데이터 폴더 → backend 로그({e})') from None
+    return {'design_id': design_id, 'display_name': name}
 
 
 @router.get('/{design_id}/builds')

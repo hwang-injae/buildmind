@@ -92,6 +92,33 @@ def test_dxf_build_matches_saved_files(model_id, cad, tmp_path, monkeypatch):
         assert (tmp_path / name).read_bytes() == (RM / 'recipes' / name).read_bytes(), name
 
 
+# 짝 저장(10/14 점검 ④2): 두 파일 중 하나라도 있으면 한 번만 묻고 둘 다 쓰거나 둘 다 안 쓴다 — 한쪽만 바뀌면 짝 해시가 어긋나 모두가 못 읽는다.
+# 하나만 있는 폴더에서 [1] → 둘 다 새것, [2] · 입력 없음(EOFError) → 둘 다 그대로(없던 파일도 안 생김), 엉뚱한 답은 다시 묻는다. 없으면 묻지 않고 둘 다 쓴다.
+@pytest.mark.parametrize('answers, saved', [(['1'], True), (['2'], False), (['3', 'y', '2'], False), ([EOFError], False), (None, True)])
+def test_save_recipe_pair_writes_both_or_neither(answers, saved, tmp_path, monkeypatch):
+    sys.path.insert(0, str(RM / 'recipe_manager'))
+    from main import RecipeManager
+    recipe, placements = tmp_path / 'X_recipe.json', tmp_path / 'X_placements.csv'
+    if answers is not None:
+        recipe.write_text('old', encoding='utf-8')
+    asked = []
+
+    def answer(prompt):
+        """준비한 답을 차례로 돌려준다(EOFError 는 던진다) — 물은 횟수를 센다."""
+        asked.append(prompt)
+        reply = answers[len(asked) - 1]
+        if reply is EOFError:
+            raise EOFError
+        return reply
+    monkeypatch.setattr('builtins.input', answer)
+    assert RecipeManager(tmp_path).save_recipe_pair({recipe: 'new', placements: 'new'}) is saved
+    assert len(asked) == (0 if answers is None else len(answers))
+    if saved:
+        assert recipe.read_text(encoding='utf-8') == placements.read_text(encoding='utf-8') == 'new'
+    else:
+        assert recipe.read_text(encoding='utf-8') == 'old' and not placements.exists()
+
+
 # 폴더: cads/ 에는 CAD 만(계획 파일 없음), recipes/ 에는 모형마다 _recipe.json · _placements.csv 2개만(_structure.json 없앰 — E-69)
 def test_folders_hold_only_cad_and_results():
     assert not list((RM / 'cads').glob('*plan*'))

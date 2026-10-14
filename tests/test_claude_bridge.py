@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 for p in (ROOT / 'web', ROOT / 'web' / 'backend', ROOT / 'src' / 'd2_task', ROOT / 'src' / 'd2_bridge'):
     sys.path.insert(0, str(p))
 
-from claude_bridge import BridgeError, ClaudeBridge, make_handler  # noqa: E402
+from claude_bridge import BridgeError, ClaudeBridge, is_usage_limit, make_handler  # noqa: E402
 
 TOOL = {'type': 'function', 'function': {'name': 'get_design', 'strict': True, 'description': '설계 읽기',
         'parameters': {'type': 'object', 'additionalProperties': False, 'required': ['design_id'],
@@ -96,11 +96,29 @@ def test_model_alias_or_default():
     ({'is_error': False, 'result': '형식 없이 글만', 'structured_output': None}, 502, '형식'),
 ])
 def test_claude_failure_status(reply, status, words):
-    """사용 한도(글에 limit — --check ③과 같은 판단) → 429, 그 밖 claude 오류 · 형식 없는 답 → 502. 이유는 그대로(화면이 보여 줌)."""
+    """사용 한도(is_usage_limit — --check ③과 같은 판단) → 429, 그 밖 claude 오류 · 형식 없는 답 → 502. 이유는 그대로(화면이 보여 줌)."""
     run, _ = fake(reply)
     with pytest.raises(BridgeError) as e:
         ClaudeBridge('claude', 'sonnet', run).complete({'response_format': FMT, 'messages': [{'role': 'user', 'content': 'x'}]})
     assert e.value.status == status and words in e.value.message
+
+
+@pytest.mark.parametrize('text, limit', [
+    ("You've hit your session limit · resets 3pm", True),
+    ('You’ve hit your weekly limit', True),                  # 굽은 따옴표
+    ('Claude AI usage limit reached|1760000000', True),           # 옛 판 글
+    ("You're out of extra usage", True),
+    ('Context limit reached', False),                             # 'limit' 낱말만 있는 한도 아닌 실패(10/13 PL)
+    ('Budget limit reached', False),
+    ('API Error: 500 time limit exceeded', False),
+    ('', False), (None, False),
+])
+def test_usage_limit_only_for_usage_limit_text(monkeypatch, text, limit):
+    """진짜 사용 한도 글만 한도(429) — 'limit' 낱말만 있는 실패는 아님(502). claude 가 출력 없이 끝난 경로(_run)도 같은 판단."""
+    assert is_usage_limit(text) is limit
+    monkeypatch.setattr(subprocess, 'run', lambda argv, **kw: subprocess.CompletedProcess(argv, 1, '', text or ''))
+    code, _ = post(ClaudeBridge('claude', 'sonnet'), {'messages': [{'role': 'user', 'content': 'x'}]})
+    assert code == (429 if limit else 502)
 
 
 def test_claude_timeout_is_504(monkeypatch):

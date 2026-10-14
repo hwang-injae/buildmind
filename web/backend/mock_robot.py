@@ -49,6 +49,8 @@ from mqtt_client import make_mqtt_client  # noqa: E402
 RECIPES = Path(os.environ.get('RECIPE_DIR') or REPO / 'src' / 'd2_robot' / 'd2_bringup' / 'recipes')   # app.py 와 같은 환경 변수
 ROBOT_YAML = REPO / 'src' / 'd2_robot' / 'd2_bringup' / 'config' / 'robot.yaml'
 BENCH = '001_CHAIR_BENCH_V000'           # 가짜 스캔 결과 · nearest_base 에 쓰는 설계(IRD 11장 '벤치 레시피')
+LOCKED_TEXT = {'select_design': '지금은 설계를 바꿀 수 없다', 'start': '지금은 출발할 수 없다', 'scan': '지금은 스캔을 시작할 수 없다',
+               'cancel': '준비·오류·스캔 검토 상태에서만 취소할 수 있다'}   # 잠김 중 거절 글 — 진짜 작업 관리자 문구(_reject)
 SERVICES = ('/d2/hmi/command', '/d2/safety/stop', '/d2/safety/resume', '/d2/task/check_design')
 GET_DESIGN = '/d2/hmi/get_design'   # 로봇이 부름 — 웹 저장소가 답한다(진짜 작업 관리자 → 다리와 같은 토픽)
 CANCEL_OK = ('READY', 'ERROR', 'SCAN_REVIEW')     # 취소를 받는 상태(SDD 5.1, 10/8 E-62)
@@ -94,7 +96,7 @@ def fake_scan_media(blocks, origin, size_mm):
 
 
 class MockRobot:
-    """로봇 PC 흉내. 상태 하나(state/1)와 잠금 하나(safety_state/1)를 들고, 명령에 따라 바꾸고 MQTT 로 방송한다.
+    """로봇 PC 흉내. 상태 하나(state/2)와 잠금 하나(safety_state/1)를 들고, 명령에 따라 바꾸고 MQTT 로 방송한다.
 
     입력: 화면 요청(…/req). 출력: 응답(…/res) · retained 상태 토픽. 실패: 모르는 설계 select · 모르는 명령은 success false · 빈 reason(진짜와 같게).
     """
@@ -142,9 +144,8 @@ class MockRobot:
 
     def local_design(self, design_id):
         """레시피 두 파일 → (doc, parts/4.0) — 기본 설계만 있다. 없으면 OSError · ValueError."""
-        family = 'chair' if 'CHAIR' in design_id.upper() else 'desk'
         doc = RecipeDocument.load(RECIPES, design_id)
-        return doc, RecipeToParts(design_id, family, self.block_mm).convert(doc.recipe, doc.placements)
+        return doc, RecipeToParts(design_id, self.block_mm).convert(doc.recipe, doc.placements)
 
     # ---------- 방송 ----------
     def pub(self, topic, body, qos=1):
@@ -220,15 +221,16 @@ class MockRobot:
         self.pub('d2/task/progress', planner.progress_message(run_id, time.time()))
 
     def _scan(self, run_id):
-        """SCAN_MOVE · CAPTURE 를 자세 3곳 → SCAN_INFER → scan_result/2.0(벤치 blocks/2, 추정 2개) + 사진 · 점군 → SCAN_REVIEW.
+        """SCAN_MOVE · CAPTURE 를 robot.yaml scan.poses 자세마다(W186 — 진짜와 같은 순서) → SCAN_INFER → scan_result/2.0(벤치 blocks/2,
+        추정 2개) + 사진 · 점군 → SCAN_REVIEW.
 
         스캔 중 화면 실시간 창(E-82)을 시험하려고 자세마다: 이동 중 live 미리보기 2번(지금 보이는 블록만) · 촬영 때 capture 미리보기
-        (지금까지 모은 누적본, index 1 · 2 · 3) — 다리가 보내는 것과 같은 토픽 · 순서(JSON 바로 뒤 PLY). 손목 RGB 는 화면에 안 씀(10/13 PL).
+        (지금까지 모은 누적본, index 1 · 2 · …) — 다리가 보내는 것과 같은 토픽 · 순서(JSON 바로 뒤 PLY). 손목 RGB 는 화면에 안 씀(10/13 PL).
         """
         _, design = self.local_design(BENCH)
         items = [{'scan_num': b['sequence'], 'x': b['x'], 'y': b['y'], 'z': b['z'], 'ori': b['ori'], 'inferred': i < 2}
                  for i, b in enumerate(design['parts'])]     # 가려져 추측한 블록 2개를 흉내(화면 반투명 표시 시험용)
-        poses = ('observe', 'observe_front', 'observe_side')
+        poses = tuple(self.cfg['scan']['poses'])
         live = 0
         for i, pose in enumerate(poses, 1):
             seen = {'schema': 'blocks/2', 'blocks': items[:max(1, len(items) * i // len(poses))]}   # 자세마다 더 많이 보임(누적)
@@ -245,11 +247,11 @@ class MockRobot:
         self.set_state('SCAN_INFER', '스캔 결과 계산 중', 'scan_running')
         if self.abort.wait(self.step_s * 2):
             return
-        scan = {'schema': 'blocks/2', 'design_id': 'scan_chair_01', 'family': 'chair', 'blocks': items}
+        scan = {'schema': 'blocks/2', 'design_id': 'scan_chair_01', 'family': 'chair', 'blocks': items}   # 실제 wrist_block 처럼 scan_<family>_NN(가장 가까운 기본 설계의 family — 10/14 PL, 저장 때 버림)
         jpeg, ply = fake_scan_media(scan, self.origin, self.block_mm)
         result = {'schema': 'scan_result/2.0', 'run_id': run_id, 'inferred_count': 2, 'blocks': scan,
                   'image_path': f'/mock/scan/{run_id}/color.png' if jpeg else '',   # 로봇 PC 경로 흉내 — 웹은 열지 않는다
-                  'poses_used': ['observe', 'observe_front', 'observe_side'], 'nearest_base': BENCH}   # E-79 힌트
+                  'poses_used': list(poses), 'nearest_base': BENCH}   # E-79 힌트
         if ply:
             result['cloud_path'] = f'/mock/scan/{run_id}/cloud.ply'   # 선택 칸 — 점군이 없으면 뺀다(진짜와 같음)
         self.pub('d2/task/scan_result', result)
@@ -282,13 +284,15 @@ class MockRobot:
     def command(self, b):
         """hmi/command 처리 → (success, reason). 실제 작업 관리자 규칙을 간단히 흉내(잠금 · 상태 · 설계)."""
         cmd, design_id, state = b.get('cmd'), b.get('design_id') or '', self.st['state']
-        if self.opening:
-            # 그리퍼가 열리는 동안은 어떤 명령이든 BUSY — 진짜 작업 관리자(#157 W183)가 정본(10/14 PL A2 ①, 옛 흉내는 STOPPED · cancel 받음)
-            return False, 'BUSY'
+        if self.opening and cmd != 'cancel':
+            # 그리퍼가 열리는 동안 select_design · start · scan · gripper_open 은 BUSY, cancel([초기화])은 받는다 — 진짜 작업 관리자
+            # (#157 W183)가 정본(10/14 10시 PL — E-101 예외 유지). 정지 · resume 은 따로 오는 요청이라 여기 안 옴. 받아도 알림은 끝날 때까지
+            # gripper_opening 그대로(set_state — E-101 ①)
+            return self._reject('BUSY', '그리퍼를 여는 중이라 받지 않는다 — 완료 안내 뒤 다시')
         if cmd == 'gripper_open':
             # [그리퍼 열기](W183 · 10/13 PL): 작업 관리자가 STOPPED(잠김)일 때만 /d2/gripper/command(0.0865 m · 10 N) — 그 밖엔 거절
             if state != 'STOPPED':
-                return False, 'BUSY'
+                return self._reject('BUSY', '그리퍼 열기는 정지 상태에서만 할 수 있다')
             self.opening = True
             self.set_state(state, '그리퍼를 여는 중이에요. 완료 안내까지 기다리세요', 'gripper_opening')
             threading.Thread(target=self._open_gripper, daemon=True).start()   # 답은 바로, 열림 완료는 state/2 로(진짜와 같게)
@@ -300,18 +304,21 @@ class MockRobot:
             self.set_state('STOPPED', '이번 조립을 버렸어요 — 잠금을 풀면 대기로 가요', 'stopped', part_id=None)
             return True, ''
         if self.locked:
-            return False, 'STOPPED'
+            return self._reject('STOPPED', LOCKED_TEXT.get(cmd, f'정지 중이라 {cmd} 를 받지 않는다'))
         if cmd == 'select_design':
             try:
                 self.design(design_id)
             except (OSError, ValueError):
-                return False, ''            # 맞는 코드 없는 거절 = 빈 값(+ 진짜는 state/2 글) — IRD 7장 ERROR 는 '세우고 사람 호출'(10/14 PL A3)
+                # 맞는 코드 없는 거절 = 빈 값 + state/2 글 — IRD 7장 ERROR 는 '세우고 사람 호출'(10/14 PL A3)
+                return self._reject('', f'설계 파일을 못 읽었다: {design_id!r}')
             self.set_state('READY', f'{design_id} 선택 — 출발을 누르세요', 'ready_to_start', design_id=design_id)
             return True, ''
         if cmd == 'start':
             design_id = design_id or self.st['design_id']
-            if state not in ('READY', 'WAIT_SUPPLY', 'WAIT_HMI') or not design_id:
-                return False, 'BUSY'
+            if not design_id:
+                return self._reject('', '설계를 먼저 고르세요')
+            if state not in ('READY', 'WAIT_SUPPLY', 'WAIT_HMI'):
+                return self._reject('BUSY', '지금은 출발할 수 없다')
             run_id = time.strftime('R%Y%m%d_%H%M%S_') + 'm0ck'
             self.placed = []
             self.set_state('CHECK', '출발 — 관측', run_id=run_id, design_id=design_id)
@@ -319,17 +326,23 @@ class MockRobot:
             return True, ''
         if cmd == 'scan':
             if state not in ('IDLE', 'DONE', 'SCAN_REVIEW'):
-                return False, 'BUSY'
+                return self._reject('BUSY', '지금은 스캔을 시작할 수 없다')
             run_id = time.strftime('R%Y%m%d_%H%M%S_') + 'scan'
             self.set_state('SCAN_MOVE', '스캔 시작', 'scan_running', run_id=run_id)
             self._run(self._scan, run_id)
             return True, ''
         if cmd == 'cancel':
             if state not in CANCEL_OK:
-                return False, 'BUSY'
+                return self._reject('BUSY', '준비·오류·스캔 검토 상태에서만 취소할 수 있다')
             self.set_state('IDLE', '취소했어요', design_id=None, run_id=None)
             return True, ''
-        return False, ''                    # 모르는 명령 — 진짜 작업 관리자와 같게 빈 값(10/14 PL A3)
+        return self._reject('', f'모르는 명령: {cmd}')     # 진짜 작업 관리자와 같게 빈 값 + 글(10/14 PL A3)
+
+    def _reject(self, reason, message):
+        """명령 거절 — 진짜 작업 관리자 _reject 처럼 상태는 그대로 두고 까닭 글을 state/2(message_id 없음)로 낸다 → (False, reason).
+        화면은 이 글로 까닭을 보인다(잠김 중에도 — 10/14 한석형 · PL). 글은 진짜 작업 관리자 문구를 따름."""
+        self.set_state(self.st['state'], message, None)
+        return False, reason
 
     def answer(self, name, b):
         """서비스 하나에 답할 칸을 만든다(IRD 10.1 응답 칸)."""

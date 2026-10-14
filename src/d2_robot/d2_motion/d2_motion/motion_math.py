@@ -575,8 +575,8 @@ def recipe_name(path):
 
 def recipe_sha256(recipe):
     """짝 확인 해시 = 레시피(구조) 객체를 키 정렬 · 공백 없는 JSON(한글 그대로)의 UTF-8 바이트로 만든 sha256 (IRD 6장 E-69).
-    d2_task.recipe_builder.RecipeBuilder.calculate_recipe_sha256 과 같은 식이다 — d2_task 가 d2_motion 을 쓰므로 여기서 불러 쓸 수 없어
-    같은 두 줄을 두고, 값이 같은지는 tests/test_motion_math.py 가 확인한다."""
+    정본은 d2_task.recipe_document.recipe_sha256(10/14 C4) — d2_task 가 d2_motion 을 쓰므로 여기서 불러 쓸 수 없어
+    같은 두 줄을 두고, 값이 같은지는 tests/test_shared_tables.py 가 확인한다."""
     text = json.dumps(recipe, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
@@ -622,7 +622,7 @@ def recipe_parts(cfg, recipe):
     블록 이름 = '<그룹>_<part>' 예 LEG_001_01 — 사람 칸 label · revision 은 읽지 않는다).
     part_id = 조립 방법의 part_id 칸, 없으면 '<design_id>_<블록 이름>' (예 001_CHAIR_BENCH_V000_LEG_001_01 — 노드 사이 전체 블록 이름).
     옛 한 파일 꼴(model.instances + steps)도 아직 읽는다 — task(TaskPlanner)가 두 파일을 RecipeDocument 로 이 꼴로 합쳐 넘기고
-    (steps[].part_id), task 시험 예시는 이 꼴 파일이다(part_id 가 없으면 '<design_id>_B<sequence 3자리>'). task 옮기기(W141) 뒤 뺀다.
+    (steps[].part_id), task 시험 예시는 이 꼴 파일이다(part_id 가 없으면 '<DESIGN_ID>_<instance_id>' — 10/14 C3, 옛 _B<번호> 꼴은 없앰). task 옮기기(W141) 뒤 뺀다.
     옛 blocks[] 형식 · 로봇 쪽 옛 파일 이름 .recipe.json 은 W139 뒤 뺐다(W138).
     조립 원점은 robot.yaml assembly_origin 하나만 쓴다 (레시피 T_base_from_cad 는 null — 10/4 합의).
     가로 위치는 설계 그대로, 높이는 받침의 실제 윗면 위에 실측 블록(block_actual_m)으로 쌓아 올린 값이다.

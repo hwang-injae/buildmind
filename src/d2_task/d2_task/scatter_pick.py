@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """흩뿌림 집기 준비 ScatterFlow — 목표 블록을 유지한 채 find_blocks 결과로 후보를 고르고 집기 요청을 준비한다 (ROS 없이 동작, W130).
 
-TaskManager 의 SELECT 안에서(공개 상태를 늘리지 않고) 쓰려고 만든 계산 클래스다. 아직 TaskManager · 로봇 호출에 연결하지 않았다.
+TaskManager 의 SELECT 안에서(공개 상태를 늘리지 않고) 쓰는 계산 클래스다(supply_mode scatter 에서 TaskManager 가 부른다 — 로봇 호출은 하지 않는다).
 호출 흐름(연결할 때): ① SELECT 가 TaskPlanner 에서 목표 블록(part_id · 잡기 · 놓을 자세)을 정한다 → ② begin() 으로 요청 표를 받는다 →
 ③ 잠금 밖에서 observe_supply 로 가서 find_blocks 를 부르고 prepare() 로 후보를 계산한다(계산만 — 상태를 바꾸지 않는다) →
 ④ **TaskManager 잠금 안에서** commit() 이 요청 번호 · 상태 · 정지 · 종료를 다시 확인하고 같은 구간에서 후보를 적용한다(확인과 적용 사이에 정지가 끼지 못한다) →
@@ -16,19 +16,22 @@ import threading
 from d2_motion.motion_math import TILT_DEG as NODE_TILT_DEG, column, half_height, quat_from_axes, rot_z, rpy_matrix
 
 from d2_task.block_picker import BlockPicker, grasp_target
+from d2_task.recipe_document import GRASPS
 
 SUPPLY_SCATTER = 'scatter'
 # 받침 경유 1단계에서 고르는 잡기 — 모든 잡기(one_pick 과 같음). 옆으로 선 · 선 블록은 그 자세로 받침에 세워 놓고 받침에서 눕힌다(잡기 TIP)
-SPARE_GRASPS = ('FLAT_SHORT', 'FLAT_LONG', 'EDGE_SHORT', 'EDGE_LONG', 'STAND_SHORT', 'STAND_LONG', 'TILT')
+SPARE_GRASPS = GRASPS + ('TILT',)       # 받침으로 옮길 때 쓸 수 있는 잡기 = 정본 6가지 + 기울여 집기(10/14 점검 ③-5)
 SIZE_KEYS = ('LENGTH', 'WIDTH', 'THICKNESS')
 # 기울여 집는 윗면 기울기 범위 (°) — 위 끝은 집기 노드 기울여 집기 계산과 같은 motion_math.TILT_DEG(45°). 10/13 PL: tool_tilt_max_deg(30) 키를
 # 지움(30 ~ 35° 안전 모드는 충돌 민감도 오설정 탓). 위 끝 값은 석형님 확인
 TILT_DEG = (3.0, NODE_TILT_DEG[1])
-# 세우기(E-37 · E-77): 목표 자세(위 축) → 눕힌 블록을 집을 잡기 (10/11 16:50 PL — 세움 FLAT_SHORT · 옆세움 FLAT_LONG)
-REORIENT_GRASP = {'LENGTH': 'FLAT_SHORT', 'WIDTH': 'FLAT_LONG'}
 # 받침 경유 세우기(W131 교시 동작, 10/13): 목표 자세(위 축) → (집기 노드 잡기 이름, 교시 동작 이름). 블록 방향 yaw 는 세운 뒤
 # find_blocks 규약(세움 = WIDTH 변 · 옆세움 = LENGTH 변 방향) — 교시대로 긴 축 y 로 눕힌 블록을 세우면 세움 0° · 옆세움 90°
 STANDUP = {'LENGTH': ('STANDUP_HIGH', 'high', 0.0), 'WIDTH': ('STANDUP_SIDE', 'side', 90.0)}
+# 받침 맞추기(10/14 실기): 맞춘 뒤 다시 잰 블록 가운데가 받침 자리에서 이 안이면 맞은 것(박진용 2 mm — 세우기 손가락 여유 한쪽 약 6 mm),
+# 넘으면 다시 맞춘다 — 블록 하나에 최대 CENTER_MAX 번(넘겨도 사람을 부르지 않고 이어 간다 — 일반은 잰 자리에서 집고 세우기는 그대로 세움, 박진용)
+CENTER_TOL_M = 0.002
+CENTER_MAX = 2
 
 # 실패 뒤 동작. 이유만으로 정하지 않는다 — 실행 단계(phase)와 잡힘 상태(grasped)로 '접촉 전'이 확인될 때만 후보를 다시 쓴다.
 # PLAN_FAILED 는 접근 계획뿐 아니라 집은 뒤 들어 올리기 · 운반 · 놓기에서도 나온다. 쥐었거나 상태가 불명확하면 기존 정지 · 복구 절차(RECOVER)로 넘긴다.
@@ -159,7 +162,6 @@ class StepTracker:
                 self._current = self._step = self._result_at = None
 
 
-UP_INDEX = {'LENGTH': 0, 'WIDTH': 1, 'THICKNESS': 2}     # block_actual_m [길이, 폭, 두께] 에서 위 축 치수 자리
 
 
 def _finite(v):
@@ -220,11 +222,6 @@ class ScatterFlow:
             self.candidate = None
             return (self._token, epoch)
 
-    def is_current(self, ticket, epoch, halted):
-        """(읽기만) 답을 적용해도 되나: 더 새 요청이 없고 · 상태가 안 바뀌었고 · 정지 · 종료 중이 아닐 때만 참. 적용은 commit 으로 한다."""
-        with self._lock:
-            return (not halted) and ticket == (self._token, epoch)
-
     def commit(self, ticket, state_fn, result):
         """prepare() 결과를 적용한다. 요청 번호 · 상태 · 정지 · 종료 재확인과 후보 적용을 한 구간에서 한다. 반환: 적용했으면 True.
 
@@ -236,7 +233,7 @@ class ScatterFlow:
             epoch, halted = state_fn()
             if halted or ticket != (self._token, epoch):
                 return False
-            if result.get('status') in ('PICK', 'REORIENT', 'SPARE', 'SPARE_TIP', 'SPARE_CENTER'):
+            if result.get('status') in ('PICK', 'SPARE', 'SPARE_TIP', 'SPARE_CENTER'):
                 self.candidate = {'request': copy.deepcopy(result['request']), 'candidate': copy.deepcopy(result['candidate']),
                                   'gap_mm': result['gap_mm']}
             else:
@@ -250,7 +247,7 @@ class ScatterFlow:
             self.candidate = None
 
     # ---------- 후보 고르기와 요청 준비 ----------
-    def prepare(self, target, response, allow_reorient=False):
+    def prepare(self, target, response):
         """목표 블록 + find_blocks 응답 → 집기 요청 준비. 반환 dict 의 status:
 
         (후보는 이 함수가 정하지 않는다 — 계산만. 적용은 commit.)
@@ -266,9 +263,6 @@ class ScatterFlow:
         EMPTY         공급에 블록이 없다 → 채우기 안내(guide 'REFILL')
         NO_MATCH      블록은 있는데 맞는 후보가 없다 → 제외 이유(counts · message)를 안내(guide 'CHECK_BLOCKS')
         LOOKUP_FAILED 조회 실패 · 잘못된 응답 — 공급 부족이 아니다(reason)
-        REORIENT      (allow_reorient 이고 목표가 세움 · 옆세움인데 맞는 후보가 없을 때만) 눕힌 블록을 빈 자리(spare_spots)에 세우는 요청.
-                      request 는 PICK 과 같은 칸 + 내부 표시 'reorient': True(액션으로는 안 감 — task_node 는 이름 있는 칸만 읽는다).
-                      세울 수 없으면(눕힌 후보 없음 · 기울어진 블록이 있음 · 빈 자리 없음) REORIENT 를 만들지 않고 NO_MATCH 그대로.
         target = {part_id, grasp, place_pose}. 목표 part_id · 놓을 자세 · 잡기는 그대로 유지하고 복사해서 쓴다.
         """
         if not self.configured:
@@ -282,10 +276,6 @@ class ScatterFlow:
                 return {'status': 'EMPTY', 'guide': 'REFILL'}
             if picked['counts']['invalid'] == len(response['blocks']):
                 return {'status': 'LOOKUP_FAILED', 'reason': 'ALL_INVALID'}      # 쓸 수 있는 블록이 하나도 없는 응답 — 조회 오류
-            if allow_reorient and up in REORIENT_GRASP:
-                reorient = self._reorient(target, response['blocks'], up)
-                if reorient is not None:
-                    return reorient
             return {'status': 'NO_MATCH', 'guide': 'CHECK_BLOCKS', 'counts': dict(picked['counts']),
                     'message': self._why(picked['counts'])}
         c = picked['block']
@@ -322,7 +312,7 @@ class ScatterFlow:
         옆으로 섬은 긴 축이 받침 방향(spot yaw_deg), 섬은 넘어지는 쪽(yaw + 90°)이 받침 긴 변(support_long_yaw)이 되게 — 짧은 변으로 넘기면
         넘기기 전 세운 자리가 받침 밖(가운데에서 44.6 mm).
         반환 status: SPARE(request — 받침에 놓는 PickPlace 칸 + 내부 표시 'via_spare': True, attempt = failed 에 넣을 꼴, tag = 고른 이유)
-        · EMPTY · NO_MATCH(counts · message) · NOT_CONFIGURED · LOOKUP_FAILED · BLOCKED. 바깥 영향 없음.
+        · EMPTY · NO_MATCH(counts · message) · NOT_CONFIGURED · LOOKUP_FAILED · BLOCKED(값이 틀린 블록이 하나라도 있음 · 받침 자리 설정 틀림). 바깥 영향 없음.
         """
         if not self.configured:
             return {'status': 'NOT_CONFIGURED'}
@@ -335,12 +325,20 @@ class ScatterFlow:
         blocks = [self._with_tilt(b) for b in response['blocks']]
         if not blocks:
             return {'status': 'EMPTY', 'guide': 'REFILL'}
+        bad = next((k for k, b in enumerate(response['blocks']) if not self.picker.is_valid(b)), None)
+        if bad is not None:
+            # 값이 틀린 블록(up 모름 등)은 손가락 자리 · 장애물 계산에 못 쓴다 — 고르기 전에 막고 다시 찍는다(_obstacles 와 같은 규칙).
+            # 예전엔 순위 계산(rank)이 이웃 블록 상자를 만들다 예외로 멈췄다(#152 리뷰 6, 재현됨)
+            return {'status': 'BLOCKED', 'reason': 'INVALID_OBSTACLE', 'index': bad, 'guide': 'CHECK_BLOCKS',
+                    'message': f'블록 {bad}번의 값이 잘못돼 집기를 시작하지 않는다'}
         if not self.can_stand(grasp_target(target['grasp'], self.cfg)[0]):
             return {'status': 'STAND_NOT_READY'}           # 받침에서 세우는 동작(robot.yaml standup_taught)이 없다 — 공급에서 옮기기 전에 막는다
         pts = height_points(response.get('height_map'))
         ranked, cut = self.picker.rank(blocks, list(failed), pts)
-        # 깊이를 못 받으면 기울여 집기는 뺀다 — 손가락 자리 · 윗면 평면을 깊이로 못 본 채 기울여 내려가지 않는다(one_pick NO_DEPTH)
-        ranked = [r for r in ranked if r[1] in SPARE_GRASPS and (pts is not None or r[1] != 'TILT')]
+        # 깊이를 못 받으면(높이 지도 없음 · 점 0개) 기울여 집기는 뺀다 — 손가락 자리 · 윗면 평면을 깊이로 못 본 채 기울여 내려가지 않는다
+        # (one_pick NO_DEPTH. 점 0개를 '받음'으로 보던 것 — 10/14 점검 ② 5)
+        depth = pts is not None and len(pts) > 0
+        ranked = [r for r in ranked if r[1] in SPARE_GRASPS and (depth or r[1] != 'TILT')]
         if not ranked:
             n = len(blocks)
             return {'status': 'NO_MATCH', 'guide': 'CHECK_BLOCKS', 'counts': {'no_clear': n},
@@ -402,18 +400,23 @@ class ScatterFlow:
         req['obstacles'] = obstacles
         return copy.deepcopy(req)
 
-    def prepare_from_spare(self, target, response, centered=False):
+    def prepare_from_spare(self, target, response, centers=0):
         """받침 경유 2단계 — 받침 위 블록(find_blocks area 'spare' — 깊이로 잰 블록 하나)을 보고 다음 요청을 준비한다(계산만, one_pick 과 같은 순서).
         받침은 공급 영역 밖 블록 하나뿐인 자리라 장애물 없음.
 
         ⓪ 옆으로 선 · 선 블록이 레시피와 같은 자세면(세우기 뒤) PICK — 눕히지 않고 레시피 잡기로 바로 집어 조립한다.
         ① 그 밖의 옆으로 선 · 선 블록이면 SPARE_TIP — 잡기 TIP 으로 받침 가운데에 눕힌다(누울 자리 yaw: 옆으로 섬 = spot yaw_deg, 섬 = 받침 긴 변).
-           눕힌 뒤 받침을 다시 잰다. ② 레시피 잡기가 FLAT_SHORT · FLAT_LONG 이고 centered 가 거짓이면 SPARE_CENTER — 반대 폭으로 물었다 놓아
-           (CENTER_<반대 잡기>) 레시피 잡기가 맞춰 주지 않는 축을 잰 중심으로 맞춘 뒤, 다시 재지 않고 같은 잰 값으로 집는다(request['then']).
-        ②' 세움 · 옆세움 레시피(STAND_* · EDGE_*)면 받침 가운데로 맞추고(SPARE_CENTER) 이어서 세우기 교시 동작(then — STANDUP_HIGH ·
-           STANDUP_SIDE, 10/13 W131)으로 세운다 — 세운 뒤 다시 재면 ⓪ 으로 집는다(_stand_request). 교시가 없으면 STAND_NOT_READY(사람).
+           눕힌 뒤 받침을 다시 잰다. ② 눕힌 블록이면 받침 맞추기(SPARE_CENTER) — 잰 중심 · 방향에서 레시피 잡기의 반대 폭(<반대 잡기>)으로 집어
+           받침 가운데(spot · yaw_deg)에 옮겨 놓는다(10/14 — 받침에 밀려 · 틀어져 놓인 것을 없앰). 맞춘 뒤 작업 관리자가 받침을 다시 재서
+           centers(이 블록에 맞추기를 한 수)를 하나 올려 다시 부른다 — 받침 자리에서 CENTER_TOL_M 안이면 다음으로, 넘으면 CENTER_MAX 번까지 다시 맞춘다.
+           일반(FLAT_SHORT · FLAT_LONG): 맞은 뒤(또는 CENTER_MAX 를 넘기면) 잰 자리에서 레시피 잡기로 집는다(PICK). 맞추기가 움직이기 전에 길이
+           안 나오면 잰 값 그대로 집는다(request['skip']).
+        ②' 세움 · 옆세움 레시피(STAND_* · EDGE_*): 같은 방법으로 맞춘 뒤 맞았으면 세우기 교시 동작(SPARE_STAND — STANDUP_HIGH · STANDUP_SIDE,
+           10/13 W131)으로 세운다 — 세운 뒤 다시 재면 ⓪ 으로 집는다(_stand_request). CENTER_MAX 번에도 안 맞으면 사람을 부르지 않고 그대로
+           세운다(박진용). 교시가 없으면 STAND_NOT_READY(사람).
+           centers > 0 인 결과에는 다시 잰 어긋남 offset_mm(받침 자리에서 블록 가운데까지 수평 거리)를 붙인다(작업 관리자가 기록).
         ③ 그 밖은 PICK — 잰 중심 · 방향에서 레시피 잡기로 곧게 다시 집어 조립 자리(target place_pose)에 놓는다.
-        반환 status: SPARE_TIP · SPARE_CENTER · PICK(request · candidate) · SPARE_EMPTY(받침에 블록이 안 보임) · STAND_NOT_READY
+        반환 status: SPARE_TIP · SPARE_CENTER · SPARE_STAND · PICK(request · candidate) · SPARE_EMPTY(받침에 블록이 안 보임) · STAND_NOT_READY
         · SPARE_BLOCKED(받침 둘레 손가락 자리에 높은 점 — message)
         · SPARE_NOT_FLAT(자세를 모름 — block) · NOT_CONFIGURED · LOOKUP_FAILED. 바깥 영향 없음.
         """
@@ -448,8 +451,10 @@ class ScatterFlow:
             return {'status': 'SPARE_TIP', 'request': copy.deepcopy(request), 'candidate': copy.deepcopy(b), 'gap_mm': None}
         if b.get('up') != 'THICKNESS':
             return {'status': 'SPARE_NOT_FLAT', 'block': copy.deepcopy(b)}
+        off = math.hypot(b['x_m'] - spot['x_m'], b['y_m'] - spot['y_m'])
+        recenter = centers == 0 or (off > CENTER_TOL_M and centers < CENTER_MAX)
         if want != 'THICKNESS':
-            return self._stand_request(target, spot, base, want)
+            return self._with_offset(self._stand_request(target, b, spot, base, want, recenter, off), centers, off)
         # 윗면 = 받침 윗면 + 두께(잰 높이는 1 ~ 2 mm 흔들려 그대로 물면 손 안에서 매달려 놓을 때 받침을 누른다 — 10/11 실기)
         pick_pose = block_pose(self.cfg, 'THICKNESS', b['yaw_deg'], b['x_m'], b['y_m'], base + thick)
         request = {'part_id': target['part_id'], 'supply_slot': '', 'grasp': target['grasp'], 'pick_pose': pick_pose,
@@ -463,31 +468,46 @@ class ScatterFlow:
             hit = ranker.fingers_blocked(fingers, tip_z, pts)
             if hit:
                 return {'status': 'SPARE_BLOCKED', 'message': ', '.join(f'{k}번 손가락 {f * 100:.0f} %' for k, f in hit)}
-        if not centered and target['grasp'] in ('FLAT_SHORT', 'FLAT_LONG'):
+        if recenter and target['grasp'] in ('FLAT_SHORT', 'FLAT_LONG'):
+            # 받침 맞추기(10/14): 잰 자리에서 반대 폭으로 집어 받침 가운데에 옮겨 놓는다 — 그 자리에서 물기만 하면 밀려 놓인 블록이 그대로 남았다
             other = 'FLAT_LONG' if target['grasp'] == 'FLAT_SHORT' else 'FLAT_SHORT'
-            center = dict(request, grasp='CENTER_' + other, place_pose=pick_pose, spare_center=True, then=copy.deepcopy(request))
-            return {'status': 'SPARE_CENTER', 'request': copy.deepcopy(center), 'candidate': copy.deepcopy(b), 'gap_mm': None}
-        return {'status': 'PICK', 'request': copy.deepcopy(request), 'candidate': copy.deepcopy(b), 'gap_mm': None}
+            spot_pose = block_pose(self.cfg, 'THICKNESS', spot['yaw_deg'], spot['x_m'], spot['y_m'], base + thick)
+            center = dict(request, grasp=other, place_pose=spot_pose, spare_center=True, skip=copy.deepcopy(request))
+            return self._with_offset({'status': 'SPARE_CENTER', 'request': copy.deepcopy(center), 'candidate': copy.deepcopy(b), 'gap_mm': None},
+                                     centers, off)
+        return self._with_offset({'status': 'PICK', 'request': copy.deepcopy(request), 'candidate': copy.deepcopy(b), 'gap_mm': None}, centers, off)
 
-    def _stand_request(self, target, spot, base, up):
-        """받침 위 눕힌 블록을 세우는 요청(세움 · 옆세움 레시피, W131 교시 동작) — 먼저 받침 가운데로 맞추고(SPARE_CENTER) 이어서 세운다.
+    @staticmethod
+    def _with_offset(result, centers, off):
+        """맞추기를 한 뒤(centers > 0) 결과에 다시 잰 어긋남 offset_mm 를 붙인다(작업 관리자 기록용). 결과 dict 를 그대로 돌려준다."""
+        if centers > 0:
+            result['offset_mm'] = round(off * 1000.0, 1)
+        return result
 
-        교시 동작은 받침 자리 한 곳의 좌표라, 맞추기는 잰 중심이 아니라 받침 자리(spare_spots 첫 자리) · 받침 방향(yaw_deg)에서 문다 —
-        세우기 잡기가 맞춰 주지 않는 축을 반대 폭(CENTER_<반대 잡기>)으로 물어 블록을 받침 가운데로 민다. 세우기 요청(then)은 그 자리의
-        눕힌 블록 → 세운 블록(위 축 up)이고, 끝나면 다음 SELECT 가 받침을 다시 재서 레시피 잡기로 집는다(spare_stand).
-        반환: SPARE_CENTER(request · then) 또는 STAND_NOT_READY(교시 없음). 바깥 영향 없음.
+    def _stand_request(self, target, b, spot, base, up, recenter, off):
+        """받침 위 눕힌 블록 b(잰 값)를 세우는 요청(세움 · 옆세움 레시피, W131 교시 동작) — recenter 면 받침 가운데에 옮겨 놓고(SPARE_CENTER),
+        아니면 세운다(SPARE_STAND — 맞았거나 CENTER_MAX 번을 다 했음). off = 받침 자리에서 잰 가운데까지 m(기록용).
+
+        교시 동작은 받침 자리 한 곳(spare_spots 첫 자리 · yaw_deg)의 좌표라 블록이 꼭 그 자리에 있어야 한다. 맞추기는 잰 중심 · 방향에서
+        세우기 잡기의 반대 폭(<반대 잡기>)으로 집어 받침 가운데에 놓는다(10/14 — 예전엔 받침 가운데에서 물기만 해서 11 mm 밀린 블록을
+        손가락이 찍었다, 10/13 실기). 세우기 요청은 그 자리의 눕힌 블록 → 세운 블록(위 축 up)이고, 끝나면 다음 SELECT 가 받침을 다시 재서
+        레시피 잡기로 집는다(spare_stand). 맞추기를 건너뛸 길(skip)은 없다 — 가운데가 아니면 못 세운다.
+        반환: SPARE_CENTER · SPARE_STAND(request) · STAND_NOT_READY(교시 없음). 바깥 영향 없음.
         """
         if not self.can_stand(up):
             return {'status': 'STAND_NOT_READY'}
         grasp, case, yaw = STANDUP[up]
         size = dict(zip(SIZE_KEYS, self.cfg['block_actual_m']))
         lying = block_pose(self.cfg, 'THICKNESS', spot['yaw_deg'], spot['x_m'], spot['y_m'], base + size['THICKNESS'])
+        seen = block_pose(self.cfg, 'THICKNESS', b['yaw_deg'], b['x_m'], b['y_m'], base + size['THICKNESS'])
         stood = block_pose(self.cfg, up, yaw, spot['x_m'], spot['y_m'], base + size[up])
         stand = {'part_id': target['part_id'], 'supply_slot': '', 'grasp': grasp, 'pick_pose': lying, 'place_pose': stood,
                  'open_width_m': self.open_width_m, 'obstacles': [], 'spare_stand': True}
+        if not recenter:
+            return {'status': 'SPARE_STAND', 'request': copy.deepcopy(stand), 'candidate': copy.deepcopy(b), 'gap_mm': None}
         under = self.cfg['standup_taught'][case]['grasp']
         other = 'FLAT_LONG' if under == 'FLAT_SHORT' else 'FLAT_SHORT'
-        center = dict(stand, grasp='CENTER_' + other, pick_pose=lying, place_pose=lying, spare_center=True, then=copy.deepcopy(stand))
+        center = dict(stand, grasp=other, pick_pose=seen, place_pose=lying, spare_center=True)
         center.pop('spare_stand')
         return {'status': 'SPARE_CENTER', 'request': copy.deepcopy(center), 'candidate': None, 'gap_mm': None}
 
@@ -517,45 +537,6 @@ class ScatterFlow:
         b['tilt_tip_z_m'] = top - self.cfg['block_actual_m'][2] / 2 * n[2]
         return b
 
-    def _reorient(self, target, blocks, up):
-        """눕힌 블록 하나를 빈 자리에 세우는 요청(REORIENT) 또는 None(세울 수 없음 → 부르는 쪽이 NO_MATCH).
-
-        잡기 = REORIENT_GRASP[up](PL 확정), 눕힌 후보는 그 잡기로 BlockPicker 의 같은 규칙으로 고른다. 놓을 자세 = 빈 자리 중심 · yaw_deg 에
-        블록을 up 축이 위로 서게(block_pose — 공급 칸과 같은 yaw 규약, 세움은 윗면 25 mm 변 방향). part_id 는 목표 그대로(장면 · 진행표에서 같은 이름).
-        빈 자리 확인은 놓기 전 필수 — 이번 관측에서 외곽을 아는 블록(고른 블록 제외)의 수평 외곽과 세운 블록 외곽이 겹치면 점유.
-        기울어진 블록이 하나라도 있으면 외곽을 확정할 수 없어 세우지 않는다(관측 불확실성 — 근사 상자로 대신하지 않음).
-        손가락 접근 공간은 W131 접근 경로가 정해지기 전이라 보지 않는다. 바깥 영향 없음(계산만).
-        yaw 는 확정 규약(LENGTH 위 = WIDTH 방향, WIDTH 위 = LENGTH 방향, base x 0° · 반시계 + · 180° 같음)으로 spare_spots yaw_deg 를 그대로 쓴다.
-        임시 시험 전제(운영 활성화 전 확인 필요): spare_spots 좌표는 임시(W146 실기 확인 대기) · 빈 자리는 외곽 겹침만 확인(W131 손가락 · 회전 · 접근 · 후퇴 공간 없음).
-        운영 TaskManager 는 allow_reorient 기본 False 라 이 요청을 만들지 않는다 — W131 두 grasp 지원 · W146 정식 좌표 · W131 과 맞춘 공간 판정 뒤 활성화.
-        """
-        try:                                  # 세울 때만 검증한다 — 세우기가 꺼져 있으면 잘못된 spare_spots 가 일반 집기를 막지 않는다
-            spots = self._spare_spots(self.cfg.get('spare_spots', []))
-        except ValueError as e:
-            return {'status': 'BLOCKED', 'reason': 'INVALID_SPARE_SPOTS', 'guide': 'CHECK_BLOCKS', 'message': str(e)}
-        grasp = REORIENT_GRASP[up]
-        lie_up, axis = grasp_target(grasp, self.cfg)
-        picked = self.picker.pick(blocks, lie_up, axis)
-        if picked['status'] != 'FOUND' or any(b.get('tilted') is True for b in blocks):
-            return None
-        known = [b for i, b in enumerate(blocks) if i != picked['index'] and self.picker.is_valid(b)]
-        spot = next((s for s in spots
-                     if not any(self._rects_overlap(self._spot_rect(s, up), self._block_rect(b)) for b in known)), None)
-        if spot is None:
-            return None                       # 두 자리 모두 점유는 PL 제외 범위(미지원) — 점유된 자리로 보내지 않고, 부르는 쪽의 NO_MATCH 로 끝난다(한계)
-        obstacles = self._obstacles(blocks, picked['index'])
-        if isinstance(obstacles, dict):
-            return obstacles
-        c = picked['block']
-        pick_pose = block_pose(self.cfg, c['up'], c['yaw_deg'], c['x_m'], c['y_m'], c['top_z_m'])
-        # 바닥 = 빈 자리 z_m(받침 윗면, 없으면 작업면) — 10/13 새 받침은 윗면 80 mm 라 작업면 기준이면 80 mm 낮게 놓는다
-        place_pose = block_pose(self.cfg, up, spot['yaw_deg'], spot['x_m'], spot['y_m'],
-                                spot.get('z_m', self.cfg['table_z_m']) + self.cfg['block_actual_m'][UP_INDEX[up]])
-        request = {'part_id': target['part_id'], 'supply_slot': '', 'grasp': grasp, 'pick_pose': pick_pose, 'place_pose': place_pose,
-                   'open_width_m': self.open_width_m, 'obstacles': obstacles, 'reorient': True}
-        return {'status': 'REORIENT', 'request': copy.deepcopy(request), 'candidate': copy.deepcopy(c), 'gap_mm': picked['gap_mm'],
-                'spot': spots.index(spot)}
-
     @staticmethod
     def _spare_spots(spots):
         """robot.yaml spare_spots → 검증한 목록(값은 그대로). 형식이 틀리면 ValueError(조용히 빼지 않는다) — 세울 때만 부른다."""
@@ -565,38 +546,6 @@ class ScatterFlow:
             if not isinstance(s, dict) or not all(_finite(s.get(key)) for key in ('x_m', 'y_m', 'yaw_deg')):
                 raise ValueError(f'robot.yaml spare_spots {k}번이 {{x_m, y_m, yaw_deg}} 숫자가 아니다')
         return [dict(s) for s in spots]
-
-    def _footprint(self, up):
-        """위 축별 수평 외곽 (yaw 방향 길이, 직각 방향 길이) m — find_blocks yaw 규약(눕힘 · 옆세움 = LENGTH 변, 세움 = WIDTH 변)."""
-        length, width, thick = self.cfg['block_actual_m']
-        return {'THICKNESS': (length, width), 'WIDTH': (length, thick), 'LENGTH': (width, thick)}[up]
-
-    def _block_rect(self, b):
-        return (b['x_m'], b['y_m'], b['yaw_deg']) + self._footprint(b['up'])
-
-    def _spot_rect(self, s, up):
-        return (s['x_m'], s['y_m'], s['yaw_deg']) + self._footprint(up)
-
-    @staticmethod
-    def _rects_overlap(a, b):
-        """돌린 두 직사각형(x, y, yaw_deg, 길이, 폭)이 넓이를 가지고 겹치나(분리축). 변이 닿기만 하면 겹침 아님 — 여유값은 두지 않는다."""
-        import math
-
-        def axes_corners(r):
-            x, y, yaw, length, width = r
-            c, s = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
-            ux, vx = (c, s), (-s, c)
-            pts = [(x + i * length / 2 * ux[0] + j * width / 2 * vx[0], y + i * length / 2 * ux[1] + j * width / 2 * vx[1])
-                   for i in (-1, 1) for j in (-1, 1)]
-            return (ux, vx), pts
-
-        (a_axes, a_pts), (b_axes, b_pts) = axes_corners(a), axes_corners(b)
-        for ax in a_axes + b_axes:
-            pa = [p[0] * ax[0] + p[1] * ax[1] for p in a_pts]
-            pb = [p[0] * ax[0] + p[1] * ax[1] for p in b_pts]
-            if min(max(pa), max(pb)) - max(min(pa), min(pb)) <= 1e-9:
-                return False
-        return True
 
     def _obstacles(self, blocks, picked_index):
         """같은 응답에서 고른 인덱스 하나만 빼고 나머지를 장애물 자세로 바꾼다. 반환: 자세 목록, 또는 요청을 막는 BLOCKED dict.

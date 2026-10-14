@@ -7,7 +7,7 @@
 // 진행: /ws {type: gen} 알림이 오면 job 을 GET 으로 다시 받는다(알림이 몰려와도 빠짐없이). 알림이 끊겨도 만드는 동안 1초마다 다시 받는다.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '@/lib/api';
-import { checkReasonKo, designName } from '@/lib/names';
+import { NO_WEB, checkReasonKo, designName } from '@/lib/names';
 import type { GenCandidate, GenJob, Intent, Rules } from '@/lib/types';
 import type { Robot } from '@/lib/ws';
 import { roleItems } from './DesignView';
@@ -70,7 +70,7 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
     setMadeBy(by);
     const r = await api.startGenerate(t, baseId);
     setBusy(false);
-    if (!r.data) return setError(r.error ?? '웹 서버 답이 없어요');
+    if (!r.data) return setError(r.error ?? NO_WEB);
     setJob({ job_id: r.data.job_id, state: 'running', text: t, base_id: baseId, template: '', candidates: [] });
     onLog('gen', `후보 만들기 시작 — 바탕 ${designName(baseId)}${by === 'voice' ? '(음성)' : ''}`);
   };
@@ -88,7 +88,7 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
     if (!listening) return;
     const t = setTimeout(() => {
       setListening(false);
-      setError('음성을 못 받았어요 — 마이크 · 음성 프로그램(voice.py)을 확인하고 다시 눌러 주세요');
+      setError('음성을 못 받았어요 → 마이크와 음성 프로그램(voice.py)이 켜져 있는지 → 웹 PC 터미널의 voice.py 로그 · 마이크 연결, 확인 뒤 다시 눌러 주세요');
     }, LISTEN_MS);
     return () => clearTimeout(t);
   }, [listening]);
@@ -110,7 +110,7 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
     setError('');
     const r = await api.pickCandidate(jobId, index, madeBy);
     setBusy(false);
-    if (!r.data) return setError(r.error ?? '웹 서버 답이 없어요');
+    if (!r.data) return setError(r.error ?? NO_WEB);
     const j = await api.getGenJob(jobId);
     if (j) setJob(j);
     onSaved(r.data.design_id);
@@ -172,6 +172,8 @@ function JobView({ job, rules, dark, canPick, onPick }: { job: GenJob; rules: Ru
   return (
     <>
       <p className={`result ${job.state === 'failed' ? 'bad' : job.state === 'running' ? '' : 'ok'}`}>{status}</p>
+      {/* 기다리는 시간 안내(W108 — 민범진 #147 측정 31 ~ 165초, 10/14 시험 165 ~ 384초 → 전체 상한 5분 = design_gen GEN_LIMIT_S) */}
+      {job.state === 'running' && <p className="muted small">AI가 만드는 데 몇 분 걸려요(최대 5분) — 끝나면 검사를 통과한 후보만 보여 줘요</p>}
       {job.state !== 'running' && job.base_id && (
         <p className="muted small">
           바탕 {designName(job.base_id)}

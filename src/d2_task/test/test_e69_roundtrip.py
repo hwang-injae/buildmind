@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """E-69 새 레시피 4종 왕복 시험(task 쪽, ROS 없이): 두 문서 읽기 → 진행표 → 변환기 ② parts/4.0 → 검사 묶음 → 작명 규칙 v3 일치.
 
-변환기 ①(W110, 한세교, 10/10 오전)은 아직 없어서 '다시 레시피로' 방향은 이름 · 번호가 같아지는지로 확인한다: parts/4.0 의 role · part 와 위치 순서로
+'다시 레시피로' 방향은 이름 · 번호가 같아지는지로 확인한다(변환기 ① parts_to_recipe 의 전체 왕복은 test_parts_to_recipe): parts/4.0 의 role · part 와 위치 순서로
 작명 규칙 v3 이 부품 번호 · 블록 번호를 다시 매기면 레시피의 블록 이름과 같아야 한다(V-45 왕복의 task 쪽 절반).
 """
 import pytest
@@ -17,7 +17,7 @@ from test_recipe_to_parts import BLOCK_MM, IDS, RECIPES
 def blocks_of(model_id):
     doc = RecipeDocument.load(RECIPES, model_id)
     design_id, family, _ = IDS[model_id]
-    return doc, RecipeToParts(design_id, family, BLOCK_MM).convert(doc.recipe, doc.placements)
+    return doc, RecipeToParts(design_id, BLOCK_MM).convert(doc.recipe, doc.placements)
 
 
 @pytest.mark.parametrize('model_id', IDS)

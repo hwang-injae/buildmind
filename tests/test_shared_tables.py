@@ -109,3 +109,29 @@ def test_recipe_readers_match_canon():
         assert _steps(mm.load_recipe(str(RECIPES / f'{model}_recipe.json'))['steps']) == canon, model
         _, pl = mock_scan.load_recipe_files(RECIPES, model)
         assert _steps(pl['steps']) == canon, model
+
+
+def test_screen_names_match_canon():
+    """화면 lib/names.ts 복사본(10/14 PM 점검 — HMI): 역할 표 ROLE = roles.json 역할, 설계 ID 정규식 DESIGN_RE = 저장소 split_design_id 와
+    같은 판정 · 조각, 부품 이름 정규식 = 정본 part_name 이 만드는 이름(레시피 4개 전부)을 읽고 역할을 맞게 뗀다."""
+    from design_store import split_design_id
+    ts = (ROOT / 'web' / 'frontend' / 'lib' / 'names.ts').read_text(encoding='utf-8')
+    roles = json.loads((ROOT / 'src' / 'd2_task' / 'd2_task' / 'roles.json').read_text(encoding='utf-8'))['roles']
+    body = re.search(r'export const ROLE: Record<string, \{ ko: string; color: string \}> = \{([^}]*(?:\}[^}]*)*?)\n\};', ts).group(1)
+    assert set(re.findall(r'^\s*([A-Z]+): \{', body, re.M)) == set(roles)
+    design_re = re.compile(re.search(r'const DESIGN_RE = /(.+?)/;', ts).group(1))
+    for name in ('001_CHAIR_BENCH_V000', '004_DESK_PEDESTAL_V012', '001_CHAIR_BENCH_V0001', '01_CHAIR_V001', 'scan', '001_chair_V001'):
+        m = design_re.fullmatch(name)
+        try:
+            want = split_design_id(name)
+        except ValueError:
+            want = None
+        assert (m and (m.group(1), int(m.group(2)))) == (want or None), name
+    part_re = re.compile(re.search(r'const m = /(\^\(\[A-Z\]\+\).+?)/\.exec\(rest\)', ts).group(1))
+    for model in MODELS:
+        recipe = json.loads((RECIPES / f'{model}_recipe.json').read_text(encoding='utf-8'))
+        for role, comp in recipe['template']['composition'].items():
+            for group, items in comp['parts'].items():
+                for item in items:
+                    m = part_re.fullmatch(part_name(group, item['part']))
+                    assert m and m.group(1) == role.split('_')[0], (model, group, item['part'])

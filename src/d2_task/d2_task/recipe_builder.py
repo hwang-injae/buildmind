@@ -1,15 +1,12 @@
-import hashlib
 import json
 import re
 
 import numpy as np
 
 # 설계 잡기 6개 · 부품 이름 규칙은 정본(recipe_document)을 가져다 쓴다(10/14 PL C1 · C3 — 같은 표를 따로 두면 한쪽만 고쳐 어긋난다)
-from d2_task.recipe_document import GRASPS, part_id, part_name
+from d2_task.recipe_document import GRASPS, PLACEMENTS_SCHEMA, RECIPE_SCHEMA, part_id, part_name, recipe_sha256   # 형식 · 지문은 정본(10/14 점검 ③-5)
 
 # 형식 이름 = <이름>/<앞>.<뒤>. 레시피(구조)와 조립 방법은 짝이라 숫자를 같이 올린다 (10/8 한세교, E-52 의 cad_structure/1.0 · cad_recipe/1.0 다음).
-RECIPE_SCHEMA = 'recipe/4.0'
-PLACEMENTS_SCHEMA = 'placements/4.0'
 
 # 좌표 비교 허용오차(mm). CAD 좌표의 부동소수 오차를 흡수한다.
 TOL = 1e-6
@@ -274,16 +271,16 @@ class RecipeBuilder:
                 'recipe_sha256': self.calculate_recipe_sha256(recipe), 'steps': steps}
 
     def calculate_recipe_sha256(self, recipe):
-        """짝 확인 해시 — 레시피 객체를 키 정렬 · 공백 없는 JSON(한글 그대로)의 UTF-8 바이트로 만든 sha256 (10/8 한세교, 바꾸지 않음).
+        """짝 확인 해시 — 정본 recipe_document.recipe_sha256 을 부른다(10/14 점검 ③-5, 같은 식을 두 곳에 두지 않음).
 
-        파일 바이트가 아니라 객체로 계산해 DB 저장 · MQTT 전달로 다시 써도(들여쓰기 · 키 순서가 바뀌어도) 값이 같다.
+        키 정렬 · 공백 없는 JSON(한글 그대로)의 UTF-8 바이트로 만든 sha256(10/8 한세교 정함). 파일 바이트가 아니라 객체로 계산해
+        DB 저장 · MQTT 전달로 다시 써도 값이 같다. 정본은 NaN · Infinity 가 있으면 ValueError(옛 복사본은 그대로 글자로 넣었다).
 
         입력:
             recipe: 레시피 dict
         출력: 16진 글자 64자
         """
-        text = json.dumps(recipe, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
-        return hashlib.sha256(text.encode('utf-8')).hexdigest()
+        return recipe_sha256(recipe)
 
     def make_placement_rows(self, recipe, placements):
         """조립 방법 CSV 줄. sequence 순서로 조립 단계와 레시피의 목표 위치 · 방향을 한 줄씩 합친다(칸 = PLACEMENT_COLUMNS).

@@ -37,7 +37,7 @@ def first_part(recipe):
 
 def convert(model_id):
     design_id, family, _ = IDS[model_id]
-    return RecipeToParts(design_id, family, BLOCK_MM).convert(*load(model_id))
+    return RecipeToParts(design_id, BLOCK_MM).convert(*load(model_id))
 
 
 @pytest.mark.parametrize('model_id', IDS)
@@ -91,7 +91,7 @@ def test_의자_등받이_위층():
 def test_steps_순서가_섞여도_sequence_순():
     r, pl = load('001_CHAIR_BENCH_V000')
     pl['steps'].reverse()
-    out = RecipeToParts('bench', 'chair', BLOCK_MM).convert(r, pl)
+    out = RecipeToParts('bench', BLOCK_MM).convert(r, pl)
     assert [b['sequence'] for b in out['parts']] == list(range(1, 12))
     assert out == convert('001_CHAIR_BENCH_V000')
 
@@ -99,7 +99,7 @@ def test_steps_순서가_섞여도_sequence_순():
 def test_원본_레시피를_바꾸지_않는다():
     r, pl = load('001_CHAIR_BENCH_V000')
     before = copy.deepcopy((r, pl))
-    RecipeToParts('bench', 'chair', BLOCK_MM).convert(r, pl)
+    RecipeToParts('bench', BLOCK_MM).convert(r, pl)
     assert (r, pl) == before
 
 
@@ -107,10 +107,17 @@ def test_출력은_JSON으로_직렬화된다():
     json.dumps(convert('003_DESK_STAND_V000'))
 
 
-def test_design_id_family_는_명시_입력():
-    for args in (('', 'chair'), ('bench', ''), (None, None)):
+def test_design_id_는_명시_입력_빈_값이면_거절():
+    for design_id in ('', None):
         with pytest.raises(ValueError):
-            RecipeToParts(*args, BLOCK_MM)
+            RecipeToParts(design_id, BLOCK_MM)
+
+
+def test_인자_수가_틀리면_TypeError_옛_family_호출도():
+    with pytest.raises(TypeError):
+        RecipeToParts('bench')
+    with pytest.raises(TypeError):
+        RecipeToParts('bench', 'chair', BLOCK_MM)                  # 옛 (design_id, family, block_mm) 호출은 10/14 PL 로 없앰
 
 
 def bad(mutate, reseal=True):
@@ -122,7 +129,7 @@ def bad(mutate, reseal=True):
     if reseal:
         pl['recipe_sha256'] = recipe_sha256(r)
     with pytest.raises(ValueError):
-        RecipeToParts('bench', 'chair', BLOCK_MM).convert(r, pl)
+        RecipeToParts('bench', BLOCK_MM).convert(r, pl)
 
 
 @pytest.mark.parametrize('schema', ['cad_structure/1.0', 'cad_recipe/1.0', 'assembly.recipe/1.0', 'recipe/1.0', 'recipe/2.0', None])
@@ -130,15 +137,15 @@ def test_옛_형식과_다른_앞자리는_schema를_보고_거절(schema):
     """E-69: 칸 이름이 아니라 schema 로 확인한다. 옛 cad_* · assembly.recipe 는 변환하지 않고 거절, 받은 schema 가 이유에 적힌다."""
     r, pl = load('001_CHAIR_BENCH_V000')
     with pytest.raises(ValueError, match='schema'):
-        RecipeToParts('bench', 'chair', BLOCK_MM).convert(dict(r, schema=schema), pl)
+        RecipeToParts('bench', BLOCK_MM).convert(dict(r, schema=schema), pl)
     with pytest.raises(ValueError, match='schema'):
-        RecipeToParts('bench', 'chair', BLOCK_MM).convert(r, dict(pl, schema=schema))
+        RecipeToParts('bench', BLOCK_MM).convert(r, dict(pl, schema=schema))
 
 
 def test_옛_두_파일을_서로_바꿔_넣으면_거절():
     r, pl = load('001_CHAIR_BENCH_V000')
     with pytest.raises(ValueError, match='schema'):
-        RecipeToParts('bench', 'chair', BLOCK_MM).convert(pl, r)
+        RecipeToParts('bench', BLOCK_MM).convert(pl, r)
 
 
 def test_짝_해시가_안_맞으면_거절():
@@ -152,7 +159,7 @@ def test_model_id가_다르면_거절():
 
 def test_잘못된_schema():
     with pytest.raises(ValueError):
-        RecipeToParts('bench', 'chair', BLOCK_MM).convert({}, {})
+        RecipeToParts('bench', BLOCK_MM).convert({}, {})
 
 
 def test_없는_block():
@@ -204,7 +211,7 @@ def test_역할이_한_단어_옵션_0_1개가_아니면_거절():
 
 def test_좌표는_레시피_원본_값_그대로():
     r, pl = load('003_DESK_STAND_V000')
-    out = RecipeToParts('desk_stand', 'desk', BLOCK_MM).convert(r, pl)
+    out = RecipeToParts('desk_stand', BLOCK_MM).convert(r, pl)
     center = {name: b['center_mm'] for name, b in flat_parts(r).items()}
     for step, b in zip(sorted(pl['steps'], key=lambda s: s['sequence']), out['parts']):
         cx, cy, _ = center[step['part_name']]
@@ -226,7 +233,7 @@ def test_부품이_참조하는_자재가_없으면_거절한다():
     r, pl = load('001_CHAIR_BENCH_V000')
     r['stocks'] = [{'stock_id': 'PART_001', 'size_mm': BLOCK_MM}]
     with pytest.raises(ValueError, match='stocks'):
-        RecipeToParts('bench', 'chair', BLOCK_MM).convert(r, dict(pl, recipe_sha256=recipe_sha256(r)))
+        RecipeToParts('bench', BLOCK_MM).convert(r, dict(pl, recipe_sha256=recipe_sha256(r)))
 
 
 def test_count가_실제_그룹_수와_다르면_거절():

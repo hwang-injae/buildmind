@@ -31,6 +31,7 @@ from d2_task.design_checker import DesignChecker
 from d2_task.recipe_document import GRASPS
 from d2_task.recipe_to_parts import ORIS, ori_extents   # 방향 코드 · 표 정본(10/14 PL C2)
 from d2_task.row_grasp import row_orders                # 연짝 찾기 정본(E-104 — 박진용 #156)
+from d2_task.template_checker import DIM_KO, LAYS, RELATIONS   # 21번 검사의 말(정본) — 프롬프트 [Template 규칙]이 같은 낱말을 쓰게
 from design_store import AI_NONE, SCHEMA_PARTS, build_summary, family_of, split_design_id
 
 LLM_URL = os.environ.get('D2_LLM_URL') or 'http://127.0.0.1:8790/v1'   # 중계 claude_bridge(컨테이너에서는 compose 가 호스트 주소로 줌)
@@ -38,8 +39,11 @@ MODEL = os.environ.get('D2_LLM_MODEL') or 'opus'   # 설계 작성 · 스캔 채
 #                                                     sonnet 은 책상 후보에 블록 35 ~ 54개(조립이 너무 김) — opus 는 16 ~ 18개라 기본
 CALL_TIMEOUT_S = 260             # 호출당 시간 제한 — 10/13 시험 후보 작성 한 번 31 ~ 165초(책상이 김)라 30초(TR-12)에서 늘림.
 #                                  중계 RUN_TIMEOUT_S(240)보다 20초 길게(10/13 17시 PL) — 중계가 먼저 끊어야 claude 가 혼자 남지 않고 504 로 까닭이 온다
+GEN_LIMIT_S = 300                # 생성 한 번(읽기 + 후보 + 더 만들기) 전체 상한 — 10/14 PL 5분(10/14 시험: 더 만들기 2번이면 10분 넘음)
+REGEN_MIN_S = 60                 # 남은 시간이 이보다 적으면 더 만들지 않는다 — 후보 쓰기 한 번이 10/14 시험 56 ~ 214초라 못 끝냄
 CALL_RETRIES = 0                 # 다시 안 함 — 한 번이 1 ~ 2분이라 다시 하면 화면이 너무 오래 멈춘다. 실패는 화면에 알리고 사람이 다시 누른다
 MAX_READS = 2                    # 도구 get_design 최대 횟수(E-72)
+SKIP_READ = 'SKIP'               # 도구 get_design 의 '더 안 읽음' 선택지(generate) — 설계 ID 꼴(<Template>_V###)이 아니라 겹치지 않음
 MAX_REGEN = 2                    # 통과 후보가 3개 안 될 때 모자란 만큼 더 만드는 횟수(처음 + 2번 — 10/11 PL N3 · A5)
 SCAN_REFILLS = 2                 # 스캔 [저장]이 AI 칸 · Template 탓으로 떨어지면 AI 가 다시 채우는 횟수(10/11 PL A3 — 레시피 초안 7-1)
 N_CANDIDATES = 3                 # 후보 수(E-67)
@@ -61,6 +65,12 @@ PROMPTS = Path(__file__).parent / 'prompts'
 ROLES = Path(__file__).resolve().parents[2] / 'src' / 'd2_task' / 'd2_task' / 'roles.json'   # 변환기 ①과 같은 목록 파일
 ROBOT_YAML = Path(__file__).resolve().parents[2] / 'src' / 'd2_robot' / 'd2_bringup' / 'config' / 'robot.yaml'
 MADE_KO = {'cad': '도면', 'web': '웹 글', 'voice': '음성', 'scan': '스캔'}
+# [Template 규칙] 글(21번 revision 칸 → 사람 말, 10/14 PL — AI 가 규칙을 미리 알고 쓰게). 놓기 · 관계 · 치수 이름은 21번 검사 것(위 import)
+LAY_HOW = {'FLAT_STACK': '묶음마다 눕힌 블록을 같은 자리에 층층이 — 한 층에 블록 하나, 위아래 자리가 같음. 같은 층에 이어 붙이면 떨어진다',
+           'FLAT_SIDE_BY_SIDE': '눕힌 블록을 모두 같은 높이 한 층에 나란히',
+           'STAND_STACK': '묶음마다 세운 블록을 같은 자리에 층층이 — 한 층에 블록 하나'}
+AT_KO = {'X_ENDS': '좌우 끝', 'Y_ENDS': '앞뒤 끝', 'REAR_END': '뒤 끝', 'X_CENTER': '좌우 가운데', 'TOP': '윗면'}
+MIRROR_KO = {'X': '좌우 대칭', 'XY': '좌우 · 앞뒤 대칭'}
 
 
 class GenError(Exception):
@@ -128,7 +138,7 @@ class DesignGenerator:
                 from openai import OpenAI
                 self._client = OpenAI(base_url=LLM_URL, api_key='claude-bridge', timeout=CALL_TIMEOUT_S, max_retries=CALL_RETRIES)
             except Exception as e:   # noqa: BLE001 — 라이브러리 없음 등 모두 '생성 못 함'으로
-                raise GenError('GEN_FAILED', f'AI 를 부를 수 없어요(준비 실패: {type(e).__name__})') from e
+                raise GenError('GEN_FAILED', f'설계 AI 를 부를 준비를 못 했어요({type(e).__name__}) → 웹 backend 에 openai 라이브러리가 있는지 → 웹 PC 에서 docker compose logs web') from e
         return self._client
 
     # ---------- Template 이름 · 스캔 AI 판단 기록 ----------
@@ -165,8 +175,9 @@ class DesignGenerator:
         바탕으로 주고, 같은 Template 의 다른 설계는 목록 요약 + 도구 get_design 으로 참고만 읽게 한다(안 읽어도 됨 — E-72).
 
         후보 규칙(10/11 PL N3 · A5 — 레시피 초안 7-1): 3개 검사 → 통과한 후보만 남기고 모자란 개수만큼 AI 가 더 만든다(떨어진 후보의
-        검사 결과를 알려 줌). 더 만들기는 처음 + MAX_REGEN 번까지(35 ~ 60초 걸려도 그대로, 먼저 보여 주기 없음 — 화면은 끝난 뒤 통과한
-        후보만 그림). 끝까지 3개가 안 차면 통과한 1 ~ 2개만. REQUEST_INVALID(웹 쪽 잘못)는 더 만들지 않는다.
+        검사 결과를 알려 줌). 더 만들기는 처음 + MAX_REGEN 번까지(먼저 보여 주기 없음 — 화면은 끝난 뒤 통과한 후보만 그림). 생성 전체는
+        GEN_LIMIT_S(5분, 10/14 PL) 안 — 남은 시간이 REGEN_MIN_S 보다 적으면 더 만들지 않는다. 끝까지 3개가 안 차면 통과한 1 ~ 2개만,
+        하나도 없으면 떨어진 까닭(만들 수 없는 모양 등 — 더 만들기 호출이 시간 초과여도 그것으로 덮지 않음). REQUEST_INVALID(웹 쪽 잘못)는 더 만들지 않는다.
         on_progress(stage, info): 화면 진행 표시용 — 'reading'(참고 설계 읽음) · 'candidates'(이번에 검사할 후보 수 count — 그림은 안 줌) ·
         'checked'(후보 하나 검사 끝 — passed = 지금까지 통과 수) · 'retry'(모자라서 더 — need). 출력: {text, base_id, template, family,
         design_id, parent_id(= base_id), reference(AI 가 읽은 설계), candidates[{idea, parts, check}](통과한 것만), attempts, elapsed_s,
@@ -191,16 +202,17 @@ class DesignGenerator:
         family = family_of(template)
         parent = base_id
         t0 = self.clock()
+        deadline = t0 + GEN_LIMIT_S
         log = self._new_log('generate', text, self.design_prompt, template=template, base_id=base_id)
         request = self._request_text(text, template, base_row, base_parts, others)
         messages = [{'role': 'system', 'content': self.design_prompt}, {'role': 'user', 'content': request}]
         read = []
         try:
             if not allowed:                                         # 읽을 다른 설계가 없음(기본 설계뿐) — 도구 없이 바로 후보
-                msg = self._chat(log, MODEL, messages, self._candidates_format())
+                msg = self._chat(log, MODEL, messages, self._candidates_format(), deadline=deadline)
             else:
                 try:
-                    msg = self._read_and_answer(log, messages, allowed, read, progress, first='auto')
+                    msg = self._read_and_answer(log, messages, allowed, read, progress, skip=True, deadline=deadline)
                 except GenError as e:
                     # 도구 단계가 실패하면 같은 Template 예시를 코드가 넣어 한 번 더(E-72 자동 전환). 시간 초과 · 중계 꺼짐 · 한도는
                     # 다시 불러도 같아 화면만 두 배로 멈추므로(한 번에 최대 4분씩 두 번) 바로 알린다
@@ -209,7 +221,7 @@ class DesignGenerator:
                     log['fallback'] = True
                     read.clear()
                     messages[1:] = [{'role': 'user', 'content': request + '\n\n' + self._examples_text(template, base_id)}]
-                    msg = self._chat(log, MODEL, messages, self._candidates_format())
+                    msg = self._chat(log, MODEL, messages, self._candidates_format(), deadline=deadline)
             design_id = None
             passed, failed, need, attempt = [], [], N_CANDIDATES, 0
             for attempt in range(1, MAX_REGEN + 2):
@@ -234,24 +246,30 @@ class DesignGenerator:
                                         for c in cands])
                 if cands and all(c['check']['service_failed'] for c in cands):
                     first = cands[0]['check']
-                    raise GenError(first['reason'] or 'ERROR', '설계 검사를 못 했어요 — 로봇 PC · 다리 연결을 확인하세요',
+                    raise GenError(first['reason'] or 'ERROR', '설계 검사를 못 했어요 → 로봇 PC 작업 관리자(검사 묶음)와 다리가 살아 있는지 → 화면 연결 표시의 로봇 PC 점, 로봇 PC 터미널 로그',
                                    [{'part': None, 'reason': first['reason'], 'detail': first['message'] or ''}])
                 invalid = [e for c in cands for e in c['check']['errors'] if e.get('reason') == 'REQUEST_INVALID']
                 if invalid:                                  # 웹 쪽 잘못(base_recipe 등) — 다시 만들어도 같다(D10)
-                    raise GenError('REQUEST_INVALID', '검사 요청 오류(웹) — 다시 만들지 않아요', invalid)
+                    raise GenError('REQUEST_INVALID', '검사 요청 오류(웹 쪽 잘못 — 다시 만들지 않아요) → 고른 설계의 기본 설계(V000) 레시피가 저장소에 맞게 있는지 → backend 로그 · 화면 설계 목록의 기본 설계', invalid)
                 passed += [c for c in cands if c['check']['ok']]
                 failed = [c for c in cands if not c['check']['ok']]
                 need = N_CANDIDATES - len(passed)
                 if need <= 0 or attempt > MAX_REGEN:
                     break
+                if deadline - self.clock() < REGEN_MIN_S:   # 5분 상한 — 못 끝낼 더 만들기는 시작하지 않는다(통과한 것만 · 없으면 떨어진 까닭)
+                    log['stopped'] = 'time'
+                    break
                 progress('retry', {'attempt': attempt + 1, 'need': need})
                 messages += [{'role': 'assistant', 'content': msg.content},
                              {'role': 'user', 'content': self._feedback(failed, self.extent, need, len(passed))}]
                 try:
-                    msg = self._chat(log, MODEL, messages, self._candidates_format(),
-                                     **({'tools': [self._tool(allowed)], 'tool_choice': 'none'} if read else {}))
-                except GenError:
+                    msg = self._chat(log, MODEL, messages, self._candidates_format(), deadline=deadline,
+                                     **({'tools': [self._tool(allowed, skip=True)], 'tool_choice': 'none'} if read else {}))
+                except GenError as e:
                     if passed:          # 더 만들기만 실패 — 이미 통과한 후보는 버리지 않고 보여 준다
+                        break
+                    if failed:          # 앞 후보가 떨어진 까닭(만들 수 없는 모양 등)이 '시간 초과'보다 쓸모 있다(10/14 W108 — 10분 뒤 시간 초과만 보임)
+                        log['stopped'], log['stop_why'] = 'regen_failed', e.message
                         break
                     raise
             if passed:
@@ -260,7 +278,12 @@ class DesignGenerator:
                           'elapsed_s': round(self.clock() - t0, 1)}
                 log['result'] = {k: result[k] for k in ('design_id', 'parent_id', 'reference', 'attempts', 'elapsed_s')}
                 return result
-            raise self._no_pass_error([e for c in failed for e in c['check']['errors']])
+            err = self._no_pass_error([e for c in failed for e in c['check']['errors']])
+            if log.get('stopped') == 'time':
+                err.message += f' (생성 상한 {GEN_LIMIT_S // 60}분 안에 통과한 후보가 없어요)'
+            elif log.get('stopped'):
+                err.message += f" (더 만들기 실패: {log['stop_why']})"
+            raise err
         except GenError as e:
             log['error'] = {'code': e.code, 'message': e.message}
             raise
@@ -311,7 +334,7 @@ class DesignGenerator:
               (모양이 바뀔 수 없음). 대신할 부모 = nearest_base, 없으면 같은 family(nearest_base 의 family, 없으면 blocks.family) 기본 설계 중
               부품 수가 가장 가까운 것. '부모 고르기 실패' = 도구 단계 실패 — 그때는 대신할 부모의 부품 목록을 코드가 넣고 칸만 채우게 한 번 더.
               AI 가 틀린 role · stage · grasp 를 코드가 고치지 않는다(E-69) — 검사에서 떨어져 feedback 으로 다시 온다.
-        바깥 영향: OpenAI 호출(gpt-4o, temperature 0, 구조화 출력) · AI 호출 기록(kind scan_fill — 설계_DB 3절). 로봇은 움직이지 않는다.
+        바깥 영향: 설계 AI 호출(Claude 중계 — E-99, 구조화 출력) · AI 호출 기록(kind scan_fill — 설계_DB 3절). 로봇은 움직이지 않는다.
         실패: GenError — GEN_FAILED(호출 실패 · 답의 scan_num 이 스캔과 다름) · ERROR(스캔 모양이 틀림 · 부모 후보 기본 설계 없음).
         """
         body = scan_result.get('blocks') if isinstance(scan_result, dict) else None
@@ -336,6 +359,7 @@ class DesignGenerator:
         system = self.design_prompt + (
             '\n\n[이번 일 — 스캔 채우기. 위 [참고 설계 읽기] · [출력] 대신 이것을 따른다]\n'
             '사람이 쌓은 가구를 스캔해 블록마다 위치(x · y · z)와 방향(ori)을 얻었다. 모양은 정해졌다 — 블록을 더하거나 빼거나 옮기지 않는다.\n'
+            '위 규칙 7([Template 규칙])은 이번 일에는 없다 — 사람이 쌓은 모양 그대로 둔다(검사도 21번을 건너뜀, E-106).\n'
             '1. [DB 목록](한 줄 = 설계 하나 — 기본 · 파생 · 예전 스캔)을 보고 도구 get_design 으로 스캔과 가장 비슷한 설계를 1 ~ 2개 읽는다.\n'
             '   가장 비슷한 설계 = 부모(parent_id): 블록 수 · 외곽 크기 · 층 구성이 가깝고 같은 가구 종류(의자 · 책상)인 것. 맞는 것이 없으면 NONE.\n'
             '2. 스캔 블록마다(scan_num) role · group · sequence · stage · grasp 를 위 규칙대로 쓴다. 읽은 설계에서 같은 자리 블록의 칸을 참고한다.\n'
@@ -444,7 +468,7 @@ class DesignGenerator:
         on_progress(stage, info): 'filled'(채움 끝 — attempt · design_id · parent_id) · 'checked'(검사 끝 — check) · 'retry'.
         출력: 저장한 설계 기록(design/4.0, made_by scan + AI 판단 기록). 저장 뒤 hmi/command select_design 은 화면이 보낸다(IRD 8.4 ⑧).
         실패: GenError(code, message, detail = 마지막 errors) — 화면 버튼은 scan_actions(detail).
-        바깥 영향: OpenAI 호출(scan_fill) · check_design 요청 · 저장. 로봇은 움직이지 않는다.
+        바깥 영향: 설계 AI 호출(scan_fill — Claude 중계) · check_design 요청 · 저장. 로봇은 움직이지 않는다.
         """
         progress = on_progress or (lambda *_: None)
         scan = scan_result.get('blocks') if isinstance(scan_result, dict) else None
@@ -471,10 +495,10 @@ class DesignGenerator:
                                               gen_log=fill.get('gen_log'))
             errors = chk['errors']
             if chk['service_failed']:
-                raise GenError(chk['reason'] or 'ERROR', '설계 검사를 못 했어요 — 로봇 PC · 다리 연결을 확인하세요',
+                raise GenError(chk['reason'] or 'ERROR', '설계 검사를 못 했어요 → 로봇 PC 작업 관리자(검사 묶음)와 다리가 살아 있는지 → 화면 연결 표시의 로봇 PC 점, 로봇 PC 터미널 로그',
                                [{'part': None, 'reason': chk['reason'], 'detail': chk['message'] or ''}])
             if any(e.get('reason') == 'REQUEST_INVALID' for e in errors):
-                raise GenError('REQUEST_INVALID', '검사 요청 오류(웹) — 다시 채우지 않아요', errors)
+                raise GenError('REQUEST_INVALID', '검사 요청 오류(웹 쪽 잘못 — 다시 채우지 않아요) → 부모 Template 의 기본 설계(V000) 레시피가 저장소에 맞게 있는지 → backend 로그 · 화면 설계 목록의 기본 설계', errors)
             kinds = {e.get('kind') for e in errors}
             if not errors or not kinds <= {'ai_fields', 'template'} or attempt > SCAN_REFILLS:
                 break
@@ -498,17 +522,25 @@ class DesignGenerator:
                                   'detail': 'AI 가 스캔한 부품의 위치 · 방향 · 개수를 바꿨다 — 그대로 두고 역할 · 그룹 · 순서 · 단계 · 잡기만 채워라'}
 
     # ---------- 대화 ----------
-    def _read_and_answer(self, log, messages, allowed, read, progress, fmt=None, first='required'):
+    def _read_and_answer(self, log, messages, allowed, read, progress, fmt=None, skip=False, deadline=None):
         """참고 설계 읽기(도구) → 후보 답. 2번 읽으면 더는 못 부르게 한다. 병렬 도구 호출은 끈다(구조화 출력과 같이 쓸 때 OpenAI 권고).
 
-        first = 첫 번째 도구 선택 — 'required'(꼭 읽게: scan_fill 부모 고르기) · 'auto'(generate — 바탕 설계는 이미 줬으니 참고는 골라서).
-        fmt = 답 형식(비우면 후보 3개 — generate). scan_fill 은 스캔 채우기 형식을 넘긴다. 끝까지 답이 없으면 GenError.
+        첫 차례는 tool_choice 'required' 로 묻는다 — 중계(claude_bridge)는 'auto' 면 도구를 버리고 바로 답해, 첫 차례를 'auto' 로 물으면 한 번도
+        안 읽었다(10/14 PM 점검 · PL — E-72 를 실제로 되게). 그다음은 'auto'(중계는 바로 답을 씀 — 읽기 한 번에 Claude 를 한 번 더 부르므로
+        더 묻지 않는다, 민범진 10/14). skip=True(generate — 바탕 설계는 이미 줬으니 참고는 골라서)면 도구 선택지에 SKIP_READ('안 읽음')를
+        넣어 AI 가 안 읽기로 고를 수 있고, 고르면 답 차례(tool_choice 'none'). skip=False(scan_fill 부모 고르기)는 첫 번은 꼭 읽는다.
+        도구가 하나여야 한다(중계는 required 를 도구 하나일 때만 받음 — SKIP 도 get_design 의 선택지로). fmt = 답 형식(비우면 후보 3개 —
+        generate). 끝까지 답이 없으면 GenError.
         """
-        tools = [self._tool(allowed)]
+        tools = [self._tool(allowed, skip)]
         fmt = fmt or self._candidates_format()
+        done = False                                        # AI 가 SKIP_READ 를 골랐다 — 더 묻지 않고 답 차례
         for rnd in range(MAX_READS + 1):
-            choice = first if rnd == 0 else ('auto' if len(read) < MAX_READS else 'none')
-            msg = self._chat(log, MODEL, messages, fmt, tools=tools, tool_choice=choice, parallel_tool_calls=False)
+            if done or len(read) >= MAX_READS:
+                choice = 'none'
+            else:
+                choice = 'required' if rnd == 0 else 'auto'
+            msg = self._chat(log, MODEL, messages, fmt, deadline=deadline, tools=tools, tool_choice=choice, parallel_tool_calls=False)
             calls = msg.tool_calls or []
             if not calls:
                 return msg
@@ -516,17 +548,24 @@ class DesignGenerator:
                 {'id': tc.id, 'type': 'function', 'function': {'name': tc.function.name, 'arguments': tc.function.arguments}}
                 for tc in calls]})
             for tc in calls:
-                messages.append({'role': 'tool', 'tool_call_id': tc.id, 'content': self._tool_answer(tc, allowed, read)})
-                if read:
+                n = len(read)
+                answer = self._tool_answer(tc, allowed, read, skip)
+                done = done or answer is None
+                messages.append({'role': 'tool', 'tool_call_id': tc.id,
+                                 'content': answer or json.dumps({'note': '참고 설계를 더 읽지 않는다 — 이제 답을 써라'}, ensure_ascii=False)})
+                if len(read) > n:
                     progress('reading', {'design_id': read[-1]})
         raise GenError('GEN_FAILED', 'AI 가 참고 설계만 읽고 후보를 쓰지 않았어요')
 
-    def _tool_answer(self, tc, allowed, read):
-        """도구 get_design 한 번 — 이 Template 설계의 블록 목록 + 최근 조립 한 줄(JSON 글자). 목록 밖 · 한도 넘음은 이유만 돌려준다."""
+    def _tool_answer(self, tc, allowed, read, skip=False):
+        """도구 get_design 한 번 — 이 Template 설계의 블록 목록 + 최근 조립 한 줄(JSON 글자). 목록 밖 · 한도 넘음은 이유만 돌려준다.
+        skip 이고 AI 가 SKIP_READ 를 골랐으면 None(더 안 읽음 — 부르는 쪽이 답 차례로 넘김)."""
         try:
             design_id = json.loads(tc.function.arguments or '{}').get('design_id')
         except (ValueError, AttributeError):
             design_id = None
+        if skip and tc.function.name == 'get_design' and design_id == SKIP_READ:
+            return None
         if tc.function.name != 'get_design' or design_id not in allowed:
             return json.dumps({'error': '이 Template 목록에 없는 설계다'}, ensure_ascii=False)
         if len(read) >= MAX_READS:
@@ -538,15 +577,22 @@ class DesignGenerator:
                            'last_build': build_summary(builds[0]) if builds else None, 'parts': d['parts']['parts']},
                           ensure_ascii=False, separators=(',', ':'))
 
-    def _chat(self, log, model, messages, response_format, **kw):
+    def _chat(self, log, model, messages, response_format, deadline=None, **kw):
         """LLM 을 한 번 부르고 메시지를 돌려준다(temperature 0 — 중계는 무시). 응답 원문 · 걸린 시간 · 토큰 수를 log['calls'] 에 남긴다.
 
         실패(중계 꺼짐 · 시간 초과 · 구독 한도 · 거절)는 GenError(GEN_FAILED). 다시 하지 않는다(CALL_RETRIES 0). 시간 초과(이쪽
-        CALL_TIMEOUT_S 또는 중계 504) · 중계 꺼짐 · 한도(중계 429 또는 글에 limit)는 final — 예시 넣어 한 번 더도 안 한다. 그 밖에 중계가
+        CALL_TIMEOUT_S 또는 중계 504) · 중계 꺼짐 · 한도(중계 429)는 final — 예시 넣어 한 번 더도 안 한다. 그 밖에 중계가
         이유를 보냈으면({'error': {'message'}} — OpenAI 오류 모양) 그 글을 화면에 그대로(라이브러리 예외 이름만으로는 까닭을 모른다).
         응답 모양이 다르면(choices 없음 · 메시지가 글자뿐 등 — 10/13 민범진 보고 AttributeError) 그것도 GEN_FAILED 로(화면이 '오류'에 머물지 않게).
+        deadline(clock 시각)을 주면 이 호출의 시간 제한을 남은 시간으로 줄인다(생성 전체 GEN_LIMIT_S) — 이쪽이 먼저 끊으면 중계의 claude 는
+        자기 제한(240초)까지 돌다 끝난다(답은 버려짐). 이미 지났으면 부르지 않고 GenError(final).
         """
         t0 = self.clock()
+        if deadline is not None:
+            left = deadline - t0
+            if left <= 0:
+                raise GenError('GEN_FAILED', f'생성 상한 {GEN_LIMIT_S // 60}분을 넘었어요 → 요청이 이 모양에서 너무 큰 변화인지 → 요청을 짧게 · 한 가지만 바꿔 다시', final=True)
+            kw['timeout'] = min(CALL_TIMEOUT_S, left)
         try:
             resp = self.client.chat.completions.create(model=model, temperature=0, messages=messages,
                                                        response_format=response_format, **kw)
@@ -556,13 +602,13 @@ class DesignGenerator:
             log['calls'].append({'model': model, 'elapsed_s': round(self.clock() - t0, 2), 'error': f'{type(e).__name__}: {e}'})
             name, status, body = type(e).__name__, getattr(e, 'status_code', None), getattr(e, 'body', None)
             if name == 'APITimeoutError' or status == 504:   # 한 번이 1 ~ 3분이라 다시 불러도 같은 길이로 멈춘다
-                raise GenError('GEN_FAILED', '설계 AI 가 시간 안에 답하지 않았어요 — 요청을 짧게 해서 다시', final=True) from e
+                raise GenError('GEN_FAILED', '설계 AI 가 시간 안에 답하지 않았어요 → 요청이 너무 크거나 Claude 가 느린지 → 요청을 짧게 해서 다시, 계속되면 웹 PC 중계(claude_bridge) 로그', final=True) from e
             if name == 'APIConnectionError':   # 중계가 안 떠 있음 — 기다려도 안 풀린다
-                raise GenError('GEN_FAILED', '설계 AI 중계(claude_bridge)가 꺼져 있어요 — 웹 PC 에서 켜 주세요', final=True) from e
-            if status == 429 or 'limit' in str(e).lower():   # Claude 구독 사용 한도 — 몇 시간 뒤 풀린다
-                raise GenError('GEN_FAILED', 'Claude 사용 한도에 걸렸어요 — 기본 설계를 고르거나 나중에 다시', final=True) from e
+                raise GenError('GEN_FAILED', '설계 AI 중계(claude_bridge)가 꺼져 있어요 → 웹 PC 호스트에서 중계가 켜져 있는지 → 웹 PC 에서 python3 web/claude_bridge.py --check', final=True) from e
+            if status == 429:   # Claude 구독 사용 한도(중계가 한도 글만 429 로 — E-99 덧붙임). 'limit' 낱말로는 가르지 않는다(다른 실패를 한도로 오해)
+                raise GenError('GEN_FAILED', 'Claude 사용 한도에 걸렸어요 → 웹 PC 에 로그인된 Claude 계정의 한도 → 중계 로그의 한도 글, 그동안은 기본 · 저장 설계로 조립', final=True) from e
             why = str(body.get('message') or '')[:200] if isinstance(body, dict) else ''
-            raise GenError('GEN_FAILED', f'설계 AI 실패 — {why}' if why else f'AI 호출 실패({name}) — 잠시 뒤 다시') from e
+            raise GenError('GEN_FAILED', f'설계 AI 실패({why}) → 중계 · Claude 상태 → 웹 PC 중계(claude_bridge) 로그' if why else f'설계 AI 호출 실패({name}) → 중계가 살아 있는지 → 웹 PC 에서 python3 web/claude_bridge.py --check, 잠시 뒤 다시') from e
         try:
             msg = resp.choices[0].message
             call = {'model': model, 'elapsed_s': round(self.clock() - t0, 2), 'content': msg.content,
@@ -681,8 +727,14 @@ class DesignGenerator:
 
     @staticmethod
     def _where(detail, by_order, extent):
-        """오류 글에 나온 블록의 위치 설명. '공중'이면 그 x · y 아래 블록 윗면의 가장 높은 z 도(어느 층이 비었는지). 모르면 ''."""
-        nums = [int(n) for n in re.findall(r'(\d+)번', detail)]
+        """오류 글에 나온 블록의 위치 설명. '공중'이면 그 x · y 아래 블록 윗면의 가장 높은 z 도(어느 층이 비었는지). 모르면 ''.
+
+        숫자 = 부품 sequence 로 읽는 것은 'N번'만 — '형식: N번째 항목'(목록 차례)은 빼고, '21번 형태 · 범위'(Template 검사) 줄은 검사
+        번호와 부품 번호가 섞여 위치를 붙이지 않는다(10/14 PM 점검 — 엉뚱한 블록 위치를 AI 에 알려 주던 것).
+        """
+        if detail.startswith('21번'):
+            return ''
+        nums = [int(n) for n in re.findall(r'(\d+)번(?!째)', detail)]
         if not nums or nums[0] not in by_order:
             return ''
         found = []
@@ -711,10 +763,63 @@ class DesignGenerator:
         한 줄 = 설계 하나, 최근 조립 결과 포함. 도구 get_design 으로 참고만)."""
         label = self.templates().get(template, {}).get('label', template)
         lines = [self._row_line(r) for r in others] or ['- 없음(이 Template 의 설계는 바탕 설계뿐)']
-        return (f'[요청] {text}\n[Template] {template} — {label}\n'
-                f'[바탕 설계 — 사용자가 고름]\n{self._row_line(base_row)}\n'
+        rules = self._template_rules(template)
+        return (f'[요청] {text}\n[Template] {template} — {label}\n' + (rules + '\n' if rules else '')
+                + f'[바탕 설계 — 사용자가 고름]\n{self._row_line(base_row)}\n'
                 + json.dumps(base_parts, ensure_ascii=False, separators=(',', ':'))
                 + '\n[DB 목록 — 같은 Template 의 다른 설계(참고만)]\n' + '\n'.join(lines))
+
+    def _template_rules(self, template):
+        """[Template 규칙] 글 — 21번 검사가 보는 그 Template(V000) 레시피 composition 의 count · revision 을 사람 말로(10/14 PL W108:
+        전에는 AI 가 규칙을 모르고 떨어진 뒤 피드백으로만 배워 10분 넘게 돌았다 — 벤치 '좌판 넓히기' 후보 6개 전부 21번 탈락).
+        모르는 칸은 빼고(검사도 안 봄), 식(SEAT.width / 2 - 25 등)은 원문 그대로. 레시피를 못 읽으면 '' — 규칙 없이 지금처럼 만든다.
+        """
+        try:
+            comp = self.store.base_recipe(template)['template']['composition']
+            names = {role: f"{c.get('label') or role}({role})" for role, c in comp.items()}
+        except (KeyError, ValueError, TypeError, AttributeError):
+            return ''
+
+        def who(role):
+            """역할 키 → '이름(키)', TABLE → 작업면."""
+            return '작업면' if role == 'TABLE' else names.get(role, str(role))
+
+        def span(v):
+            """[최소, 최대] → '최소 ~ 최대'(식은 그대로)."""
+            return f'{v[0]} ~ {v[1]}' if isinstance(v, list) and len(v) == 2 else str(v)
+
+        lines = []
+        for role, c in comp.items():
+            rev = c.get('revision') if isinstance(c.get('revision'), dict) else {}
+            bits = [f"묶음 {c.get('count')}개"]
+            if rev.get('lay') in LAYS:
+                bits.append(f"놓기 = {LAYS[rev['lay']]}({LAY_HOW[rev['lay']]})")
+            le = rev.get('long_edge')
+            if isinstance(le, dict):
+                bits.append(f"긴 변 = {who(le.get('to'))} 긴 변과 {RELATIONS.get(le.get('relation'), le.get('relation'))}")
+            sup = rev.get('support')
+            if isinstance(sup, list):
+                bits.append('받침 = ' + ' · '.join(who(r) for r in sup))
+            elif isinstance(sup, dict):
+                bits.append(f"받침 = {who(sup.get('to'))} 묶음 {sup.get('per_group')}개 위")
+            at = rev.get('attach')
+            if isinstance(at, dict):
+                where = f"붙는 자리 = {who(at.get('to'))} {AT_KO.get(at.get('at'), at.get('at'))}"
+                bits.append(where + (f"에서 안쪽으로 {span(at['d_mm'])} mm" if 'd_mm' in at else ''))
+            for key, dim in (('height_mm', 'height'), ('width_mm', 'width'), ('depth_mm', 'depth')):
+                v = rev.get(key)
+                if isinstance(v, str):
+                    bits.append(f"{DIM_KO[dim]} {v.strip()}(그 묶음과 같은 크기 + 양 끝 맞춤)")
+                elif v is not None:
+                    bits.append(f"{DIM_KO[dim]} {span(v)} mm")
+            if rev.get('same_size') is True:
+                bits.append('묶음끼리 같은 크기')
+            if rev.get('mirror') in MIRROR_KO:
+                bits.append(f"{MIRROR_KO[rev['mirror']]}(이 역할 전체 가운데 기준)")
+            lines.append(f'- {who(role)}: ' + ' · '.join(bits))
+        return ('[Template 규칙 — 검사 21번이 그대로 본다. 하나라도 어기면 떨어진다. 단위 mm. 묶음 = 같은 role · group 블록, 크기 = 묶음 바깥 상자'
+                '(폭 = 좌우 x · 깊이 = 앞뒤 y · 높이 z). 한 역할의 블록은 모두 같은 ori. 식의 ROLE.width · depth · height = 그 역할 묶음의 폭 · 깊이 · 높이]\n'
+                + '\n'.join(lines))
 
     @staticmethod
     def _row_line(r):
@@ -737,13 +842,16 @@ class DesignGenerator:
         return '\n'.join(lines)
 
     @staticmethod
-    def _tool(allowed):
-        """도구 get_design 정의 — design_id 는 이 Template 설계 목록 안에서만 고르게 enum 으로 묶는다(E-84 ③)."""
+    def _tool(allowed, skip=False):
+        """도구 get_design 정의 — design_id 는 이 Template 설계 목록 안에서만 고르게 enum 으로 묶는다(E-84 ③).
+        skip 이면 enum 끝에 SKIP_READ(더 안 읽고 답을 씀)를 넣는다 — 'required' 로 물어도 안 읽기를 고를 수 있게(generate)."""
+        names = list(allowed) + ([SKIP_READ] if skip else [])
+        note = f' 더 읽을 필요가 없으면 {SKIP_READ} 를 고른다.' if skip else ''
         return {'type': 'function', 'function': {
             'name': 'get_design', 'strict': True,
-            'description': 'DB 목록의 설계 하나를 읽는다 — 블록 목록(parts/4.0)과 최근 조립 결과. 2개까지 읽을 수 있다.',
+            'description': f'DB 목록의 설계 하나를 읽는다 — 블록 목록(parts/4.0)과 최근 조립 결과. 2개까지 읽을 수 있다.{note}',
             'parameters': {'type': 'object', 'additionalProperties': False, 'required': ['design_id'],
-                           'properties': {'design_id': {'type': 'string', 'enum': list(allowed)}}}}}
+                           'properties': {'design_id': {'type': 'string', 'enum': names}}}}}
 
     def _candidates_format(self):
         """후보 3개 구조화 출력 형식(JSON Schema strict). role 은 역할 목록 파일의 이름만(enum — 목록 밖 이름은 변환기 ①이 어차피 거절)."""
