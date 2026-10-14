@@ -14,11 +14,10 @@
   <exec_depend>sensor_msgs_py</exec_depend>     <!-- scan_live_preview: RViz 확인용 PointCloud2(rviz_cloud) -->
   <exec_depend>tf2_ros</exec_depend>          <!-- wrist_block · capture_scene · check_wrist_calib: 손목 자세 TF base_link → rg2_tcp (10/10 W156) -->
   <exec_depend>d2_interfaces</exec_depend>      <!-- CheckProgress -->
-  <!-- 아래 둘은 CI(ros-base 컨테이너) rosdep 이 못 찾는다(두산 · 우리 로봇 패키지는 CI 에서 빌드 안 함) — ci.yml rosdep skip-keys 에 이미 있다(10/14 점검) -->
+  <!-- 아래 셋은 CI(ros-base 컨테이너) rosdep 이 못 찾는다(두산 · 우리 로봇 패키지는 CI 에서 빌드 안 함) — ci.yml rosdep skip-keys 에 같이 적는다(10/14 점검 · PL) -->
   <exec_depend>d2_motion</exec_depend>          <!-- wrist_block · mock_wrist_block: motion_math.recipe_parts(레시피 → base 블록 목록) -->
+  <exec_depend>d2_bringup</exec_depend>         <!-- wrist_block · capture_scene · check_wrist_calib: config/robot.yaml · 손목 보정 파일 -->
   <exec_depend>dsr_msgs2</exec_depend>          <!-- capture_scene: 두산 posx 조회(GetCurrentPosx) -->
-  <!-- d2_bringup(config/robot.yaml · 손목 보정 파일 — wrist_block · capture_scene · check_wrist_calib)도 쓰지만 아직 적지 않는다:
-       ci.yml rosdep skip-keys 에 d2_bringup 이 없어 적으면 CI 가 실패한다. PL 이 skip-keys 에 더하면 여기 적는다(10/14) -->
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-scipy</exec_depend>

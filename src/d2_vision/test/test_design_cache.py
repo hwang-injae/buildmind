@@ -334,7 +334,7 @@ def generated_design(model_id, family, design_id, made_by):
     cfg = robot_cfg()
     block_mm = [v * 1000.0 for v in cfg['block_size_m']]
     base = rd.RecipeDocument.load(ROOT / 'src/recipe_manager/recipes', model_id)
-    blocks = copy.deepcopy(rb.RecipeToParts(model_id, family, block_mm).convert(base.recipe, base.placements))
+    blocks = copy.deepcopy(rb.RecipeToParts(model_id, block_mm).convert(base.recipe, base.placements))
     blocks['design_id'] = design_id
     out = b2r.PartsToRecipe(dc.DesignChecker(cfg).grasp_options, block_mm).convert(blocks)
     doc = rd.RecipeDocument(out['recipe'], out['placements']).design(design_id)
