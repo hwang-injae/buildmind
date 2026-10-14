@@ -180,11 +180,17 @@ class TaskManager:
 
     # ---------- 콜백 스레드에서 들어오는 것 ----------
     def on_safety(self, st):
-        """정지 노드의 safety_state/1(dict)을 적는다. 상태 전이는 작업 스레드가 run_once 에서 한다(콜백은 변수만)."""
+        """정지 노드의 safety_state/1(dict)을 적는다. 상태 전이는 작업 스레드가 run_once 에서 한다(콜백은 변수만).
+
+        객체(dict)가 아니면 버리고 경고만 남긴다 — 적어 두면 halted() 등이 .get 에서 터져 작업 스레드(노드)가 멈춘다(10/14 점검 ③-5).
+        """
+        if not isinstance(st, dict):
+            LOG.warning('safety/state 가 객체가 아니라 버린다: %r', st)
+            return
         with self._lock:
             self.safety = st
             self.safety_count += 1
-            if isinstance(st, dict) and st.get('stopped'):
+            if st.get('stopped'):
                 self._stop_count += 1
                 if self._scatter is not None:
                     self._scatter.invalidate()        # 관측 · 조회 중이던 흩뿌림 답은 정지 뒤에 적용하지 않는다
@@ -1058,7 +1064,7 @@ class TaskManager:
         poses = self.cfg.get('scan', {}).get('poses')
         if not isinstance(poses, list) or not poses or any(
                 not isinstance(p, str) or f'{p}_pose' not in self.cfg for p in poses) or len(set(poses)) != len(poses):
-            return self._reject('ERROR', 'scan.poses가 없거나 촬영 자세 설정과 맞지 않는다')
+            return self._reject('', 'scan.poses가 없거나 촬영 자세 설정과 맞지 않는다')     # 맞는 코드 없는 거절 = 빈 값 + 글(E-111 A3)
         ok, code, text = self._precheck(scan=True)
         if not ok:
             return self._reject(code, f'스캔 시작 점검 실패: {text}')
@@ -1406,7 +1412,8 @@ class TaskManager:
             if self._clock() - received > self.command_s:      # 늦은 출발 · 선택은 허용하지 않는다(웹은 이미 시간 초과로 보였다)
                 return self._reject('TIMEOUT', f'명령을 받은 뒤 {self.command_s} 초 안에 확정하지 못해 실행하지 않았다')
             if not ok:
-                return self._reject(why, f'설계를 못 가져왔다: {design_id!r} ({why or "이유 없음"})')
+                code = why if why in ('TIMEOUT', 'STOPPED', 'BUSY') else ''      # E-111 A3: 이 셋만 코드, 나머지(ERROR · 서버 이유)는 빈 값 + 글
+                return self._reject(code, f'설계를 못 가져왔다: {design_id!r} ({why or "이유 없음"})')
             planner, problem = self._planner_from(design, design_id)
             if problem:
                 return self._reject('', problem)

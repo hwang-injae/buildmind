@@ -229,6 +229,8 @@ class TaskNode(Node):
             for client, name in ((self.capture_cli, '/d2/vision/scan_capture'), (self.infer_cli, '/d2/vision/scan_infer')):
                 if not client.service_is_ready():
                     waiting.append(name)
+            if not self.stop_cli.service_is_ready():
+                waiting.append('/d2/safety/stop')              # 스캔도 촬영 자세로 팔을 움직인다 — 시간 초과 · Ctrl+C 때 세울 곳(10/14 점검 ③-5)
             return waiting
         if not self.check_cli.service_is_ready():
             waiting.append('/d2/vision/check_progress')
@@ -377,7 +379,9 @@ class TaskNode(Node):
                 return ok
 
             def stop_robot():
-                self.request_stop('W144 촬영 실패')
+                # reason 은 계약 값만(StopRequest: TIMEOUT · CTRL_C, 비우면 정지 노드가 STOP_TASK) — 까닭 글은 로그로(10/14 점검 ③-5)
+                self.get_logger().error('W144 촬영 실패 — 정지 요청(STOP_TASK)')
+                self.request_stop('')
 
             rec = cls(folder, move_observe, stop_robot)
             tr = W144Trace(folder, run_id, self._ros_ns)
@@ -603,7 +607,8 @@ class TaskNode(Node):
             if not wait_until(accepted, should_abort, timeout_s=max(0.0, deadline - time.monotonic())):
                 sent.add_done_callback(self._cancel_late)      # 아직 답이 없던 목표는 받아지는 대로 바로 취소
                 return False, ('STOPPED' if should_abort() else 'TIMEOUT')
-        except KeyboardInterrupt:                              # Ctrl+C: 받아지는 대로 취소하고 끝낸다
+        except KeyboardInterrupt:                              # Ctrl+C: 먼저 세우고, 받아지는 대로 취소하고 끝낸다(10/14 점검 ③-5)
+            self.request_stop('CTRL_C')
             sent.add_done_callback(self._cancel_late)
             raise
         handle = sent.result()
@@ -630,7 +635,8 @@ class TaskNode(Node):
                 return False, ('CANCELED' if should_abort() else 'TIMEOUT')
             r = result.result().result
             return r.success, r.reason
-        except KeyboardInterrupt:                              # Ctrl+C: _active 를 지우기 전에 목표를 취소한다
+        except KeyboardInterrupt:                              # Ctrl+C: 먼저 세우고(정지 요청) _active 를 지우기 전에 목표를 취소한다(10/14 점검 ③-5)
+            self.request_stop('CTRL_C')
             self.cancel_active()
             raise
         finally:
@@ -664,7 +670,8 @@ class TaskNode(Node):
 
 
 def main():
-    """task 상태표와 executor 를 돌린다. Ctrl+C 는 목표 취소 · 정지 서비스 요청 뒤 제한 있는 기록 마무리를 한다."""
+    """task 상태표와 executor 를 돌린다. Ctrl+C 는 정지 서비스 요청(CTRL_C) → 목표 취소, 예상 못 한 예외는 정지 요청(빈 reason = STOP_TASK) → 목표 취소 뒤
+    다시 던진다. 끝날 때 제한 있는 기록 마무리를 한다."""
     logging.basicConfig(level=logging.INFO, format='[%(name)s] %(message)s')
     init_ros()
     node = TaskNode()
@@ -687,6 +694,24 @@ def main():
                 break
             except KeyboardInterrupt:
                 node.get_logger().warn('정지 요청 중 Ctrl+C — 정지 요청부터 다시 보낸다')
+    except Exception as e:                         # 예상 못 한 예외로 노드가 끝난다 — 세 단계를 따로 시도하고 원래 예외를 다시 던진다(10/14 점검 ③-5)
+        log = node.get_logger()
+        log.error(f'[작업 관리자] 예상 못 한 예외로 끝남({e!r}) — 정지 요청부터')
+        try:
+            node.manager.shutdown()                # ① 새 이동 · 목표를 막는다(_shutdown 플래그 → halted() 참, 로봇 명령은 안 보냄)
+        except Exception as step_error:            # noqa: BLE001 — 실패해도 정지 요청은 보낸다
+            log.error(f'종료 ① 새 작업 막기 실패: {step_error!r}')
+        try:
+            ok, message = node.request_stop('')    # ② 먼저 세운다(빈 reason → 정지 노드가 STOP_TASK)
+            if not ok:
+                log.error(f'종료 ② 정지 요청 거절 · 실패: {message}')
+        except Exception as step_error:            # noqa: BLE001 — 실패해도 목표 취소는 시도한다
+            log.error(f'종료 ② 정지 요청 예외: {step_error!r}')
+        try:
+            node.cancel_active()                   # ③ 진행 중인 집기 · 놓기 목표 취소
+        except Exception as step_error:            # noqa: BLE001
+            log.error(f'종료 ③ 목표 취소 실패: {step_error!r}')
+        raise
     finally:
         node.manager.finalize(LOG_FLUSH_S)
         node.w144_finish(False)                    # 조립 기록이 꺼져 있어도 W144 녹화는 닫는다(이미 닫혔으면 아무것도 안 함)
