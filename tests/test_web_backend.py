@@ -322,7 +322,8 @@ class FakeGen:
         on_progress('filled', {'attempt': 1, 'design_id': '001_CHAIR_BENCH_V001', 'parent_id': '001_CHAIR_BENCH_V000'})
         if scan_result.get('fail'):
             raise GenError('OUT_OF_SCOPE', '블록이 너무 많아 저장할 수 없어요', [{'part': None, 'reason': 'OUT_OF_SCOPE', 'kind': 'scope'}])
-        return {'design_id': '001_CHAIR_BENCH_V001', 'version': 'V001', 'parent_id': '001_CHAIR_BENCH_V000'}
+        return {'design_id': '001_CHAIR_BENCH_V001', 'version': 'V001', 'parent_id': '001_CHAIR_BENCH_V000',
+                'ai_template': '001_CHAIR_BENCH', 'ai_reason': '블록 수 · 층 구성이 가장 가까운 벤치'}
 
     def save(self, result, index, made_by='web'):
         if not result['candidates'][index]['check']['ok']:
@@ -421,6 +422,7 @@ def test_scan_save_route_job(store):
             break
         threading.Event().wait(0.02)
     assert view['state'] == 'saved' and view['saved']['design_id'] == '001_CHAIR_BENCH_V001' and view['run_id'] == run
+    assert view['saved']['ai_reason'] == '블록 수 · 층 구성이 가장 가까운 벤치'   # 화면이 부모를 고른 까닭을 한 줄로(10/14 PL)
     fake.scan = {**fake.scan, 'fail': True}
     job = client.post('/api/designs/scan/save', json={'run_id': run}).json()['job_id']
     for _ in range(100):

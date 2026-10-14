@@ -243,6 +243,7 @@ button.reset:hover:not(:disabled) { filter: brightness(1.08); border-color: var(
 .result { font-size: 14px; padding: 8px 12px; border-radius: 10px; }
 .result.ok { background: var(--ok-soft); color: var(--ok); }
 .result.bad { background: var(--bad-soft); color: var(--bad); }
+.result.warn { background: var(--warn-soft); color: var(--text); border-left: 3px solid var(--warn); } /* 막는 것은 아니고 확인할 것(스캔 추천 — 다른 블록) */
 
 /* ---------- 설계 목록 ---------- */
 .tree { border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: 14px; background: var(--panel-2); }

@@ -82,7 +82,9 @@ class GenJobs:
             self.publish({'type': 'scan_save', 'data': {'job_id': job_id, 'stage': stage, **info}})
         try:
             rec = self.gen.save_scan(scan_result, on_progress=progress)
-            job.update(state='saved', saved={'design_id': rec['design_id'], 'version': rec['version'], 'parent_id': rec['parent_id']})
+            job.update(state='saved', saved={'design_id': rec['design_id'], 'version': rec['version'], 'parent_id': rec['parent_id'],
+                                             # AI 가 부모를 고른 까닭 — 화면에 한 줄(10/14 PL · 민범진 제안 1, 전엔 기록에만)
+                                             'ai_template': rec.get('ai_template'), 'ai_reason': rec.get('ai_reason')})
         except GenError as e:
             job.update(state='failed', code=e.code, message=e.message, detail=e.detail, actions=scan_actions(e.detail))
         except Exception as e:   # noqa: BLE001 — 저장소 · 검사 경로 고장도 화면에 실패로

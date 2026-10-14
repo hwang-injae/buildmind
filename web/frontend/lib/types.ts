@@ -118,7 +118,7 @@ export interface ScanSaveJob {
   code?: string;
   message?: string;
   actions?: ('cancel' | 'rescan')[];
-  saved?: { design_id: string; version: string; parent_id: string | null };
+  saved?: { design_id: string; version: string; parent_id: string | null; ai_template?: string | null; ai_reason?: string | null };
 }
 
 /** 버튼 응답 — 다리가 넘긴 ROS 응답 칸 그대로(명령은 success · reason, 정지 · 다시 시작은 success · message) */

@@ -10,7 +10,7 @@ import { designName, rejectText } from '@/lib/names';
 import type { CmdResult, ScanMatch } from '@/lib/types';
 import { gripperOpening, type Robot } from '@/lib/ws';
 
-const GOOD_RATE = 0.9; // V-48 기준(일치율 ≥ 90 %) — 이보다 낮으면 '많이 달라요'를 띄운다(막지는 않음, 사람이 정함)
+const GOOD_RATE = 0.9; // V-48 기준(일치율 ≥ 90 %) — 이보다 낮으면 '처음 보는 모양'(경고 아님 — 새로 쌓았을 수 있어 [그대로 저장]을 권함, 10/14 PL)
 
 interface Props {
   robot: Robot;
@@ -45,6 +45,15 @@ export default function ScanRecommend({ robot, onView, onLog }: Props) {
   const st = robot.state;
   const canSend = !sending && !robot.safety?.locked && !gripperOpening(robot) && robot.bridge && st?.state === 'SCAN_REVIEW';
   const line = (m: ScanMatch) => `부품 ${m.matched}/${Math.max(m.scan_count, m.part_count)} 같음 (${Math.round(m.rate * 100)} %)`;
+  // 추천 설계와 스캔이 다른 블록 수 — 하나라도 다르면 [조립]은 스캔한 구조가 아니라 추천 설계를 쌓는다(10/14 PL · 민범진 제안 1)
+  const differ = Math.max(best.scan_count, best.part_count) - best.matched;
+  // 안내(E-114 꼴 — 문제 → 무엇을 확인 → 어떻게). 처음 보는 모양은 경고가 아니다(일부러 새로 쌓았을 수 있음) — [다시 스캔] 대신 [그대로 저장]
+  const advice =
+    differ === 0
+      ? '스캔한 구조와 같아요 → 그대로 [조립]하면 같은 모양으로 복제돼요'
+      : best.rate < GOOD_RATE
+        ? '처음 보는 모양이에요 → 스캔한 구조를 그대로 새 설계로 만들어야 복제돼요 → 위 [그대로 저장](이 추천 설계 [조립]은 다른 모양을 쌓아요)'
+        : `추천 설계와 블록 ${differ}개 달라요 → [조립]하면 스캔한 구조가 아니라 추천 설계가 쌓여요 → 3D로 비교하고, 스캔한 그대로 복제는 위 [그대로 저장]`;
 
   async function assemble() {
     setSending(true);
@@ -63,9 +72,8 @@ export default function ScanRecommend({ robot, onView, onLog }: Props) {
         <span className="muted">가장 비슷한 저장 설계</span>
         <strong>{designName(best.design_id)}</strong>
       </div>
-      <p className={best.rate >= GOOD_RATE ? 'hint' : 'result bad'}>
-        {line(best)}
-        {best.rate < GOOD_RATE && ' — 많이 달라요. 3D로 비교해 보고, 다르면 [다시 스캔]을 권해요'}
+      <p className={differ === 0 ? 'hint' : 'result warn'}>
+        {line(best)} — {advice}
       </p>
       <div className="btn-row">
         <button className="secondary" onClick={() => onView(best.design_id)} title="오른쪽 3D 에서 추천 설계를 보고 스캔한 구조와 비교해요">
