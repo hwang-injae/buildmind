@@ -87,13 +87,15 @@ jobs:
       - name: colcon build
         run: |
           source /opt/ros/jazzy/setup.bash
-          colcon build --packages-select $CI_PKGS --event-handlers console_cohesion+
+          # --base-paths: CI_PKGS 폴더만 찾는다 — d2_vision 이 실행 의존으로 적은 d2_motion · d2_bringup(두산 의존, CI 에서 빌드 안 함)이
+          # 저장소 안 패키지로 잡히면 colcon 이 '먼저 빌드돼 있어야 한다'며 멈춘다(10/14 main 4451e20). 못 찾은 의존은 바깥 패키지로 보고 넘어간다
+          colcon build --base-paths $(for p in $CI_PKGS; do printf 'src/%s ' "$p"; done) --packages-select $CI_PKGS --event-handlers console_cohesion+
       - name: colcon test
         run: |
           source /opt/ros/jazzy/setup.bash
           # 시험이 하나도 없는 ament_python 패키지는 colcon 이 'NO TESTS RAN'(code 5)으로 '실패'라 적는다
           # (setup.py 에 tests_require=['pytest'] 가 없으면 setup.py test 로 떨어진다). 그래서 종료 코드는 경고로만 남기고
           # 판정은 colcon test-result(시험 결과 XML — pytest 로 돈 패키지의 실패가 여기 남는다)가 한다.
-          colcon test --packages-select $CI_PKGS --event-handlers console_cohesion+ \
+          colcon test --base-paths $(for p in $CI_PKGS; do printf 'src/%s ' "$p"; done) --packages-select $CI_PKGS --event-handlers console_cohesion+ \
             || echo "::warning::colcon test 종료 코드 $? — 시험이 없는 패키지(code 5)인지 위 로그를 본다"
           colcon test-result --verbose
