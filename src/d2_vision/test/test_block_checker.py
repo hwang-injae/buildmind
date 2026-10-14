@@ -295,3 +295,31 @@ def test_local_and_get_design_paths_give_same_blocks(design_id, n):
         assert all(np.allclose(a['center'], b['center']) and np.allclose(a['rot'], b['rot']) for a, b in zip(local, remote))
         planner = tp.TaskPlanner(cfg, d['recipe'], d['placements'])
         assert [b['part_id'] for b in planner.parts] == names, path.name
+
+
+@pytest.mark.parametrize('yaw_deg', [0.0, 90.0, 37.0])
+def test_standing_block_is_judged_at_any_spot(yaw_deg):
+    """세운 블록(바닥 24.8 × 14.8 mm)은 자리 · 방향에 따라 4 mm 줄인 칸이 2 ~ 4개뿐이라 늘 unknown 이었다(10/14 실기 — 스캔 설계 세운
+    다리 3칸 → 조립 첫 단계 UNKNOWN_BLOCK). 2 mm 만 줄이면 빈 작업대는 absent, 세워 두면 present 로 판정돼야 한다."""
+    L = SIZE[0]
+    R_stand = [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]    # 길이 축이 위(세움)
+    R = rot_z(R_stand, math.radians(yaw_deg))
+    for k in range(25):                                                 # 5 mm 칸에 대해 0.2 ~ 4.8 mm 씩 비켜 둔 자리
+        dx, dy = (k % 5) * 0.001 + 0.0002, (k // 5) * 0.001 + 0.0002
+        leg = {'part_id': 'LEG', 'rot': R, 'center': (ORIGIN['x_m'] + 0.03 + dx, ORIGIN['y_m'] - 0.02 + dy, ORIGIN['z_m'] + L / 2)}
+        chk = BlockChecker([leg], (ORIGIN['x_m'], ORIGIN['y_m']), HALF_M, SIZE)
+        assert chk.parts['LEG']['shrink'] == 0.002
+        assert chk.check(scene_points([], set()), ['LEG'])[0]['state'] == 'absent', (yaw_deg, k)
+        box = [(leg['center'], (SIZE[1] / 2, SIZE[2] / 2, L / 2))] if yaw_deg == 0.0 else []
+        if box:                                                        # 축에 맞춘 상자로만 그릴 수 있어 0° 에서만 present 를 본다
+            got = chk.check(scene_points([], set(), extra=box, step=0.001), ['LEG'])[0]
+            assert got['state'] == 'present' and abs(got['dz_m']) < 0.002, (k, got)
+
+
+def test_flat_and_edge_blocks_keep_4mm_shrink(blocks):
+    """눕힘(74.5 × 24.8) · 옆세움(74.5 × 14.8)은 4 mm 줄여도 칸이 넉넉하다(최소 36 · 9칸) — 그대로 4 mm."""
+    chk = BlockChecker(blocks, (ORIGIN['x_m'], ORIGIN['y_m']), HALF_M, SIZE)
+    assert {p['shrink'] for p in chk.parts.values()} == {0.004}
+    R_edge = [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]       # 폭 축이 위(옆세움)
+    edge = {'part_id': 'E', 'rot': R_edge, 'center': (ORIGIN['x_m'], ORIGIN['y_m'], ORIGIN['z_m'] + SIZE[1] / 2)}
+    assert BlockChecker([edge], (ORIGIN['x_m'], ORIGIN['y_m']), HALF_M, SIZE).parts['E']['shrink'] == 0.004
