@@ -182,16 +182,24 @@ docker --version
 
 **컨테이너는 그 안에 넣는 것의 담당이 만든다(10/5 S-17).** 브로커는 W102로 먼저 띄워 쓰고, 두 PC 연결 확인은 W129(일정표). 1시간 넘게 막히면 일단 호스트로 돌리고 compose(10/12) 때 마저 한다.
 
-컨테이너는 성능을 바꾸지 않는다(1장). DB는 PostgreSQL 16(10/6 21시 E-39) — W088 전에는 저장소 인터페이스가 JSON 파일 폴더로 돈다. 띄우는 순서는 아래와 같다 — 브로커를 열기 전에 방화벽부터([web/README](../../web/README.md) '두 PC Wi-Fi 연결').
+컨테이너는 성능을 바꾸지 않는다(1장). DB는 PostgreSQL 16(10/6 21시 E-39 · W088 10/14 들어옴) — `.env`의 `DATABASE_URL`이 비면 지금처럼 JSON 파일 폴더(`web/backend/data`), 채우면 `db` 컨테이너에 저장한다. 띄우는 순서는 아래와 같다 — 브로커를 열기 전에 방화벽부터([web/README](../../web/README.md) '두 PC Wi-Fi 연결').
 
 ```bash
 cd <저장소>/web
-cp .env.example .env          # OPENAI_API_KEY=…(음성 STT만) · D2_LLM_MODEL · (W088 뒤) DB 접속값 (값은 적지 않는다)
+cp .env.example .env          # OPENAI_API_KEY=…(음성 STT만) · D2_LLM_MODEL · DB 넷(COMPOSE_PROFILES=db · POSTGRES_PASSWORD · DATABASE_URL …) (값은 적지 않는다)
 # 다른 터미널(호스트): python3 web/claude_bridge.py --host 172.17.0.1   — 설계 AI 중계(E-99), 먼저 --check
 D2_WEB_IPV4=<웹 PC Wi-Fi IP> WEB_UID=$(id -u) WEB_GID=$(id -g) docker compose up -d   # mosquitto · db · web
 docker compose ps
 docker compose logs -f web    # 키 읽힘(값은 안 찍음) · 브로커 연결 · DB 연결 확인
 ```
+
+**DB(W088, 10/14 E-112 ③ — 시연 웹 PC는 꼭 켬):**
+- 켜기: `.env`에 `COMPOSE_PROFILES=db`(이 줄이 없으면 `db` 컨테이너가 안 뜸) · `POSTGRES_PASSWORD` · `DATABASE_URL`(`postgresql://d2:<비밀번호>@db:5432/d2` 꼴 — 값은 `.env`에만)을 채우고 `docker compose up -d`. 웹이 켜질 때 기본 설계 4개를 다시 등록한다(E-112 P5).
+- 데이터 = 웹 PC 로컬 폴더 `web/db/data`(커밋 안 됨). 폴더가 비면 `web/db/init/001_schema.sql`로 표를 한 번 만든다. DB 포트(5432)는 열지 않는다 — `web` 컨테이너만 붙는다.
+- 확인: 화면 연결 표시 줄 '저장소: DB(PostgreSQL) / JSON 폴더'(backend `GET /api/designs/rules`의 `store` = `postgres` · `json`).
+- DB에 못 붙으면: `web`은 시작 때 약 30초(20번) 다시 붙어 보고, 그래도 안 되면 꺼졌다 다시 켜지기를 되풀이한다 — 화면이 안 열린다(JSON으로 저절로 넘어가지 않음). `docker compose logs db web`으로 까닭을 본다.
+- 되돌리기(JSON 폴더로): `.env`의 `DATABASE_URL`을 비우고 `docker compose up -d web`.
+- 설계 AI 중계(`claude_bridge`)는 10/14 #167로 '사용 한도' 판단이 바뀌었다 — 통합 뒤 웹 PC 호스트에서 중계를 다시 켠다(`--check` 먼저).
 
 | 규칙 | 내용 |
 |---|---|
