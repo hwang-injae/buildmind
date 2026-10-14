@@ -137,6 +137,8 @@ def test_못_잰_답은_UNMEASURED_로_오차를_만들지_않는다(res, want):
 
 def test_잰_답은_설계_중심과의_차를_mm_로():
     r = placed_offset(C, P, True, '', ok_body(P, [{'x_m': 0.403, 'y_m': -0.0525, 'yaw_deg': -2.0, 'up': 'THICKNESS'}]))
+    raw = {k: r.pop(k) for k in ('dx_raw_mm', 'dy_raw_mm')}                         # 판단용 반올림 전 값(부동소수 그대로)
+    assert abs(raw['dx_raw_mm'] - 3.0) < 1e-9 and abs(raw['dy_raw_mm'] + 2.5) < 1e-9
     assert r == {'status': 'MEASURED', 'x_m': 0.403, 'y_m': -0.0525, 'target_x_m': 0.4, 'target_y_m': -0.05,
                  'dx_mm': 3.0, 'dy_mm': -2.5, 'yaw_deg': -2.0, 'up': 'THICKNESS', 'tilted': None, 'top_z_m': None, 'measured_stamp': ST}
 
