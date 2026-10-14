@@ -206,3 +206,17 @@ def test_OK_판정_뒤라도_정지가_끼면_다음_단계로_가지_않는다(
     monkeypatch.setattr(tm, 'regrasp_decision', ok_then_stop)
     drive(m, 'STOPPED')
     assert len(io.goals) == 1 and [p for _, p in io.measured] == [IDS[0]]                       # 두 번째 블록으로 안 감
+
+
+def test_measured_stamp_1ms_반올림은_받고_그보다_밖은_막는다():
+    """#177 은 measured_stamp 를 round(…, 3) 으로 보낸다 — 요청 · 답 시각 경계에서 0.5 ms 반올림은 '이번 요청'으로 본다."""
+    from d2_task.task_manager import STAMP_ROUND_S
+    part = {'part_id': 'P', 'center': (0.4, -0.05, 0.0074), 'quat': (0.0, 0.0, 0.0, 1.0), 'grasp': 'FLAT_SHORT'}
+    row = {'status': 'MEASURED', 'x_m': 0.405, 'y_m': -0.05, 'dx_mm': 5.0, 'dy_mm': 0.0, 'yaw_deg': 0.0, 'up': 'THICKNESS',
+           'tilted': False, 'top_z_m': 0.0148}
+    sent = (part['center'], part['quat'])
+    t_req, t_resp = 100.0004, 100.0006                           # 가짜 비전처럼 요청 · 답이 1 ms 안
+    for stamp in (round(t_req, 3), round(t_resp, 3)):            # 100.000 · 100.001 — 반올림으로 경계 밖에 찍힌 값
+        assert regrasp_decision(dict(row, measured_stamp=stamp), t_req, t_resp, part, sent, CFG, 0)[0] == 'REGRASP'
+    for stamp in (t_req - STAMP_ROUND_S - 1e-4, t_resp + STAMP_ROUND_S + 1e-4):
+        assert regrasp_decision(dict(row, measured_stamp=stamp), t_req, t_resp, part, sent, CFG, 0)[0] == 'HUMAN'

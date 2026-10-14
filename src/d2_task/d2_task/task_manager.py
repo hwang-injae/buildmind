@@ -119,6 +119,7 @@ def placed_offset(center_m, part_id, ok, why, body):
 
 A4_TOL_MM = 3.0            # 축별 이보다 크면 다시 집어 놓는다(일정표 W144 · E-119 '문턱 3 mm 그대로')
 A4_MAX_TRIES = 2           # 같은 블록 다시 집기 최대 횟수(W144 '최대 2번' → 그래도 크면 사람)
+STAMP_ROUND_S = 0.0005     # 비전 #177 이 measured_stamp 를 소수 3자리(1 ms)로 반올림해 보낸다 — 비교에 그 반올림 폭만 둔다(새 문턱 아님)
 UP_NAMES = ('LENGTH', 'WIDTH', 'THICKNESS')
 
 
@@ -136,6 +137,7 @@ def regrasp_decision(row, t_req, t_resp, part, place_pose, cfg, tries):
           1 mm 띄운 자리, 칸 방식이면 설계 자리. 모르면 None) · cfg = robot.yaml dict(block_actual_m) · tries = 이 블록을 이미 다시 집은 횟수.
     최신성: #177 은 요청 뒤에 받은 깊이만 쓰고(fresh_frames) measured_stamp 는 그중 마지막 장을 받은 시각(노드 시계)이다 —
           같은 로봇 PC 시계라는 가정 아래 t_req ≤ measured_stamp ≤ t_resp 일 때만 '이번 요청의 영상'으로 본다(밖이면 시계 · 영상을 믿지 않음).
+          measured_stamp 는 1 ms 로 반올림돼 오므로 양 끝에 STAMP_ROUND_S(0.5 ms)만 둔다.
     출력: ('OK', None) = 축별 3 mm 안 — 그대로 이어 감 / ('REGRASP', 목표) = PickPlace 목표 {part_id, supply_slot '', grasp(레시피), pick_pose(잰 중심 ·
           잰 yaw · 잰 윗면에서 자세 치수로 구한 중심 높이 — block_pose), place_pose(설계), open_width_m 0, obstacles []} /
           ('HUMAN', 까닭) = 사람 확인. 측정을 못 했거나 믿을 수 없으면(대상 · 자세 다름 · 기울어짐 · 좌표 · yaw · 윗면 없음 · 측정 시각이 요청 · 답 사이가 아님 ·
@@ -146,7 +148,7 @@ def regrasp_decision(row, t_req, t_resp, part, place_pose, cfg, tries):
     if row.get('status') != 'MEASURED':
         return 'HUMAN', f'놓은 블록을 재지 못했어요({row.get("reason")}{": " + row["detail"] if row.get("detail") else ""})'
     stamp = row.get('measured_stamp')
-    if not isinstance(stamp, (int, float)) or isinstance(stamp, bool) or not math.isfinite(stamp) or not t_req <= stamp <= t_resp:
+    if not isinstance(stamp, (int, float)) or isinstance(stamp, bool) or not math.isfinite(stamp) or not t_req - STAMP_ROUND_S <= stamp <= t_resp + STAMP_ROUND_S:
         return 'HUMAN', '측정 영상이 이번 요청 뒤의 것인지 확인되지 않았어요(measured_stamp가 요청 · 답 시각 사이가 아님)'
     if row.get('tilted') is not False:
         return 'HUMAN', '놓은 블록이 기울어졌거나 기울기를 모릅니다'
