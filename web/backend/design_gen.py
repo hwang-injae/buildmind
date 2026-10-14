@@ -502,10 +502,12 @@ class DesignGenerator:
     def _read_and_answer(self, log, messages, allowed, read, progress, fmt=None, skip=False):
         """참고 설계 읽기(도구) → 후보 답. 2번 읽으면 더는 못 부르게 한다. 병렬 도구 호출은 끈다(구조화 출력과 같이 쓸 때 OpenAI 권고).
 
-        읽을 차례는 tool_choice 'required' 로 묻는다 — 중계(claude_bridge)는 'auto' 면 도구를 버리고 바로 답해, 'auto' 로 물으면 한 번도
-        안 읽었다(10/14 PM 점검 · PL — E-72 를 실제로 되게). skip=True(generate — 바탕 설계는 이미 줬으니 참고는 골라서)면 도구 선택지에
-        SKIP_READ('더 안 읽음')를 넣어 AI 가 안 읽기로 고를 수 있고, 고르면 바로 답 차례(tool_choice 'none'). skip=False(scan_fill 부모
-        고르기)는 첫 번은 꼭 읽고 그 뒤는 'auto'. fmt = 답 형식(비우면 후보 3개 — generate). 끝까지 답이 없으면 GenError.
+        첫 차례는 tool_choice 'required' 로 묻는다 — 중계(claude_bridge)는 'auto' 면 도구를 버리고 바로 답해, 첫 차례를 'auto' 로 물으면 한 번도
+        안 읽었다(10/14 PM 점검 · PL — E-72 를 실제로 되게). 그다음은 'auto'(중계는 바로 답을 씀 — 읽기 한 번에 Claude 를 한 번 더 부르므로
+        더 묻지 않는다, 민범진 10/14). skip=True(generate — 바탕 설계는 이미 줬으니 참고는 골라서)면 도구 선택지에 SKIP_READ('안 읽음')를
+        넣어 AI 가 안 읽기로 고를 수 있고, 고르면 답 차례(tool_choice 'none'). skip=False(scan_fill 부모 고르기)는 첫 번은 꼭 읽는다.
+        도구가 하나여야 한다(중계는 required 를 도구 하나일 때만 받음 — SKIP 도 get_design 의 선택지로). fmt = 답 형식(비우면 후보 3개 —
+        generate). 끝까지 답이 없으면 GenError.
         """
         tools = [self._tool(allowed, skip)]
         fmt = fmt or self._candidates_format()
@@ -514,7 +516,7 @@ class DesignGenerator:
             if done or len(read) >= MAX_READS:
                 choice = 'none'
             else:
-                choice = 'required' if rnd == 0 or skip else 'auto'
+                choice = 'required' if rnd == 0 else 'auto'
             msg = self._chat(log, MODEL, messages, fmt, tools=tools, tool_choice=choice, parallel_tool_calls=False)
             calls = msg.tool_calls or []
             if not calls:

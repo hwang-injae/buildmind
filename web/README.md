@@ -120,7 +120,7 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 ```text
 ①  설계 목록에서 바탕 설계를 고름 → 글 창 [AI 생성]  또는  마이크 → 음성 request_design 문장 → 글 창에 넣고 바로 생성(10/13 PL)
 ②  바탕(10/13 PL): 고른 설계 = 새 설계의 parent_id, Template = 그 앞부분. 요청 글에 고른 설계의 블록 목록을 넣고,
-    같은 Template 의 다른 설계는 store.list_designs 요약 + 도구 get_design(최대 2번 — 읽을 차례마다 tool_choice required + 선택지 SKIP '더 안 읽음', 중계가 auto 면 도구를 버려서 10/14)으로 참고만(E-72)
+    같은 Template 의 다른 설계는 store.list_designs 요약 + 도구 get_design(첫 차례 tool_choice required + 선택지 SKIP '안 읽음', 그다음 auto — 중계가 auto 면 도구를 버리고 바로 답해 읽기는 사실상 한 번, 10/14)으로 참고만(E-72)
     → 화면 "바탕 … · 참고한 설계 …". 도구 단계가 실패하면 examples_for(template)(바탕 설계는 뺌). 다른 설계가 없으면 도구 없이 바로
 ③  Claude 1번 호출 → 후보 3개(parts/4.0 — 부품마다 sequence · x · y · z · ori + role · group · stage · grasp, 구조화 출력 candidates[3])
     프롬프트: 역할 · 옵션 목록(src/d2_task/d2_task/roles.json) · 잡기 규칙(SDD 6.6) · 설계 규칙 숫자(robot.yaml — 10/9 ①) · RAG 예시

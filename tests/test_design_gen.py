@@ -119,7 +119,7 @@ def test_generate_reads_reference_checks_and_saves_chosen(store, good, bad):
     안 넣는다. 저장하면 AI 기록 번호(#14), AI 판단 기록 3칸은 비움(글 · 음성 — 10/13 PL)."""
     v1 = derive(store)
     sent, check = [], real_check()
-    gen, client = make(store, [tool_call(v1), tool_call(SKIP_READ, 'c2'), answer([good, bad, good]), answer([good])],
+    gen, client = make(store, [tool_call(v1), answer([good, bad, good]), answer([good])],
                        check=lambda req: sent.append(req) or check(req))
     events = []
     r = gen.generate('벤치를 만들어 줘', BENCH, on_progress=lambda stage, info: events.append(stage))
@@ -130,10 +130,10 @@ def test_generate_reads_reference_checks_and_saves_chosen(store, good, bad):
     assert all('made_by' not in req for req in sent)      # AI 생성 검사 요청에는 made_by 를 싣지 않는다(10/14 PL A1)
     assert all('base_recipe' not in c['parts'] for c in r['candidates'])
     assert events == ['reading', 'candidates', 'checked', 'checked', 'checked', 'retry', 'candidates', 'checked']
-    assert '후보 2개는 통과해 남겨 둔다' in client.calls[3]['messages'][-1]['content'] and '새 후보 1개만' in client.calls[3]['messages'][-1]['content']
-    first, second, third, _ = client.calls
-    assert first['model'] == MODEL and first['temperature'] == 0 and first['tool_choice'] == 'required'   # 읽기 차례는 required(중계가 auto 면 안 읽음)
-    assert (second['tool_choice'], third['tool_choice']) == ('required', 'none')     # 하나 읽고 SKIP 을 고르면 바로 답 차례
+    assert '후보 2개는 통과해 남겨 둔다' in client.calls[2]['messages'][-1]['content'] and '새 후보 1개만' in client.calls[2]['messages'][-1]['content']
+    first, second, _ = client.calls
+    assert first['model'] == MODEL and first['temperature'] == 0 and first['tool_choice'] == 'required'   # 첫 차례는 required(중계가 auto 면 안 읽음)
+    assert second['tool_choice'] == 'auto'                                           # 읽은 뒤는 auto — 중계가 바로 답(한 번만 읽음)
     assert first['parallel_tool_calls'] is False and first['response_format']['json_schema']['strict'] is True
     assert first['tools'][0]['function']['parameters']['properties']['design_id']['enum'] == [v1, SKIP_READ]   # 같은 Template 의 다른 설계 + 안 읽음
     request = first['messages'][1]['content']
@@ -150,7 +150,7 @@ def test_generate_reads_reference_checks_and_saves_chosen(store, good, bad):
     logs = list(store.gen_logs_dir.glob('*_generate.json'))
     assert len(logs) == 1 and r['gen_log'] == logs[0].name
     log = json.loads(logs[0].read_text(encoding='utf-8'))
-    assert log['messages'][0]['role'] == 'system' and len(log['calls']) == 4 and log['result']['design_id'] == '001_CHAIR_BENCH_V002'
+    assert log['messages'][0]['role'] == 'system' and len(log['calls']) == 3 and log['result']['design_id'] == '001_CHAIR_BENCH_V002'
     assert log['design_id'] == '001_CHAIR_BENCH_V002' and log['base_id'] == BENCH     # 고른 후보를 저장할 때 채움(설계_DB #14)
     assert 'sk-' not in logs[0].read_text(encoding='utf-8')
 
@@ -235,18 +235,20 @@ def test_out_of_scope(store):
     assert [r['design_id'] for r in store.list_designs(template=TEMPLATE)] == [BENCH]
 
 
-def test_tool_answers_only_template_designs_and_stops_after_two(store, good):
-    """목록 밖 설계(다른 Template · 바탕 설계 자신)를 부르면 이유만 돌려주고(읽지 않음), 2번 읽으면 그다음은 도구를 못 부르게(none)."""
+def test_tool_answers_only_template_designs_then_answers(store, good):
+    """목록 밖 설계(다른 Template · 바탕 설계 자신)를 부르면 이유만 돌려주고(읽지 않음), 첫 차례 뒤는 auto(중계가 바로 답 — 읽기 한 번에
+    Claude 를 한 번 더 부르므로 더 안 물음, 10/14 민범진), SKIP 을 고르면 안 읽고 답 차례(none)."""
     v1 = derive(store)
-    gen, client = make(store, [tool_call('002_CHAIR_BACK_V000'), tool_call(v1, 'c2'), tool_call(v1, 'c3'), answer([good] * 3)])
-    r = gen.generate('벤치', BENCH)                            # 3라운드 내내 도구만 부름 → 예시를 코드가 넣는 길로(E-72)
-    assert r['reference'] == [] and r['parent_id'] == BENCH and 'tools' not in client.calls[-1]
-    gen, client = make(store, [tool_call(v1), tool_call(v1, 'c2'), answer([good] * 3)])
+    for wrong in ('002_CHAIR_BACK_V000', BENCH):
+        gen, client = make(store, [tool_call(wrong), answer([good] * 3)])
+        r = gen.generate('벤치', BENCH)
+        assert 'error' in client.calls[1]['messages'][-1]['content'] and r['reference'] == [] and r['parent_id'] == BENCH
+    gen, client = make(store, [tool_call(v1), answer([good] * 3)])
     r = gen.generate('벤치', BENCH)
-    assert [c['tool_choice'] for c in client.calls] == ['required', 'required', 'none'] and r['reference'] == [v1, v1]
-    gen, client = make(store, [tool_call(BENCH), tool_call(v1, 'c2'), answer([good] * 3)])
+    assert [c['tool_choice'] for c in client.calls] == ['required', 'auto'] and r['reference'] == [v1]
+    gen, client = make(store, [tool_call(SKIP_READ), answer([good] * 3)])
     r = gen.generate('벤치', BENCH)
-    assert 'error' in client.calls[1]['messages'][-1]['content'] and r['reference'] == [v1] and r['parent_id'] == BENCH
+    assert [c['tool_choice'] for c in client.calls] == ['required', 'none'] and r['reference'] == [] and r['parent_id'] == BENCH
 
 
 def test_falls_back_to_examples_when_tool_phase_fails(store, good):
