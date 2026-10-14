@@ -38,6 +38,8 @@ def fix_row_grasps(parts, block_mm):
     """연짝 블록 중 grasp 가 FLAT_SHORT 인 것을 FLAT_LONG 으로 바꾼 새 parts 목록과 바꾼 sequence 목록.
 
     입력 목록은 바꾸지 않는다(블록마다 얕은 복사). 연짝이 아닌 블록 · 이미 FLAT_LONG 인 블록은 그대로.
+    손가락이 들어가는지(검사 묶음 grasp_options)는 보지 않는다 — 부르는 쪽(HMI 저장 · 고치기 스크립트)이 바꾼 블록을 검사 묶음으로
+    확인하고, 안 되면 FLAT_SHORT 그대로 두고 보고한다(E-104 · 10/13 석형님 #156 리뷰 ①).
     반환: (새 parts 목록, [바꾼 sequence …] — sequence 순).
     """
     rows = row_orders(parts, block_mm)

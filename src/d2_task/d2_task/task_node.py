@@ -369,6 +369,9 @@ class TaskNode(Node):
             repo = share.resolve().parents[3]
             folder = Path.home() / 'd2_data' / 'runs' / f'w144_{design_id}_{time.strftime("%m%d_%H%M%S")}'
             trace = {}
+            # 촬영 문맥은 기록기를 만들기 전에 둔다 — 준비 · 녹화 시작이 실패해도 기록기(덜 된 기록 ZIP 용)는 남고, 그 뒤 RECOVER 로
+            # 이어 가면 촬영(w144_after_place)이 이 문맥을 쓴다. 예전엔 성공 때만 만들어 그 경우 예외가 났다(#152 리뷰 5)
+            self._w144_ctx = trace
 
             def move_observe():
                 tr = trace.get('t')
@@ -423,7 +426,6 @@ class TaskNode(Node):
             self._w144, self._w144_trace = rec, tr
             if not ok:
                 return False, f'W144 녹화 시작 실패: {why}'
-            self._w144_ctx = trace
             self.get_logger().info(f'[W144] 기록 폴더: {folder} · bag: {tr.bag_dir}')
             return True, ''
         except Exception as e:

@@ -2,7 +2,7 @@
 """받침 경유 흩뿌림 집기(robot.yaml scatter.via_spare, 10/13 PL 10시 지시) 시험 — ROS 없이 TaskManager · ScatterFlow 를 가짜 IO 로 돌린다.
 
 흐름: 공급 관측(find_blocks height_map) → 고르기(BlockPicker.rank) → 받침에 놓음(조립 아님 — 옆으로 선 · 선 블록은 그 자세로) → 받침 위 촬영 자세
-→ find_blocks area 'spare' → 선 블록이면 잡기 TIP 으로 눕히고 다시 잼 → 반대 폭으로 맞추기(CENTER_*) → 같은 잰 값에서 레시피 잡기로 다시 집어
+→ find_blocks area 'spare' → 선 블록이면 잡기 TIP 으로 눕히고 다시 잼 → 반대 폭으로 집어 받침 가운데에 옮겨 놓기(10/14) → 받침 가운데에서 레시피 잡기로 다시 집어
 조립(1 mm 띄운 자리) → VERIFY. 실패 규칙: 팔이 움직인 실패만 셈 · 움직이기 전 길 거절은 다음 후보 · 연달아 3번이면 사람.
 받침에 놓은 블록이 안 보이면 사람(1번째 다시 잼 · 연달아 2번째 공급에서) — one_pick 과 같음.
 """
@@ -26,28 +26,43 @@ def supply():
     return {'ok': True, 'blocks': [blk(x=0.30, y=0.20, top=top, length=60, width=60), blk(x=0.45, y=0.22, top=top, length=60, width=60)]}
 
 
-def on_spare(up='THICKNESS'):
-    """받침 위 블록 하나(find_blocks area 'spare' 꼴)."""
+def on_spare(up='THICKNESS', centered=False):
+    """받침 위 블록 하나(find_blocks area 'spare' 꼴) — 받침 자리에서 x +1 · y −2 mm(2.2 mm) 비킴, centered 면 받침 자리 그대로."""
     size = {'THICKNESS': T, 'WIDTH': W, 'LENGTH': L}[up]
-    b = blk(x=SPOT['x_m'] + 0.001, y=SPOT['y_m'] - 0.002, top=SPOT['z_m'] + size, up=up, length=99, width=99, thickness=99)
+    dx, dy = (0.0, 0.0) if centered else (0.001, -0.002)
+    b = blk(x=SPOT['x_m'] + dx, y=SPOT['y_m'] + dy, top=SPOT['z_m'] + size, up=up, length=99, width=99, thickness=99)
     b.update(yaw_deg=-89.0, base_z_m=SPOT['z_m'], confidence=1.0)
     return {'ok': True, 'blocks': [b]}
 
 
 class SpareIO(ScatterIO):
-    """find_blocks 선택 칸(height_map · area)을 받아 기록하고, area 'spare' 면 spare_script(없으면 받침 위 눕힌 블록)를 돌려준다."""
+    """find_blocks 선택 칸(height_map · area)을 받아 기록하고, area 'spare' 면 받침에 블록이 있을 때 spare_script(없으면 받침 위 눕힌 블록),
+    없으면 빈 목록을 돌려준다. 받침에 블록이 있나(spare_has)는 집기가 성공할 때 따라간다 — 받침에 옮기기면 생기고, 받침에서 조립으로 집으면 없어진다
+    받침 맞추기(spare_center)가 성공하면 그 뒤 받침 블록은 받침 자리 그대로로 잰다(10/14 — 맞춘 뒤 다시 재기)."""
 
     def __init__(self):
         super().__init__()
-        self.opts, self.spare_script = [], []
+        self.opts, self.spare_script, self.spare_has, self.spare_centered = [], [], False, False
 
     def find_blocks(self, run_id, should_abort, **opts):
         self.opts.append(dict(opts))
         self.events.append(('call', 'find_blocks', run_id))
         if opts.get('area') == 'spare':
-            return (True, '', self.spare_script.pop(0) if self.spare_script else on_spare())
+            if not self.spare_has:               # 받침에 아무것도 안 놓았다(출발 때 확인) — 준비한 답(spare_script)은 받침에 놓은 뒤에 쓴다
+                return (True, '', {'ok': True, 'blocks': []})
+            return (True, '', self.spare_script.pop(0) if self.spare_script else on_spare(centered=self.spare_centered))
         step = self.find_script.pop(0) if self.find_script else (True, '', supply())
         return step(self) if callable(step) else step
+
+    def pick_place(self, goal, should_abort, on_feedback=None, on_result=None):
+        res = ScatterIO.pick_place(self, goal, should_abort, on_feedback, on_result)
+        if res[0] and goal.get('via_spare'):
+            self.spare_has, self.spare_centered = True, False
+        elif res[0] and goal.get('spare_center'):
+            self.spare_centered = True
+        elif res[0] and goal.get('from_spare') and not (goal.get('spare_stand') or goal.get('spare_tip') or goal.get('spare_center')):
+            self.spare_has = False
+        return res
 
 
 def make():
@@ -70,16 +85,18 @@ def test_블록마다_받침에_눕히고_받침에서_다시_집어_끝까지_�
     to_spare, center, from_spare = legs[0::3], legs[1::3], legs[2::3]
     assert all(g.get('via_spare') for g in to_spare) and not any(g.get('via_spare') for g in from_spare)
     other = {'FLAT_SHORT': 'FLAT_LONG', 'FLAT_LONG': 'FLAT_SHORT'}
-    for c, g in zip(center, from_spare):                                          # 레시피 잡기의 반대 폭으로 맞춘 뒤 다시 재지 않고 같은 잰 값으로 집는다
-        assert c.get('spare_center') and c['grasp'] == 'CENTER_' + other[g['grasp']] and c['pick_pose'] == g['pick_pose']
+    for c, g in zip(center, from_spare):                                          # 잰 자리에서 반대 폭으로 집어 받침 가운데에 놓고, 다시 재서 그 자리에서 집는다
+        assert c.get('spare_center') and c['grasp'] == other[g['grasp']]
+        assert abs(c['pick_pose'][0][0] - (SPOT['x_m'] + 0.001)) < 1e-9 and abs(c['pick_pose'][0][1] - (SPOT['y_m'] - 0.002)) < 1e-9
+        assert abs(c['place_pose'][0][0] - SPOT['x_m']) < 1e-9 and abs(c['place_pose'][0][1] - SPOT['y_m']) < 1e-9
     for g in to_spare:                                                           # 받침 윗면(80 mm) 위에 눕힘
         assert abs(g['place_pose'][0][2] - (SPOT['z_m'] + T / 2)) < 1e-9
         assert abs(g['place_pose'][0][0] - SPOT['x_m']) < 1e-9 and abs(g['place_pose'][0][1] - SPOT['y_m']) < 1e-9
-    for g in from_spare:                                                         # 받침에서 잰 중심 · 받침 높이로 집고, 장애물 없음
-        assert abs(g['pick_pose'][0][0] - (SPOT['x_m'] + 0.001)) < 1e-9 and g['obstacles'] == []
+    for g in from_spare:                                                         # 받침 가운데 · 받침 높이로 집고, 장애물 없음
+        assert abs(g['pick_pose'][0][0] - SPOT['x_m']) < 1e-9 and g['obstacles'] == []
         assert abs(g['pick_pose'][0][2] - (SPOT['z_m'] + T / 2)) < 1e-9
     targets = [c[1] for c in calls(io, 'move_to')]
-    assert targets.count('observe_spare') == len(IDS)
+    assert targets.count('observe_spare') == 2 * len(IDS)                         # 블록마다 받침에 놓은 뒤 + 맞춘 뒤 다시
     assert {'height_map': True} in io.opts and {'area': 'spare'} in io.opts
 
 
@@ -144,7 +161,7 @@ def test_받침에_옆으로_선_블록이면_TIP_으로_눕히고_다시_재서
     assert abs(tip['place_pose'][0][2] - (SPOT['z_m'] + T / 2)) < 1e-9          # 받침 가운데에 누움
     assert abs(tip['place_pose'][0][0] - SPOT['x_m']) < 1e-9 and abs(tip['place_pose'][0][1] - SPOT['y_m']) < 1e-9
     assert io.goals[2].get('spare_center') and len(io.goals) == 3 * len(IDS) + 1
-    assert [c[1] for c in calls(io, 'move_to')].count('observe_spare') == len(IDS) + 1     # 눕힌 뒤 받침을 다시 잼
+    assert [c[1] for c in calls(io, 'move_to')].count('observe_spare') == 2 * len(IDS) + 1     # 블록마다 2번(놓은 뒤 · 맞춘 뒤) + 눕힌 뒤 한 번 더
 
 
 def test_기울어진_블록은_윗면_법선으로_두께_절반만_물고_받침에_그만큼_올려_놓는다():
@@ -155,7 +172,9 @@ def test_기울어진_블록은_윗면_법선으로_두께_절반만_물고_받�
                  center_top_z_m=top, normal=[-0.2588, 0.0, 0.9659])
     target = {'part_id': IDS[0], 'grasp': 'FLAT_SHORT', 'place_pose': ((0.4, -0.07, 0.01), (0, 0, 0, 1))}
     assert flow.prepare_spare(target, {'ok': True, 'blocks': [tilted]})['status'] == 'NO_MATCH'      # 깊이 없으면 기울여 집기 안 함
-    r = flow.prepare_spare(target, {'ok': True, 'blocks': [tilted], 'height_map': EMPTY_HM})
+    assert flow.prepare_spare(target, {'ok': True, 'blocks': [tilted], 'height_map': EMPTY_HM})['status'] == 'NO_MATCH'   # 점 0개도 깊이 없음(10/14 점검)
+    floor = dict(EMPTY_HM, z_m=[SPARE_CFG['table_z_m']])                      # 블록에서 먼 작업대 점 하나 — 깊이는 받았고 막는 점은 없음
+    r = flow.prepare_spare(target, {'ok': True, 'blocks': [tilted], 'height_map': floor})
     assert r['status'] == 'SPARE' and r['request']['grasp'] == 'TILT'
     center, _, n = tilt_block_pose(dict(tilted), T)
     shift = SPARE_CFG['grasp_depth_m'] - T / 2
@@ -196,23 +215,56 @@ def test_세움_레시피는_세우기_교시가_없으면_사람을_부른다()
 
 
 def test_세움_레시피는_받침_가운데로_맞춘_뒤_교시_동작으로_세운다():
-    """W131(10/13): 받침 위 눕힌 블록 → CENTER_FLAT_LONG 으로 받침 자리 가운데에 맞춤 → then = STANDUP_HIGH(받침 자리 눕힘 → 세움).
-    옆세움(EDGE)은 CENTER_FLAT_SHORT → STANDUP_SIDE. 공급에서 받침으로 옮기는 1단계도 막지 않는다."""
+    """W131(10/13): 받침 위 눕힌 블록 → 잰 자리에서 FLAT_LONG 으로 집어 받침 자리 가운데에 놓음(10/14) → 다시 재서 2 mm 안이면 STANDUP_HIGH
+    (받침 자리 눕힘 → 세움). 옆세움(EDGE)은 FLAT_SHORT → STANDUP_SIDE. 공급에서 받침으로 옮기는 1단계도 막지 않는다. 맞추기를 건너뛸 길(skip)은 없다."""
     from d2_motion.motion_math import matrix_from_quat, up_axis
     m, io = make()
-    for grasp, center, stand, up in (('STAND_SHORT', 'CENTER_FLAT_LONG', 'STANDUP_HIGH', 'LENGTH'),
-                                     ('EDGE_SHORT', 'CENTER_FLAT_SHORT', 'STANDUP_SIDE', 'WIDTH')):
+    for grasp, center, stand, up in (('STAND_SHORT', 'FLAT_LONG', 'STANDUP_HIGH', 'LENGTH'),
+                                     ('EDGE_SHORT', 'FLAT_SHORT', 'STANDUP_SIDE', 'WIDTH')):
         target = {'part_id': IDS[0], 'grasp': grasp, 'place_pose': ((0.4, -0.07, 0.04), (0, 0, 0, 1))}
         assert m._scatter.prepare_spare(target, supply())['status'] == 'SPARE'
-        r = m._scatter.prepare_from_spare(target, on_spare())
-        assert r['status'] == 'SPARE_CENTER'
-        c, t = r['request'], r['request']['then']
-        assert c['grasp'] == center and c.get('spare_center') and not c.get('spare_stand')
+        r = m._scatter.prepare_from_spare(target, on_spare())                    # 처음(맞추기 0번) — 맞추기
+        assert r['status'] == 'SPARE_CENTER' and 'offset_mm' not in r
+        c = r['request']
+        assert c['grasp'] == center and c.get('spare_center') and not c.get('spare_stand') and c.get('skip') is None
+        assert abs(c['pick_pose'][0][0] - (SPOT['x_m'] + 0.001)) < 1e-9 and abs(c['pick_pose'][0][1] - (SPOT['y_m'] - 0.002)) < 1e-9   # 잰 자리에서 집음
+        assert abs(c['place_pose'][0][0] - SPOT['x_m']) < 1e-9 and abs(c['place_pose'][0][1] - SPOT['y_m']) < 1e-9
+        r = m._scatter.prepare_from_spare(target, on_spare(centered=True), centers=1)   # 맞춘 뒤 다시 잼 — 받침 자리 그대로 → 세움
+        assert r['status'] == 'SPARE_STAND' and r['offset_mm'] == 0.0
+        t = r['request']
         assert t['grasp'] == stand and t.get('spare_stand') and not t.get('spare_center')
-        for pose in (c['pick_pose'], t['pick_pose'], t['place_pose']):                # 잰 중심이 아니라 받침 자리(교시 좌표)
+        for pose in (t['pick_pose'], t['place_pose']):                              # 받침 자리(교시 좌표)에서 세운다
             assert abs(pose[0][0] - SPOT['x_m']) < 1e-9 and abs(pose[0][1] - SPOT['y_m']) < 1e-9
         assert up_axis(matrix_from_quat(t['pick_pose'][1])) == 'THICKNESS' and up_axis(matrix_from_quat(t['place_pose'][1])) == up
         assert abs(t['place_pose'][0][2] - (SPOT['z_m'] + {'LENGTH': L, 'WIDTH': W}[up] / 2)) < 1e-9
+
+
+def test_맞춘_뒤_다시_재서_2mm_넘으면_한_번_더_맞추고_두_번이면_사람_없이_이어_간다():
+    """10/14 박진용: 맞춘 뒤 받침 자리에서 2 mm(CENTER_TOL_M) 넘으면 다시 맞춘다 — 블록당 CENTER_MAX(2)번까지, 넘겨도 사람을 부르지 않는다."""
+    from d2_task.scatter_pick import CENTER_MAX
+    m, io = make()
+    off = on_spare()                                                              # 2.2 mm 비킴
+    for grasp, after in (('FLAT_SHORT', 'PICK'), ('STAND_SHORT', 'SPARE_STAND')):
+        target = {'part_id': IDS[0], 'grasp': grasp, 'place_pose': ((0.4, -0.07, 0.04), (0, 0, 0, 1))}
+        r = m._scatter.prepare_from_spare(target, off, centers=1)
+        assert r['status'] == 'SPARE_CENTER' and r['offset_mm'] == 2.2              # 1번 맞춘 뒤 2.2 mm → 한 번 더
+        r = m._scatter.prepare_from_spare(target, off, centers=CENTER_MAX)
+        assert r['status'] == after and r['offset_mm'] == 2.2                       # 2번 다 했으면 그대로 이어 감(사람 없음)
+    target = {'part_id': IDS[0], 'grasp': 'FLAT_SHORT', 'place_pose': ((0.4, -0.07, 0.04), (0, 0, 0, 1))}
+    r = m._scatter.prepare_from_spare(target, off, centers=CENTER_MAX)
+    assert abs(r['request']['pick_pose'][0][0] - (SPOT['x_m'] + 0.001)) < 1e-9      # 일반은 잰 자리에서 집는다
+
+
+def test_받침_맞추기는_다시_재고_어긋남을_기록한다():
+    """10/14: 맞춘 뒤 다시 잰 어긋남을 조립 기록에 남긴다 — 실기에서 왜 못 맞추는지 숫자로 보려고."""
+    m, io = make()
+    got, log = [], m.logger.log
+    m.logger.log = lambda kind, part_id=None, value=None, module='task': (got.append((kind, value)), log(kind, part_id, value, module))
+    start(m)
+    drive(m, 'DONE')
+    again = [v for k, v in got if k == 'spare' and '다시 잼' in str(v)]
+    assert len(again) == len(IDS) and all(v.endswith('0.0 mm') for v in again)   # 가짜 카메라는 맞춘 뒤 받침 자리 그대로
+    assert m._spare_centers == 0
 
 
 def test_받침에_레시피_자세로_선_블록은_눕히지_않고_바로_집는다():
@@ -243,7 +295,8 @@ def test_맞추기_길이_안_나오면_맞추기_없이_다시_집는다():
     io.pick_script = [script] * (3 * len(IDS))
     start(m)
     drive(m, 'DONE')
-    assert [g['grasp'] for g in io.goals[:3]] == ['FLAT_SHORT', 'CENTER_FLAT_LONG', 'FLAT_SHORT']
+    assert [g['grasp'] for g in io.goals[:3]] == ['FLAT_SHORT', 'FLAT_LONG', 'FLAT_SHORT']
+    assert abs(io.goals[2]['pick_pose'][0][0] - (SPOT['x_m'] + 0.001)) < 1e-9     # 옮기지 못했으니 잰 자리 그대로 집는다(skip)
     assert m.last_build['placed'] == len(IDS)
     assert m._plan_streak == 0
 
@@ -378,6 +431,7 @@ def test_W144_출발에_폴더_VERIFY_통과마다_설계_중심으로_촬영_�
     m, io = make_w144()
     start(m)
     drive(m, 'DONE')
+    m.run_once()                                                                  # 닫기는 작업 스레드가 잠금 밖에서(#152 리뷰 3)
     kinds = [e[0] for e in io.w144 if e[0] != 'event']
     assert kinds[0] == 'start' and kinds[-1] == 'finish' and io.w144[-1][1] is True
     shots = [e for e in io.w144 if e[0] == 'shot']
@@ -405,7 +459,9 @@ def test_W144_기록_준비가_안_되면_움직이기_전에_ERROR():
     """INTEGRATION.md: 필수 토픽 · 녹화가 준비 안 되면 조립을 시작하지 않는다 — 출발 뒤 이동 · 집기 없이 ERROR."""
     m, io = make_w144(fail_at='start')
     assert m.command('select_design', 'bench') == (True, '')
-    assert m.command('start') == (True, '') and m.state == 'ERROR'          # 출발은 받되 움직이기 전에 오류(사람이 카메라 · TF 를 보고 다시)
+    assert m.command('start') == (True, '') and m.state == 'CHECK'          # 출발은 받고, 기록은 CHECK 첫 단계에서 잠금 밖으로 연다(#152 리뷰 3)
+    m.run_once()
+    assert m.state == 'ERROR'                                                 # 움직이기 전에 오류(사람이 카메라 · TF 를 보고 다시)
     assert io.goals == [] and calls(io, 'move_to') == [] and calls(io, 'find_blocks') == []
 
 
@@ -419,3 +475,162 @@ def test_W144_집기가_실패하면_그_시도를_닫고_다음_시도는_retry
     fails = [e for e in io.w144 if e[0] == 'fail']
     assert fails and fails[0][1] == begins[0][3] and fails[0][3] == 'GRASP_FAILED'
     assert begins[1][1] == begins[0][1] and begins[1][4] == begins[0][3]          # 같은 부품의 다음 시도 = retry_of 첫 시도
+
+
+# ---------- 10/14 #152 리뷰 고침 ----------
+def test_받침에_놓는_중에_멈추면_받침_기록을_남겨_다음엔_받침부터_잰다():
+    """#152 리뷰 1: 놓기(place) 단계 이후의 실패 · 정지면 실물이 받침에 있을 수 있다 — 기록을 남겨 같은 자리에 또 놓지 않는다."""
+    m, io = make()
+    m.goal = {'part_id': IDS[0], 'grasp': 'FLAT_SHORT', 'via_spare': True, 'attempt': (0.3, 0.2, 'FLAT_SHORT', 0, 0.0)}
+    m._spare_on = None
+    for step, kept in (('move', None), ('place', IDS[0]), ('retreat', IDS[0])):
+        m._spare_on = None
+        m.last_pick = {'request_id': 1, 'step': step, 'result_at': None}
+        m._via_spare_result(False, 'STOPPED')
+        assert m._spare_on == kept                                                # 옮기는 중(move)이면 블록은 손에 — 받침 기록 안 함
+
+
+def test_출발_홈_이동은_앞_블록이_남은_장면으로_먼저_하고_그_뒤에_장면을_비운다():
+    """#152 리뷰 2: 빈 진행표로 장면을 비운 뒤 움직이면 실물이 남았을 때 장애물이 빠진 장면으로 간다."""
+    m, io = make()
+    order = []
+    io.publish_progress = lambda msg: order.append(('progress', len(msg['parts'])))
+    move = io.move_to
+    io.move_to = lambda target, abort, speed_ratio=1.0: (order.append(('move', target)), move(target, abort, speed_ratio))[1]
+    start(m)
+    m.run_once()
+    assert order.index(('move', 'home')) < order.index(('progress', 0))
+
+
+def test_출발_홈_이동이_막히면_장면을_비우지_않고_사람을_부른다():
+    m, io = make()
+    sent = []
+    io.publish_progress = lambda msg: sent.append(msg)
+    io.move_script = [(False, 'PLAN_FAILED')]
+    start(m)
+    drive(m, 'ERROR')
+    assert not any(msg['parts'] == [] for msg in sent)
+
+
+def test_헛잡음_뒤_공급_관측_이동이_실패하면_넘기지_않고_실패_처리한다():
+    """#152 리뷰 4: observe_supply 이동이 TIMEOUT 이어도 다시 찍으러 갔다 — 이제 평소 실패 처리(TIMEOUT 은 정지 요청부터)."""
+    m, io = make()
+    m.run_id = 'R1'
+    io.find_script = [(True, '', {'ok': True, 'blocks': []})]                    # 집기 위에서 찍었는데 그 블록이 안 보임 → 공급 관측으로
+    io.move_script = [(False, 'TIMEOUT')]
+    goal = {'part_id': IDS[0], 'grasp': 'FLAT_SHORT', 'via_spare': True, 'attempt': (0.3, 0.2, 'FLAT_SHORT', 0, 0.0),
+            'seen': supply()['blocks'][0]}
+    assert m._spare_regrasp(goal) is True
+    assert ('stop', 'TIMEOUT') in io.calls and calls(io, 'find_blocks') == [('find_blocks', 'R1')]
+
+
+def test_값이_틀린_블록이_있으면_고르기_전에_막고_예외가_안_난다():
+    """#152 리뷰 6: up 이 없거나 모르는 이웃 블록이 있으면 순위 계산이 예외로 멈췄다 — BLOCKED(다시 찍기)로."""
+    m, io = make()
+    target = {'part_id': IDS[0], 'grasp': 'FLAT_SHORT', 'place_pose': ((0.4, -0.07, 0.04), (0, 0, 0, 1))}
+    for bad in (None, 'SIDE'):
+        resp = supply()
+        resp['blocks'][1]['up'] = bad
+        r = m._scatter.prepare_spare(target, resp)
+        assert r['status'] == 'BLOCKED' and r['index'] == 1
+
+
+class LockIO(W144IO):
+    """W144 열기 · 닫기를 부를 때 작업 관리자 잠금을 다른 스레드가 잡을 수 있었나(= 잠금 밖인가)를 남긴다."""
+
+    def _free(self):
+        import threading
+        got = []
+
+        def probe():
+            ok = self.manager._lock.acquire(timeout=0.5)
+            got.append(ok)
+            if ok:                                     # RLock 은 잡은 스레드가 푼다
+                self.manager._lock.release()
+        t = threading.Thread(target=probe)
+        t.start()
+        t.join()
+        return bool(got and got[0])
+
+    def w144_start(self, design_id, run_id):
+        self.w144.append(('start_free', self._free()))
+        return super().w144_start(design_id, run_id)
+
+    def w144_finish(self, completed):
+        self.w144.append(('finish_free', self._free()))
+        super().w144_finish(completed)
+
+
+def test_W144_녹화_열기_닫기는_작업_관리자_잠금_밖에서_한다():
+    """#152 리뷰 3: 잠금 안에서 녹화 시작(토픽 확인 최대 15 s) · 닫기(rosbag · ZIP 30 s)를 기다리면 그동안 정지 신호 처리가 막혔다."""
+    io = LockIO()
+    m = TaskManager(SPARE_CFG, io, open_width_m=0.0)
+    io.manager = m
+    fast_wait(m)
+    m.on_safety(SAFE_OK)
+    m.on_gripper({'grasped': False})
+    start(m)
+    drive(m, 'DONE')
+    m.run_once()
+    free = dict((e[0], e[1]) for e in io.w144 if e[0] in ('start_free', 'finish_free'))
+    assert free == {'start_free': True, 'finish_free': True}
+
+
+# ---------- 10/14 10시 전체 점검 ② 박진용 ----------
+def test_사람_확인을_웹_끊김으로_떠나면_계속_뒤_할_일을_비운다():
+    """점검 ② 2ⓐ: WAIT_SUPPLY(놓은 뒤 확인 대기 then='verify') → WAIT_HMI 로 떠나면 _hold_then 이 남아 다음 [계속]이 엉뚱하게 VERIFY 로 갔다."""
+    m, io = make()
+    m.state, m._hold_then = 'WAIT_SUPPLY', 'verify'
+    m._set('WAIT_HMI', 'hmi_lost', '')
+    assert m._hold_then is None
+    m.state, m._hold_then = 'SELECT', None
+    m._hold(IDS[0], '사람 확인', then='verify')                              # 들어갈 때는 남는다
+    assert m.state == 'WAIT_SUPPLY' and m._hold_then == 'verify'
+
+
+def test_웹_다시_붙은_뒤_재확인도_받침_경유면_엄격하게_본다():
+    """점검 ② 2ⓐ: 웹 재연결 뒤 SELECT 재확인이 높이 기준(place_dz_m 5 mm) 없이 통과해 고치지 않은 블록 위로 진행했다."""
+    m, io = make()
+    start(m)
+    m.run_once()                                                              # CHECK → SELECT
+    io.world.add(IDS[0])
+    io.dz = 0.010                                                             # 놓은 블록이 10 mm 떠 있음(5 mm 넘음)
+    m.placed, m._hmi_recheck, m.state = IDS[0], True, 'SELECT'
+    m.run_once()
+    assert m.state == 'WAIT_SUPPLY' and m._hold_then == 'verify' and not m._hmi_recheck
+
+
+def test_헛잡음_뒤_다시_찍기_조회가_실패하면_실패_처리한다():
+    """점검 ② 2ⓑ: find_blocks 가 TIMEOUT 이어도 정지 요청 없이 SELECT 로 갔다."""
+    m, io = make()
+    m.run_id = 'R1'
+    io.find_script = [(False, 'TIMEOUT', None)]
+    goal = {'part_id': IDS[0], 'grasp': 'FLAT_SHORT', 'via_spare': True, 'attempt': (0.3, 0.2, 'FLAT_SHORT', 0, 0.0),
+            'seen': supply()['blocks'][0]}
+    assert m._spare_regrasp(goal) is True
+    assert ('stop', 'TIMEOUT') in io.calls
+
+
+def test_헛잡음_뒤_다시_잡기는_새로_찍은_관측을_다음_후보의_바탕으로_남긴다():
+    """점검 ② 2ⓒ: 다시 잡기가 움직이기 전에 거절되면 밀리기 전 옛 관측(_spare_seen)에서 다음 후보를 골라 빈 자리로 갔다."""
+    m, io = make()
+    m.run_id = 'R1'
+    old = supply()
+    new = supply()
+    new['blocks'][0]['x_m'] += 0.01                                          # 헛잡음으로 10 mm 밀림
+    m._spare_seen = ({'part_id': IDS[0]}, old)
+    io.find_script = [(True, '', new)]
+    goal = {'part_id': IDS[0], 'grasp': 'FLAT_SHORT', 'via_spare': True, 'attempt': (0.30, 0.20, 'FLAT_SHORT', 0, 0.0),
+            'seen': old['blocks'][0], 'place_pose': ((0.4, -0.07, 0.04), (0, 0, 0, 1))}
+    assert m._spare_regrasp(goal) is True and m.state == 'PICK_PLACE'
+    assert m._spare_seen[1] is new
+
+
+def test_W144_기록_시작이_실패하면_덜_된_기록을_닫는다():
+    """점검 ② 3: 시작 실패 뒤 [다시 시작]으로 이어 가면 반쯤 연 기록을 썼다 — 실패하면 닫기(ZIP)를 잡아 둔다."""
+    m, io = make_w144(fail_at='start')
+    assert m.command('select_design', 'bench') == (True, '') and m.command('start') == (True, '')
+    m.run_once()
+    assert m.state == 'ERROR'
+    m.run_once()
+    assert ('finish', False) in io.w144
