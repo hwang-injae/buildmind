@@ -309,11 +309,11 @@
           },
           "depth_mm": [
             75,
-            150
+            75
           ],
           "width_mm": [
             75,
-            150
+            75
           ],
           "mirror": "X",
           "material": [

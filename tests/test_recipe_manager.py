@@ -182,7 +182,7 @@ def test_recipe_sha256_is_fixed_canonical_json(bench):
     assert builder.calculate_recipe_sha256(moved) != BENCH_RECIPE_SHA256
 
 
-BENCH_RECIPE_SHA256 = '63b1a5389e133f79af0396784ac2ceade86464da5d9071e71b27feda04eed2b2'   # 벤치 레시피(recipe/4.0 — stocks + 트리) 해시 — 계산 방법이 바뀌면 깨진다
+BENCH_RECIPE_SHA256 = '9a1e88b0c36799a06ad91821aaaed2fa6f9797c8415d0472c88a53f924431d40'   # 벤치 레시피(recipe/4.0 — stocks + 트리) 해시 — 계산 방법이 바뀌면 깨진다
 
 
 # 저장 레시피로 다시 만든 레시피 · 조립 방법이 원본과 같다 (꼭짓점 → 치수 · 회전 · 받침 · 블록 이름). builder 는 사람 칸을 만들지 않는다
