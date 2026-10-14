@@ -25,6 +25,7 @@ UPS = ('THICKNESS', 'WIDTH', 'LENGTH')
 HORIZ = {'THICKNESS': (('LENGTH', 0.0), ('WIDTH', 90.0)), 'WIDTH': (('LENGTH', 0.0), ('THICKNESS', 90.0)),
          'LENGTH': (('WIDTH', 0.0), ('THICKNESS', 90.0))}
 POSE_KO = {'THICKNESS': '눕힘', 'WIDTH': '옆으로 섬', 'LENGTH': '세움'}
+TILT_ABOVE_LEVEL = 1.5   # 기울어진 블록이 이 층 이상이면 실제 높이로 위층 취급, 아래면 1층(바닥에서 조금 들린 것 — 10/14 #174 리뷰 ②)
 TIER_NAMES = {1: '덮은 블록 치우기', 2: '눕힘 곧게', 3: '눕힘 틀기', 4: '기울여 집기', 5: '옆으로 선·선', 6: '큰 옮김'}
 
 
@@ -142,11 +143,13 @@ class PickRanker:
 
     def level_of(self, b):
         """집는 순서의 높이(층 단위) — 반듯한 블록은 layer_of(정수 층), 기울어진 블록은 반올림하지 않은 실제 높이(층 사이에 들어감,
-        10/14 박진용). 바닥 = 가운데 윗면(없으면 윗면) − 두께."""
+        10/14 박진용). 바닥 = 가운데 윗면(없으면 윗면) − 두께. 기울어진 블록이 1.5층 아래(바닥에서 조금 들린 것)면 1층으로 친다 —
+        다른 블록에 걸친 것만 위층보다 먼저, 바닥 근처는 같은 1층 안 칸 순서(곧게 먼저)대로(10/14 석형님 #174 리뷰 ② · 박진용)."""
         if not b.get('tilted'):
             return float(self.layer_of(b))
         z = b.get('center_top_z_m', b['top_z_m']) - self.T
-        return max(1.0, (z - self.table_z) / self.T + 1.0)
+        level = (z - self.table_z) / self.T + 1.0
+        return level if level >= TILT_ABOVE_LEVEL else 1.0
 
     def covers(self, blocks, i):
         """i 번이 남을 덮은 블록인가 — 비전이 overlap=top 이라고 했거나 기울어진 블록 중, 위에서 본 사각형이 덮인(under) 블록과 겹치는 것.

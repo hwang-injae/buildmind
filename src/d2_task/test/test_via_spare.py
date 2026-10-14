@@ -636,12 +636,12 @@ def test_W144_기록_시작이_실패하면_덜_된_기록을_닫는다():
     assert ('finish', False) in io.w144
 
 
-def test_조립_중이_아닐_때_정지가_풀리면_빈_진행표로_장면_블록을_비운다():
-    """10/14 실기: [초기화] 뒤 [정리 끝]으로 대기로 돌아가도 장면에 앞 설계 블록이 남아 다음 설계 놓기가 PLAN_FAILED — 빈 진행표를 보내
-    장면 관리가 장면의 blk_* 를 전부 지우게 한다([조립] 출발 때 _clean_start 와 같은 신호)."""
+def test_조립_중이_아닐_때_정지가_풀려도_장면은_그대로_둔다():
+    """10/14 #174 리뷰 ①: 완성 · 대기에서 정지 → 다시 시작은 실물 블록이 남았을 수 있어 빈 진행표를 보내지 않는다
+    (장면은 조립 끝 DONE 에 장면 관리가, 다음 [조립] 출발 때 _clean_start 가 비운다)."""
     m, io = make()
     io.progress.clear()
     m.state, m._assembling = 'RECOVER', False
     m._recover()
     assert m.state == 'IDLE'
-    assert io.progress and io.progress[-1]['parts'] == [] and io.progress[-1]['schema'] == 'progress/2.0'
+    assert io.progress == []
