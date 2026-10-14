@@ -30,7 +30,7 @@ import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from d2_interfaces.action import PickPlace
-from d2_interfaces.srv import CheckProgress, HmiCommand, JsonQuery, MoveTo, SceneAttach, StopRequest
+from d2_interfaces.srv import CheckProgress, GripperCommand, HmiCommand, JsonQuery, MoveTo, SceneAttach, StopRequest
 from d2_safety.safe_stop import init_ros
 from geometry_msgs.msg import Pose
 from rclpy.action import ActionClient
@@ -113,6 +113,7 @@ class TaskNode(Node):
         self.infer_cli = self.create_client(JsonQuery, '/d2/vision/scan_infer', callback_group=cb)
         self.find_cli = self.create_client(JsonQuery, '/d2/vision/find_blocks', callback_group=cb)      # supply_mode: scatter 일 때만 쓴다
         self.stop_cli = self.create_client(StopRequest, '/d2/safety/stop', callback_group=cb)
+        self.gripper_cli = self.create_client(GripperCommand, '/d2/gripper/command', callback_group=cb)   # 정지 중 화면 gripper_open 만 쓴다(W183)
         self.attach_cli = self.create_client(SceneAttach, '/d2/motion/scene/attach', callback_group=cb)    # 출발 때 남은 쥔 상자 떼기(받침 경유)
         self.service_s = cfg['timeout']['service_s']      # 서비스 한 번의 제한 시간 · save_build 다시 보내기 간격 (robot.yaml)
         self.move_to_s = cfg['timeout']['move_to_s']
@@ -557,6 +558,28 @@ class TaskNode(Node):
         req.source, req.reason = 'task', reason
         res, why = self._call(self.stop_cli, req, lambda: not rclpy.ok(), self.service_s)
         return (False, why or 'ERROR') if res is None else (res.success, res.message)
+
+    def gripper_open(self, width_m, force_n, on_done):
+        """정지 중 화면 gripper_open: /d2/gripper/command 로 폭 width_m(m) · 힘 force_n(N)을 보내고 곧바로 돌아온다. 반환: (보냈나, reason).
+
+        팔은 움직이지 않는다. 그리퍼 서버의 실제 답은 언제 오든 on_done(성공, reason)으로 한 번 알린다(기다리지 않고 future 를 버리지 않는다).
+        서버가 없으면 보내지 않고 (False, 'GRIPPER_NO_RESPONSE') — 이때 on_done 은 부르지 않는다(호출자가 처리).
+        """
+        if not self.gripper_cli.service_is_ready():
+            return False, 'GRIPPER_NO_RESPONSE'
+        req = GripperCommand.Request()
+        req.width_m, req.force_n = float(width_m), float(force_n)
+
+        def finished(f):
+            try:
+                res = f.result()
+                ok, why = (bool(res.success), res.reason) if res is not None else (False, 'ERROR')
+            except Exception as e:     # noqa: BLE001 — 답을 못 읽어도 대기는 풀어야 한다
+                self.get_logger().error(f'그리퍼 응답 실패: {e!r}')
+                ok, why = False, 'ERROR'
+            on_done(ok, why)
+        self.gripper_cli.call_async(req).add_done_callback(finished)
+        return True, ''
 
     def check_progress(self, part_ids, should_abort):
         """진행 확인을 service_s 초 안에 받는다. 반환: (성공, reason, 블록별 관측). 중단 · 시간 초과 · 실패 때 관측은 빈 dict."""

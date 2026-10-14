@@ -56,6 +56,7 @@ RUN_STATES = ('CHECK', 'SELECT', 'PICK_PLACE', 'WAIT_SUPPLY', 'WAIT_HMI', 'VERIF
 # 로봇이 서야 하는 결과 — 정지 노드가 세웠다(STOPPED · CANCELED). 그리퍼 응답 없음(GRIPPER_NO_RESPONSE) · 피드백 없음(NO_FEEDBACK)은
 # 정지 노드가 잠그지 않으니 신호를 기다리지 않고 작업 관리자가 ERROR 로 멈춘다(E-74, 10/9 PL)
 STOP_REASONS = ('STOPPED', 'CANCELED')
+GRIPPER_OPEN_M = 0.0865   # 정지 중 그리퍼 열기 폭(m) — 복구 절차 4절 2 명령과 같은 값(10/13 16:30 PL). 쥔 블록(최대 75 mm)을 뺄 수 있게 연다
 
 
 def wait_until(event, should_abort, poll_s=0.05, timeout_s=None):
@@ -168,6 +169,9 @@ class TaskManager:
         self._hmi_recheck = False                 # WAIT_HMI 의 start 는 SELECT 에서 진행표부터 다시 확인한다
         self._scan_run = False                    # 스캔 CSV 는 남기되 조립 결과 build/2 로 보내지 않는다
         self._scan_poses, self._scan_index = (), 0
+        self._in_handler = False                  # 작업 스레드가 STOPPED 밖의 단계(이동 · 집기 결과 처리 등)를 돌리는 중 — 그동안 정리 취소는 받지 않는다
+        self._gripper_seq = 0                     # 그리퍼 열기 요청 번호 — 답이 한 번만 대기를 풀게 한다
+        self._gripper_busy = False                # 정지 중 그리퍼 열기를 보냈고 서버의 실제 답이 아직 없다 — TIMEOUT 으로는 풀지 않는다(10/13 사용자 결정)
         for run_id, summary in self.logger.load_pending():
             self.pending_builds[run_id] = summary
             self._build_ready.add(run_id)         # 이미 디스크에 있다
@@ -374,13 +378,20 @@ class TaskManager:
         reason 은 IRD 7장에 이미 있는 코드만 쓴다: 운전 중 'BUSY', 정지 중 'STOPPED', 조회 시간 초과 'TIMEOUT'. 맞는 코드가 없는 거절(설계 없음 ·
         점검 실패 · 아직 없는 명령)은 reason 을 빈 값으로 두고 이유를 state/2 의 message 글자로만 알린다.
         """
+        with self._lock:
+            if self._gripper_busy and cmd in ('select_design', 'start', 'scan'):     # 팔을 움직이게 하는 요청 — 그리퍼가 실제로 다 열렸다는 답이 올 때까지 받지 않는다
+                return self._reject('BUSY', '그리퍼가 열리는 중이에요. 완료 안내 뒤 다시 누르세요')
         if cmd == 'select_design':
             return self._lookup_then(design_id, 'select')
         if cmd == 'start':
             return self._lookup_then(design_id, 'start')
+        if cmd == 'gripper_open':
+            return self._gripper_open()
         with self._lock:
             if cmd == 'scan':
                 return self._begin_scan()
+            if cmd == 'cancel' and self.state == 'STOPPED':
+                return self._cleanup_stopped()
             if cmd == 'cancel':
                 if not self._cancel_to_idle():
                     return self._reject(self._busy_reason(), '준비·오류·스캔 검토 상태에서만 취소할 수 있다')
@@ -388,7 +399,7 @@ class TaskManager:
             return self._reject('', f'모르는 명령: {cmd}')
 
     def on_intent(self, intent, design_id=None):
-        """음성 의도(intent/1, 다리가 ROS 토픽으로 낸다). start·select_design은 버튼과 같고 cancel은 READY·ERROR·SCAN_REVIEW에서 받는다.
+        """음성 의도(intent/1, 다리가 ROS 토픽으로 낸다). start·select_design은 버튼과 같고 cancel은 READY·ERROR·SCAN_REVIEW와 STOPPED(정리 확인 — 화면 cancel과 같은 함수)에서 받는다.
 
         그 밖(request_design 등)은 무시. 출발할 수 없는 때의 음성 start 는 무시하고 알림 voice_start_ignored 만 낸다(IRD 8.5).
         설계 조회가 있는 동작은 잠금 밖에서 command 로 한다.
@@ -407,7 +418,65 @@ class TaskManager:
                     self._publish('voice_start_ignored', '관측 자세로 가는 중이라 음성 출발을 무시했다')
         elif intent == 'cancel':
             with self._lock:
-                self._cancel_to_idle()
+                if self.state == 'STOPPED':
+                    self._cleanup_stopped()      # 화면 [초기화]와 같은 함수(10/13 19:45 PL) — 기록 닫기 · 잠금 유지, 팔 이동 없음
+                else:
+                    self._cancel_to_idle()
+
+    def _cleanup_stopped(self):
+        """(잠금 안) STOPPED 의 화면 cancel = 사람이 쥔 블록 · 구조물을 정리했다는 확인(W183, 10/13 16:30 PL). 반환: (success, reason).
+
+        조립 기록을 STOPPED 로 닫고 조립 상태 · 설계 · 진행표 · 목표를 비운다. 상태는 STOPPED 그대로 두고 안전 잠금을 풀지 않으며 로봇을 움직이지 않는다.
+        이어서 화면이 /d2/safety/resume 을 부르면 기존 RECOVER 의 비조립 경로로 IDLE 에 간다(조립이 비었으니 CHECK · 자동 재개로 갈 수 없다).
+        다시 눌러도 기록은 이미 닫혀 새 기록 · 종료 줄을 만들지 않는다. 작업 단계가 아직 정지 결과를 처리하는 중이면 BUSY 로 거절한다(다시 누르면 된다).
+        """
+        if self._in_handler:
+            return self._reject('BUSY', '멈추는 중인 동작을 정리하고 있어요. 잠시 뒤 다시 누르세요')
+        self.logger.log('cleanup', None, 'STOPPED 정리 확인')     # 닫기 전에 남긴다(run 이 없으면 아무것도 안 함)
+        self.planner, self.design_id, self.part_id, self.goal = None, None, None, None
+        self._assembling = False
+        self._clear_run()
+        self._publish('stopped', '정리를 확인했어요. 다 치웠으면 [정리 끝]을 누르세요 — 대기로 돌아갑니다')
+        return True, ''
+
+    def _gripper_open(self):
+        """화면 gripper_open: STOPPED 에서만 그리퍼 열기를 보낸다(사람이 쥔 블록을 빼기 위해, W183). 반환: (접수했나, reason). 팔은 움직이지 않는다.
+
+        폭 · 힘은 복구 절차(docs 복구절차_정지뒤다시시작 4절 2)와 같은 GRIPPER_OPEN_M · robot.yaml gripper.force_n.
+        접수되면 곧바로 (True, '')로 답하고(10/13 PL — 그리퍼가 다 멈출 때까지 화면 명령을 붙잡지 않는다), 실제 결과는 그리퍼 서버의 답이 올 때
+        _gripper_done 이 gripper_done 알림으로 낸다. 그때까지 _gripper_busy 를 유지하며 state/2 는 모두 message_id gripper_opening 으로 나간다
+        (retained 마지막 값으로 다시 붙은 화면도 대기 중임을 안다). 대기 중 반복 open · select_design · start · scan 은 BUSY,
+        조립 RECOVER 는 CHECK 로 가지 않고 기다린다. 정지 · resume · cancel 은 막지 않는다. 상태 · 안전 잠금 · 조립 기록은 바꾸지 않는다.
+        보내지 못하면(서버 없음 · 예외) 바로 gripper_done(실패)을 내고 (False, reason).
+        답이 끝내 오지 않으면 대기(차단)를 스스로 풀지 않는다 — 사람이 그리퍼 장비를 확인한 뒤 task 를 다시 켠다(10/13 19:45 PL, 복구 절차 4-1).
+        """
+        with self._lock:
+            if self.state != 'STOPPED':
+                return self._reject(self._busy_reason(), '그리퍼 열기는 정지 상태에서만 할 수 있다')
+            if self._gripper_busy:
+                return self._reject('BUSY', '그리퍼가 이미 열리는 중이에요. 완료 안내를 기다리세요')
+            self._gripper_busy = True
+            self._gripper_seq += 1
+            seq = self._gripper_seq
+            self._publish('gripper_opening', '그리퍼를 여는 중이에요. 완료 안내까지 기다리세요')
+        try:
+            accepted, why = self.io.gripper_open(GRIPPER_OPEN_M, self.cfg['gripper']['force_n'],
+                                                 lambda done_ok, done_why: self._gripper_done(seq, done_ok, done_why))
+        except Exception as e:                 # noqa: BLE001 — 보내지도 못했다: 답이 올 일이 없으니 바로 푼다
+            accepted, why = False, f'ERROR({e!r})'
+        if not accepted:
+            self._gripper_done(seq, False, why or 'ERROR')
+            return False, ('ERROR' if (why or '').startswith('ERROR') else (why or 'ERROR'))
+        return True, ''
+
+    def _gripper_done(self, seq, ok, why):
+        """그리퍼 서버의 실제 답(또는 보내기 실패)을 받았다 — 대기를 풀고 gripper_done 을 알린다. 한 요청에 한 번만, 늦게 와도 같다."""
+        with self._lock:
+            if not self._gripper_busy or seq != self._gripper_seq:
+                return
+            self._gripper_busy = False
+            self.logger.log('gripper_open', None, 'ok' if ok else (why or 'ERROR'))
+            self._publish('gripper_done', '그리퍼를 열었어요' if ok else f'그리퍼 열기 실패: {why or "이유 없음"}')
 
     def _cancel_to_idle(self):
         """(잠금 안) READY·ERROR·SCAN_REVIEW 에서 취소해 IDLE 로 간다. 반환: 취소했나. 화면 cancel 과 음성 cancel 이 같이 쓴다(S-16).
@@ -435,14 +504,20 @@ class TaskManager:
         with self._lock:
             if self._hmi_pause and self.state in ('CHECK', 'SELECT', 'PICK_PLACE', 'WAIT_SUPPLY'):
                 self._enter_wait_hmi()
-        handler = self._handlers.get(self.state)
-        if handler is None:
-            return
+        with self._lock:
+            handler = self._handlers.get(self.state)
+            if handler is None:
+                return
+            # 정지 직후에도 이 단계는 끝까지 돈다(늦은 결과를 STOPPED 로 정리). 그 사이 정리 취소가 goal · planner 를 비우면 단계가 깨지므로 표시해 둔다
+            self._in_handler = self.state != 'STOPPED'
         try:
             handler()
         except Exception as e:        # noqa: BLE001 — 어떤 오류든 멈추고 사람을 부른다
             LOG.exception('상태 %s 에서 예상 못 한 오류', self.state)
             self._to_error(f'예상 못 한 오류({e!r})')
+        finally:
+            with self._lock:
+                self._in_handler = False
 
     # ---------- 상태별 일 ----------
     def _check(self):
@@ -1017,6 +1092,9 @@ class TaskManager:
             self._clear_run()
             self._set('IDLE', None, '정지가 풀렸어요. 설계를 다시 고르세요')
             return None
+        with self._lock:
+            if self._gripper_busy:                # 열기 답 전에는 gripper/state 도 믿을 수 없고 팔도 움직이지 않는다 — 답이 오면 다음 단계가 이어 본다
+                return None
         grip = self.gripper
         if grip is None or grip.get('grasped'):
             return self._to_error('블록을 쥐고 있거나 그리퍼 상태를 모른다. 사람이 확인한 뒤 [다시 시작]')
@@ -1613,6 +1691,8 @@ class TaskManager:
 
     def _publish(self, message_id, message):
         """state/2 한 건을 보낸다. run_id 는 조립 중(끝난 직후 포함)에만 값, message_id 는 IRD 2장 값 또는 null."""
+        if self._gripper_busy and message_id != 'gripper_done':
+            message_id = 'gripper_opening'          # 그리퍼 열기 답 전에는 어떤 알림이든 대기 표시를 유지한다 — 화면은 이것으로 팔 이동 버튼을 끈다(10/13 PL)
         self.io.publish_state({'schema': 'state/2', 'stamp': time.time(), 'mode': 'auto', 'state': self.state,
                                'run_id': self.run_id, 'design_id': self.design_id, 'part_id': self.part_id,
                                'message_id': message_id, 'message': message})
