@@ -25,7 +25,7 @@
   - tilted 가 true 인 블록에만 두 칸을 더한다(10/13): center_top_z_m = 윗면 가운데 평면 높이(m) · normal = 윗면 단위 법선 [nx, ny, nz]
     (위쪽, 평면 맞춤에서). 기울지 않은 블록은 위 칸 그대로.
 단위: 이 파일 안 좌표는 m(base_link), 치수 · 틈 · 높이 비교는 mm. 높이 지도는 block_checker.height_map(스캔 추론기와 같은 함수)을 쓴다.
-cv2 는 예비 마스크(masks_from_edges) · 그림(draw_found · draw_spare)에서만 쓴다 — 뒷단은 numpy 만 써서 CI(cv2 없음)에서도 시험한다.
+cv2 는 예비 마스크(masks_from_edges) · 그림(draw_found · draw_spare · draw_workbench)에서만 쓴다 — 뒷단은 numpy 만 써서 CI(cv2 없음)에서도 시험한다.
 """
 import itertools
 import math
@@ -732,10 +732,12 @@ def masks_from_yolo(result, hw):
 
 
 OVERLAP_BGR = {'none': (0, 200, 0), 'top': (0, 200, 255), 'under': (0, 0, 255)}   # 그림 윤곽 색: 집을 수 있음 초록 · 위 노랑 · 덮임 빨강
-TARGET_BGR = (255, 0, 255)   # 받침 목표 자리 상자 색(자홍) — 잰 블록 초록보다 굵게 먼저 그려 둘이 겹쳐도 자홍 테가 남게
+TARGET_BGR = (0, 0, 255)     # 받침 목표 자리 상자 색(빨강, 10/14 22시 PL) — 잰 블록 초록보다 굵게 먼저 그려 둘이 겹쳐도 빨간 테가 남게
 # 그림 글자의 자세 이름 — cv2.putText 는 한글을 못 그려 영어로(10/14 20시 PL: 눕힘 FLAT · 옆세움 EDGE(잡기 이름 EDGE_SHORT · EDGE_LONG 과 같게) · 세움 STAND)
 UP_NAME = {'THICKNESS': 'FLAT', 'WIDTH': 'EDGE', 'LENGTH': 'STAND'}
 LABEL_SCALE = 0.4            # 글자 크기(FONT_HERSHEY_SIMPLEX 배율) — 화면을 덜 가리게 작게(10/14 20시 PL), 640×480 에서 블록 하나 폭 정도
+BADGE_SCALE = 0.5            # 우선순위 번호 동그라미 글자 크기 — 낱말(LABEL_SCALE)보다 조금 크게, 블록(640×480 에서 폭 ~40 px) 안에 들게
+PICK_ALPHA = 0.35            # 고른 블록 마스크 채우기 진하기 — 블록 결이 비쳐 보이게 반투명
 AXIS_PX = 25                 # 받침 그림 왼쪽 위 base +x · +y 방향 화살표 길이(픽셀) — 받침 관측 자세는 사진이 돌아가 있어 'dx dy' 방향을 보여 준다
 
 
@@ -744,11 +746,25 @@ def _deg(a):
     return f'{int(round(float(a))):+d}'
 
 
-def block_label(k, b):
-    """그림 글자 한 줄: '#번호(k + 1) 자세 yaw°' + 기울었으면 ' TILT'. 예: '#1 FLAT +12' · '#3 STAND -45 TILT'.
-    입력: k = 응답 순서(0부터 — find_blocks 답 순서 = 윗면 높은 순, 고르는 순서가 아님) · b = find_blocks 블록 dict(up · yaw_deg · tilted).
-    출력: ASCII 글자. 바깥 영향 없음."""
-    return f'#{k + 1} {UP_NAME.get(b["up"], b["up"])} {_deg(b["yaw_deg"])}' + (' TILT' if b.get('tilted') else '')
+def tilt_deg(b):
+    """기울어진 블록의 윗면 기울기 각(°, 정수) — find_blocks 'normal'(윗면 단위 법선, 위쪽) 과 수직(+z) 사이 각. normal 이 없으면 None.
+    yaw(돌아간 각)와 다르다 — 그림 글자에 '기울어진 각도'를 적으려고(10/14 22시 PL). 바깥 영향 없음."""
+    n = b.get('normal')
+    if not n or len(n) != 3:
+        return None
+    nz = float(n[2]) / max(math.sqrt(sum(float(v) ** 2 for v in n)), 1e-9)
+    return int(round(math.degrees(math.acos(min(1.0, max(-1.0, nz))))))
+
+
+def block_label(b):
+    """그림 글자 한 줄: 자세 이름 + 기울었으면 ' TILT n'(기울기 각 °, normal 이 없으면 ' TILT'). 예: 'FLAT' · 'STAND TILT 8'.
+    번호는 글자에 넣지 않는다 — 고르는 우선순위는 블록 가운데 동그라미 번호로 따로(draw_found ranks, 10/14 22시 PL: 번호 = 우선순위,
+    find_blocks 응답 순서 번호와 헷갈리지 않게). 입력: b = find_blocks 블록 dict(up · tilted · normal). 출력: ASCII 글자. 바깥 영향 없음."""
+    name = UP_NAME.get(b['up'], b['up'])
+    if not b.get('tilted'):
+        return name
+    t = tilt_deg(b)
+    return f'{name} TILT' + ('' if t is None else f' {t}')
 
 
 def spare_label(measured, target):
@@ -766,33 +782,74 @@ def spare_offset_text(measured, target):
     return f'base dx {dx:+.1f} dy {dy:+.1f} mm'
 
 
-def _put_label(cv2, img, txt, org, center=False):
-    """img 에 흰 글자(검은 테두리)를 org(글자 왼쪽 아래 — center 면 아래 가운데, 픽셀) 근처에 그린다 — 글자 크기를 재서 영상 밖으로
-    나가지 않게 org 를 당긴다. 바깥 영향: img 를 고친다(호출하는 쪽이 복사본을 넘긴다)."""
+def _label_box(cv2, img, txt, org, center=False):
+    """_put_label 이 그릴 글자 상자 (x0, y0, x1, y1) 픽셀 — 영상 밖으로 나가지 않게 당긴 자리. 바깥 영향 없음."""
     (w, h), base = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, 3)   # 테두리(굵기 3)까지 든 크기
     x0 = org[0] - w / 2 if center else org[0]
     x = max(min(int(x0), img.shape[1] - w - 2), 2)
     y = max(min(int(org[1]), img.shape[0] - base - 2), h + 2)
-    cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, (0, 0, 0), 3)
-    cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, (255, 255, 255), 1)
+    return x, y - h, x + w, y + base
 
 
-def draw_found(color, blocks, masks, mask_index):
+def _put_label(cv2, img, txt, org, center=False):
+    """img 에 흰 글자(검은 테두리)를 org(글자 왼쪽 아래 — center 면 아래 가운데, 픽셀) 근처에 그린다 — 글자 크기를 재서 영상 밖으로
+    나가지 않게 org 를 당긴다. 반환: 그린 글자 상자(_label_box). 바깥 영향: img 를 고친다(호출하는 쪽이 복사본을 넘긴다)."""
+    box = _label_box(cv2, img, txt, org, center)
+    (_, h), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, 3)
+    cv2.putText(img, txt, (box[0], box[1] + h), cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, (0, 0, 0), 3)
+    cv2.putText(img, txt, (box[0], box[1] + h), cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, (255, 255, 255), 1)
+    return box
+
+
+def _overlaps(a, b):
+    """두 상자 (x0, y0, x1, y1) 가 겹치나. 바깥 영향 없음."""
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _put_badge(cv2, img, n, center):
+    """우선순위 번호 동그라미(흰 바탕 · 검은 숫자 · 검은 테)를 center(픽셀)에 — 영상 밖으로 나가지 않게 당긴다. 바깥 영향: img 를 고친다."""
+    txt = str(n)
+    (w, h), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, BADGE_SCALE, 2)
+    r = max(w, h) // 2 + 5
+    x = min(max(int(center[0]), r + 1), img.shape[1] - r - 2)
+    y = min(max(int(center[1]), r + 1), img.shape[0] - r - 2)
+    cv2.circle(img, (x, y), r, (255, 255, 255), -1)
+    cv2.circle(img, (x, y), r, (0, 0, 0), 2)
+    cv2.putText(img, txt, (x - w // 2, y + h // 2), cv2.FONT_HERSHEY_SIMPLEX, BADGE_SCALE, (0, 0, 0), 2)
+
+
+def draw_found(color, blocks, masks, mask_index, ranks=None, pick=None):
     """find_blocks 결과를 컬러 영상 위에 그린다(IRD `/d2/vision/wrist_image`, E-67 — 화면은 받은 그림을 그대로 보여 준다).
 
     입력: color (H, W, 3) BGR uint8 · blocks = find 결과(윗면 높이 순) · masks = BlockFinder.last_masks ·
-          mask_index = last_info['mask_index'](blocks[k] 가 쓴 마스크 번호). 출력: 같은 크기 BGR 새 그림(자르거나 줄이지 않음).
-    블록마다 윤곽(overlap 색) + block_label 글자('#1 FLAT +12', 기울면 ' TILT')를 윤곽 위쪽 가운데에 작게(블록을 덜 가리게, 10/14 20시 PL).
-    글자는 영상 테두리 블록이어도 영상 안에 둔다. 바깥 영향 없음. 실패: cv2 가 없으면 ImportError."""
+          mask_index = last_info['mask_index'](blocks[k] 가 쓴 마스크 번호) ·
+          ranks = 고르는 우선순위대로 늘어놓은 블록 번호(1부터 = blocks[번호 − 1], 작업 관리자 state/2 pick.ranks) — 없으면 번호를 안 그림 ·
+          pick = 고른 블록 번호(1부터, pick.index) — 그 블록만 마스크를 칠하고 테두리를 굵게.
+    출력: 같은 크기 BGR 새 그림(자르거나 줄이지 않음).
+    블록마다 윤곽(overlap 색) + block_label 글자('FLAT' · 'STAND TILT 8')를 윤곽 위쪽 가운데에 작게(블록을 덜 가리게, 10/14 20시 PL) +
+    순위가 있으면 가운데에 번호 동그라미(1 = 먼저 집을 블록, 10/14 22시 PL — 순위 없는 블록은 동그라미 없음). find 직후(순위 전)
+    그림에는 번호가 없다. 글자 · 동그라미는 영상 테두리 블록이어도 영상 안에 둔다. 바깥 영향 없음. 실패: cv2 가 없으면 ImportError."""
     import cv2
     img = np.ascontiguousarray(color).copy()
+    rank_of = {int(n): r for r, n in enumerate(ranks or [], 1)}
+    used = []                                    # 이미 그린 글자 상자 — 겹친 블록 글자가 서로 덮지 않게(10/14 시안: 'FLAT' 둘이 겹쳐 'FLATLAT')
     for k, (b, mi) in enumerate(zip(blocks, mask_index)):
         m = np.asarray(masks[mi], np.uint8)
+        bgr = OVERLAP_BGR.get(b['overlap'], (255, 255, 255))
+        if pick is not None and int(pick) == k + 1 and m.any():   # 고른 블록 — 자기 윤곽 색으로 반투명 채우기
+            sel = m.astype(bool)
+            img[sel] = (img[sel] * (1 - PICK_ALPHA) + np.array(bgr) * PICK_ALPHA).astype(np.uint8)
         cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(img, cnts, -1, OVERLAP_BGR.get(b['overlap'], (255, 255, 255)), 2)
+        cv2.drawContours(img, cnts, -1, bgr, 4 if pick is not None and int(pick) == k + 1 else 2)
         vs, us = np.nonzero(m)
+        txt = block_label(b)
         org = (int(us.mean()), int(vs.min()) - 4) if len(us) else (5 + 60, 20 + 14 * k)
-        _put_label(cv2, img, block_label(k, b), org, center=True)
+        if len(us) and any(_overlaps(_label_box(cv2, img, txt, org, True), u) for u in used):   # 윗자리가 차 있으면 윤곽 아래로
+            (_, h), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, 3)
+            org = (org[0], int(vs.max()) + h + 6)
+        used.append(_put_label(cv2, img, txt, org, center=True))
+        if k + 1 in rank_of and len(us):
+            _put_badge(cv2, img, rank_of[k + 1], (us.mean(), vs.mean()))
     return img
 
 
@@ -819,12 +876,12 @@ def top_face_corners(b, size_m):
 
 
 def draw_spare(color, measured, target, intr, T_base2cam, block_actual_m):
-    """받침 다시 재기(find_blocks area spare) 그림: 잰 블록 윗면 사각형(초록) + 목표 자리 상자(자홍) + 글자(wrist_image, 10/14 HMI · PL).
+    """받침 다시 재기(find_blocks area spare) 그림: 잰 블록 윗면 사각형(초록) + 목표 자리 상자(빨강) + 글자(wrist_image, 10/14 HMI · PL).
 
     입력: color (H, W, 3) BGR uint8 · measured = measure_on_spare 블록 dict 또는 None(빈 받침) ·
           target = ideal_spare_block(spare_spots[0]) 블록 dict 또는 None · intr (fx, fy, ppx, ppy) · T_base2cam 4x4 m ·
           block_actual_m = [길이, 폭, 두께] m. 출력: 같은 크기 BGR 새 그림(입력은 그대로).
-    그림: 목표 상자(자홍, 4 px)를 먼저, 잰 블록(초록, 2 px)을 위에 — 딱 맞으면 초록 선 양옆에 자홍 테가 보인다.
+    그림: 목표 상자(빨강, 4 px)를 먼저, 잰 블록(초록, 2 px)을 위에 — 딱 맞으면 초록 선 양옆에 빨간 테가 보인다.
     글자: 목표 'TARGET'은 상자 아래 · 잰 블록 spare_label('SPARE FLAT dyaw +1')은 사각형 위(테두리를 가리지 않게).
           둘 다 있으면 왼쪽 위에 spare_offset_text('base dx +2.1 dy -0.8 mm') + 그 아래 base +x · +y 방향 화살표
           (받침 관측 자세는 사진이 돌아가 있어 base +x 가 사진 위쪽으로 보인다 — 숫자를 사진 가로 · 세로로 읽지 않게).
@@ -869,6 +926,136 @@ def base_axes_px(target, intr, T_base2cam):
     if (n < 1e-6).any():
         return None
     return d / n
+
+
+# 작업대 그림(check_progress 답 때) 설계 자리 윤곽 색 — check_progress state 이름 그대로(BlockChecker):
+# 있음 초록 · 가려짐 · 모름 주황 · 없음 빨강(10/14 22시 PL, 박진용 안 ②). 표에 없는 값은 주황(모름과 같게)
+STATE_BGR = {'present': (0, 200, 0), 'occluded': (0, 165, 255), 'unknown': (0, 165, 255), 'absent': (0, 0, 255)}
+
+
+def part_short_name(part_id):
+    """전체 부품 이름 → 그림 글자용 짧은 이름. 예: '001_CHAIR_BENCH_V000_LEG_001_03' → 'LEG 1-3' · 'LEG_001_03' → 'LEG 1-3'.
+    역할[_옵션] = 끝 두 숫자 칸(그룹 · 부품 번호) 앞에서 설계 이름(V 번호 · 숫자 칸)이 나오기 전까지, 번호는 앞 0 을 뺀다.
+    꼴이 다르면(끝 두 칸이 숫자가 아님 · 역할이 빔) 이름 뒤 16자 그대로. ASCII 가 아닌 글자는 '?'(cv2.putText 는 한글을 못 그린다). 바깥 영향 없음."""
+    toks = str(part_id).split('_')
+    name = str(part_id)[-16:]
+    if len(toks) >= 3 and toks[-1].isdigit() and toks[-2].isdigit():
+        role = []
+        for t in reversed(toks[:-2]):
+            if t.isdigit() or (t[:1] == 'V' and t[1:].isdigit()):   # 설계 이름 끝(V000) · Template 번호(001)에 닿으면 멈춘다
+                break
+            role.insert(0, t)
+        if role:
+            name = f'{"_".join(role)} {int(toks[-2])}-{int(toks[-1])}'
+    return name.encode('ascii', 'replace').decode('ascii')
+
+
+def design_top_corners(center, rot, size_m):
+    """설계 자리 윗면 네 모서리 base 점 (4, 3) m — 차례대로 이으면 사각형.
+    입력: center = 블록 가운데 (x, y, z) m · rot = 3x3 base←블록(열 = 블록 축의 base 방향 — recipe_parts · BlockChecker.parts 칸) ·
+    size_m = [길이, 폭, 두께] m. 윗면 = 위(base +z)를 가장 많이 향한 블록 축의 위쪽 면(BlockChecker · placed_measure.up_of 와 같은 판단).
+    yaw 로 바꾸지 않고 rot 를 그대로 써서 세움 · 옆세움 · 기운 설계도 같은 식. 바깥 영향 없음."""
+    c = np.asarray(center, float).reshape(3)
+    R = np.asarray(rot, float).reshape(3, 3)
+    h = np.asarray(size_m, float).reshape(3) / 2.0
+    k = int(np.argmax(np.abs(R[2])))
+    i, j = (a for a in range(3) if a != k)
+    top = c + R[:, k] * h[k] * (1.0 if R[2, k] >= 0 else -1.0)
+    ei, ej = R[:, i] * h[i], R[:, j] * h[j]
+    return np.array([top + si * ei + sj * ej for si, sj in ((1, 1), (-1, 1), (-1, -1), (1, -1))])
+
+
+def placed_note(part_id, measured, part_center, rejected=None):
+    """A4 다시 재기(find_blocks area assembly) 그림 왼쪽 위 글자(ASCII).
+    잼 → 'LEG 1-3 base dx +2.1 dy -0.8 mm'(잰 − 설계 가운데, base_link x · y — spare_offset_text 와 같은 꼴) ·
+    못 잼(measured None) → 'LEG 1-3 NOT MEASURED FEW_POINTS'(거절 코드가 있으면 붙임). 입력: part_center = 설계 가운데 (x, y, …) m. 바깥 영향 없음."""
+    name = part_short_name(part_id)
+    if measured is None:
+        return f'{name} NOT MEASURED' + (f' {rejected}' if rejected else '')
+    return f'{name} ' + spare_offset_text(measured, {'x_m': part_center[0], 'y_m': part_center[1]})
+
+
+def draw_workbench(color, parts, intr, T_base2cam, block_actual_m, measured=None, note=''):
+    """작업대(조립 자리) 그림: 설계 자리 윗면 사각형을 사진에 겹쳐 그린다(wrist_image — check_progress 답 · find_blocks area assembly 때,
+    10/14 22시 PL · 박진용 안 ②).
+
+    입력: color (H, W, 3) BGR uint8 · parts = [{part_id, center (x, y, z) m, rot 3x3, state}] — state = check_progress 판정
+          (STATE_BGR: present 초록 · occluded · unknown 주황 · absent 빨강, 2 px — 표에 없는 값은 주황) 또는 None = 다시 재기 목표 자리
+          (빨간 4 px 상자 — 받침 목표 TARGET_BGR 와 같게) · intr (fx, fy, ppx, ppy) · T_base2cam 4x4 m · block_actual_m = [길이, 폭, 두께] m ·
+          measured = 잰 블록 dict(x_m · y_m · top_z_m · yaw_deg · up — measure_placed) 또는 None → 초록 2 px 윗면 사각형 + 가운데 십자 ·
+          note = 왼쪽 위 한 줄 글자(ASCII, 예 placed_note — 비면 안 씀).
+    출력: 같은 크기 BGR 새 그림(입력은 그대로).
+    차례: 윤곽 전부(목표 상자 → 설계 자리는 윗면이 낮은 것부터 — 사진에서 겹치면 위층이 위에 → 잰 블록) 다음 글자 —
+          부품 짧은 이름(part_short_name)을 사각형 가운데에(목표 자리는 상자 아래), 이미 그린 글자와 겹치면 사각형 아래로, 거기도 겹치면 뺀다
+          (시작 확인은 부품 전부를 그려 글자가 몰린다). 카메라 뒤로 가는 사각형은 그리지 않는다. 바깥 영향 없음. 실패: cv2 가 없으면 ImportError."""
+    import cv2
+    img = np.ascontiguousarray(color).copy()
+    drawn = []                                   # (부품 dict, 픽셀 사각형) — 글자는 윤곽을 다 그린 뒤에(선이 글자를 긋지 않게)
+    tops = []
+    for p in parts:
+        corners = design_top_corners(p['center'], p['rot'], block_actual_m)
+        tops.append((p.get('state') is not None, float(corners[0, 2]), p, corners))
+    for _, _, p, corners in sorted(tops, key=lambda t: (t[0], t[1])):   # 목표(state None) 먼저 → 낮은 윗면부터
+        px = project_to_image(corners, intr, T_base2cam)
+        if px is None:
+            continue
+        target = p.get('state') is None
+        bgr = TARGET_BGR if target else STATE_BGR.get(p['state'], STATE_BGR['unknown'])
+        cv2.polylines(img, [np.round(px).astype(np.int32)], True, bgr, 4 if target else 2)
+        drawn.append((p, px))
+    if measured is not None:
+        px = project_to_image(top_face_corners(measured, block_actual_m), intr, T_base2cam)
+        if px is not None:
+            cv2.polylines(img, [np.round(px).astype(np.int32)], True, OVERLAP_BGR['none'], 2)
+            cu, cv = px.mean(axis=0)
+            cv2.drawMarker(img, (int(round(cu)), int(round(cv))), OVERLAP_BGR['none'], cv2.MARKER_CROSS, 8, 1)
+    used = []
+    if note:
+        used.append(_put_label(cv2, img, note, (5, 18)))
+    for p, px in drawn:
+        txt = part_short_name(p['part_id'])
+        (_, h), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, 3)
+        cu, cv = px.mean(axis=0)
+        below = (cu, px[:, 1].max() + h + 6)
+        tries = [below] if p.get('state') is None else [(cu, cv + h / 2), below]
+        for org in tries:
+            if not any(_overlaps(_label_box(cv2, img, txt, org, True), u) for u in used):
+                used.append(_put_label(cv2, img, txt, org, center=True))
+                break
+    return img
+
+
+def _is_int(v):
+    """JSON 정수인가(True · False 는 빼고). 바깥 영향 없음."""
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def pick_redraw_key(ctx_seq, last_key, pick):
+    """작업 관리자 state/2 의 pick 칸으로 손목 그림을 다시 그릴지 정한다(10/14 22시 PL — 고른 블록 · 우선순위 번호를 마지막 공급 find 그림에 덧그림).
+
+    입력: ctx_seq = 노드가 기억한 마지막 공급 find 그림의 image_seq(없으면 None) · last_key = 지난번 다시 그린 열쇠(없으면 None) ·
+          pick = state/2 'pick' 칸 {"image_seq": int 또는 null, "index": int(1부터), "ranks": [int, …](1부터, 우선순위 차례), "reason"} 또는 None.
+    출력: 다시 그릴 열쇠 (image_seq, index, ranks 튜플) 또는 None(안 그림) — pick 없음 · image_seq null · 기억한 그림과 다른 image_seq
+          (그 사이 다시 찾았거나 노드가 다시 켜짐) · 지난번과 같은 열쇠(state 는 다른 칸이 바뀌어도 다시 오므로 같은 그림을 또 내지 않게).
+          ranks 가 없으면(null) 빈 목록으로 본다(고른 블록만 칠함).
+    실패: pick 이 객체가 아니거나 image_seq · index 가 정수가 아니거나 ranks 가 정수 목록이 아니면 ValueError(노드는 경고만). 바깥 영향 없음."""
+    if pick is None:
+        return None
+    if not isinstance(pick, dict):
+        raise ValueError('pick 이 객체가 아님')
+    seq = pick.get('image_seq')
+    if seq is None:
+        return None
+    if not _is_int(seq):
+        raise ValueError('pick.image_seq 가 정수가 아님')
+    if ctx_seq is None or seq != ctx_seq:
+        return None
+    idx, ranks = pick.get('index'), pick.get('ranks')
+    ranks = [] if ranks is None else ranks
+    if not _is_int(idx) or not isinstance(ranks, list) or not all(_is_int(r) for r in ranks):
+        raise ValueError('pick.index 가 정수가 아니거나 pick.ranks 가 정수 목록이 아님')
+    key = (seq, idx, tuple(ranks))
+    return None if key == last_key else key
 
 
 class BlockFinder:

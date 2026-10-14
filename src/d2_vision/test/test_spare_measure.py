@@ -111,7 +111,7 @@ def test_project_to_image_matches_hand():
 
 
 def test_draw_spare_target_box_center_and_copy():
-    """목표 자리 상자(자홍)의 가운데가 손 계산 픽셀 ±2 px · 긴 변(yaw 90 → base y)이 영상 세로 · 크기 그대로 · 입력은 안 고침 · 잰 블록 없어도 그린다."""
+    """목표 자리 상자(빨강)의 가운데가 손 계산 픽셀 ±2 px · 긴 변(yaw 90 → base y)이 영상 세로 · 크기 그대로 · 입력은 안 고침 · 잰 블록 없어도 그린다."""
     pytest.importorskip('cv2')
     color = np.full((480, 640, 3), 90, np.uint8)
     target = ideal_spare_block(SPOT, SIZE)
@@ -137,7 +137,7 @@ def test_draw_spare_measured_and_offset():
 
 
 def test_draw_spare_exact_fit_keeps_both_outlines():
-    """잰 블록이 목표와 딱 맞아도 자홍 목표 테(굵게 먼저)와 초록 윤곽(가늘게 위)이 둘 다 보인다."""
+    """잰 블록이 목표와 딱 맞아도 빨간 목표 테(굵게 먼저)와 초록 윤곽(가늘게 위)이 둘 다 보인다."""
     pytest.importorskip('cv2')
     color = np.full((480, 640, 3), 90, np.uint8)
     target = ideal_spare_block(SPOT, SIZE)

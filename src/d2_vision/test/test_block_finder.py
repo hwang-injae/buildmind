@@ -16,8 +16,9 @@ import numpy as np
 import pytest
 import yaml
 
-from d2_vision.block_finder import (LABEL_SCALE, BlockFinder, _in_area, block_label, blocks_from_masks, draw_found, finder_cfg,
-                                   masks_from_edges, wrap_deg)
+from d2_vision.block_finder import (LABEL_SCALE, STATE_BGR, TARGET_BGR, BlockFinder, _in_area, block_label, tilt_deg, blocks_from_masks,
+                                   design_top_corners, draw_found, draw_workbench, finder_cfg, masks_from_edges, part_short_name,
+                                   pick_redraw_key, placed_note, wrap_deg)
 
 ROBOT_YAML = Path(__file__).resolve().parents[2] / 'd2_robot' / 'd2_bringup' / 'config' / 'robot.yaml'
 CFG = finder_cfg(yaml.safe_load(ROBOT_YAML.read_text(encoding='utf-8')))
@@ -468,19 +469,43 @@ def test_기울어진_블록_평면은_사각형_안쪽_점으로_다시_맞추�
     assert _tilt_keys(b, P[:2, :5], 0.0, cfg) == {}              # 10점 — 50점 미만
 
 
-def test_block_label_names_number_yaw_tilt():
-    """그림 글자: '#'번호는 1부터 · 자세 이름 FLAT · EDGE · STAND(10/14 20시 PL) · yaw 부호 · −0.3° 는 '+0' · 기울었을 때만 ' TILT'(한글 대신 ASCII)."""
+def test_block_label_names_pose_and_tilt_angle():
+    """그림 글자: 자세 이름 FLAT · EDGE · STAND(10/14 20시 PL) · 번호 · yaw 없음 · 기울었을 때만 ' TILT n'(n = 윗면 법선과 수직 사이 각 °,
+    10/14 22시 PL — yaw 가 아니라 기울어진 각도) · normal 이 없으면 ' TILT' 만 · ASCII."""
     blk = {'up': 'THICKNESS', 'yaw_deg': 12.4, 'tilted': False}
-    assert block_label(0, blk) == '#1 FLAT +12'
-    assert block_label(2, {**blk, 'up': 'WIDTH', 'yaw_deg': -3.0}) == '#3 EDGE -3'
-    assert block_label(0, {**blk, 'yaw_deg': -0.3}) == '#1 FLAT +0'
-    assert block_label(9, {**blk, 'up': 'LENGTH', 'yaw_deg': -45.0, 'tilted': True}) == '#10 STAND -45 TILT'
-    assert 'TILT' not in block_label(0, blk) and block_label(0, blk).isascii()
+    assert block_label(blk) == 'FLAT'
+    assert block_label({**blk, 'up': 'WIDTH'}) == 'EDGE'
+    th = math.radians(8.2)
+    assert block_label({**blk, 'up': 'LENGTH', 'tilted': True, 'normal': [math.sin(th), 0.0, math.cos(th)]}) == 'STAND TILT 8'
+    assert block_label({**blk, 'tilted': True}) == 'FLAT TILT'
+    assert tilt_deg({'normal': [0.0, 0.0, 2.0]}) == 0 and tilt_deg({}) is None
+    assert block_label(blk).isascii()
+
+
+def test_draw_found_rank_badges_and_pick_fill():
+    """순위(ranks — 블록 번호 1부터, 우선순위 차례)가 있으면 블록 가운데에 번호 동그라미(흰 바탕), 고른 블록(pick)은 윤곽 색으로 반투명 채우기 ·
+    굵은 테두리. 순위가 없으면 동그라미 · 채우기 없음(find 직후 그림)."""
+    pytest.importorskip('cv2')
+    color = np.full((H, W, 3), 60, np.uint8)
+    m1, m2 = np.zeros((H, W), bool), np.zeros((H, W), bool)
+    m1[100:140, 100:220] = True
+    m2[300:340, 350:470] = True
+    blks = [{'up': 'THICKNESS', 'overlap': 'none', 'tilted': False}] * 2
+    plain = draw_found(color, blks, [m1, m2], [0, 1])
+    ranked = draw_found(color, blks, [m1, m2], [0, 1], ranks=[2, 1], pick=2)
+    inside = lambda img, m: img[m].reshape(-1, 3)
+    assert not (inside(plain, m1) == 255).all(axis=1).any()                  # 순위 전 — 동그라미 없음
+    assert (inside(ranked, m1) == 255).all(axis=1).any() and (inside(ranked, m2) == 255).all(axis=1).any()
+    core1, core2 = np.zeros((H, W), bool), np.zeros((H, W), bool)
+    core1[104:110, 104:130] = True                                           # 동그라미 · 테두리 밖 안쪽 자리
+    core2[304:310, 354:380] = True
+    assert (ranked[core1] == 60).all() and (ranked[core2] != 60).all()       # 2번(고른 블록)만 채움
+    assert ranked[core2][0][1] > 60                                          # 초록(none) 쪽으로 물듦
 
 
 @pytest.mark.parametrize('k', [0, 11])
 def test_draw_found_label_inside_image_at_border(k):
-    """오른쪽 아래 테두리에 닿은 블록도 긴 글자('#12 STAND -45 TILT')가 영상 밖으로 나가지 않는다(옛 고정 90 px 당김은 잘렸다)."""
+    """오른쪽 아래 테두리에 닿은 블록도 긴 글자('STAND TILT')가 영상 밖으로 나가지 않는다(옛 고정 90 px 당김은 잘렸다)."""
     cv2 = pytest.importorskip('cv2')
     color = np.zeros((H, W, 3), np.uint8)
     m = np.zeros((H, W), bool)
@@ -488,7 +513,7 @@ def test_draw_found_label_inside_image_at_border(k):
     blk = {'up': 'LENGTH', 'yaw_deg': -45.0, 'overlap': 'none', 'tilted': True}
     masks = [m] * (k + 1)
     img = draw_found(color, [blk] * (k + 1), masks, list(range(k + 1)))
-    txt = block_label(k, blk)
+    txt = block_label(blk)
     (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, 1)
     vs, us = np.nonzero((img == 255).all(axis=2))          # 흰 글자 픽셀(윤곽은 초록 · 글자 테두리는 검정)
     assert img.shape == color.shape and len(us)
@@ -505,3 +530,110 @@ def test_draw_found_label_above_outline():
     img = draw_found(color, [{'up': 'THICKNESS', 'yaw_deg': 3.0, 'overlap': 'none', 'tilted': False}], [m], [0])
     vs, us = np.nonzero((img == 255).all(axis=2))
     assert len(vs) and vs.max() < 200 and abs((us.min() + us.max()) / 2 - 319.5) <= 3     # 윗변 위 · 가로 가운데
+
+
+# ---------------- 작업대 그림 · 고른 뒤 덧그림 (10/14 22시 PL — 박진용 안 ②, state pick) ----------------
+# 작업대 바로 위 카메라(관측 자세처럼 카메라 z 가 아래로): 카메라 축 = base (x, −y, −z), (0.40, 0.0) 위 0.40 m
+BENCH_INTR = (600.0, 600.0, 320.0, 240.0)
+BENCH_T = np.array([[1.0, 0.0, 0.0, 0.40], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.40], [0.0, 0.0, 0.0, 1.0]])
+FLAT = np.eye(3)                                  # 눕힘 — 길이 = base x, 두께 = 위
+
+
+def _part(pid, x, y, state, rot=FLAT):
+    """작업대 그림 부품 한 개(BlockChecker.parts 칸 + check_progress state) — 작업대 위 눕힌 블록 가운데."""
+    return {'part_id': pid, 'center': np.array([x, y, SIZE[2] / 2]), 'rot': rot, 'state': state}
+
+
+def test_design_top_corners_flat_and_standing():
+    """설계 윗면 네 모서리: 눕힘 = 길이 × 폭, z = 두께 · 세움(길이 축이 위) = 두께 × 폭, z = 가운데 + 길이/2. 차례대로 이으면 사각형."""
+    c = design_top_corners([0.4, 0.0, SIZE[2] / 2], FLAT, SIZE)
+    assert np.allclose(c[:, 2], SIZE[2]) and np.allclose(np.ptp(c[:, 0]), SIZE[0]) and np.allclose(np.ptp(c[:, 1]), SIZE[1])
+    stand = np.array([[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]])   # 열 = 블록 축(길이 → base +z)
+    c = design_top_corners([0.4, 0.0, SIZE[0] / 2], stand, SIZE)
+    assert np.allclose(c[:, 2], SIZE[0]) and np.allclose(np.ptp(c[:, 0]), SIZE[2]) and np.allclose(np.ptp(c[:, 1]), SIZE[1])
+    assert np.allclose(c.mean(axis=0)[:2], [0.4, 0.0])
+
+
+def test_part_short_name_and_placed_note():
+    """짧은 이름 'LEG 1-3'(역할 + 그룹-부품, 앞 0 뺌 · 설계 이름 뺌) · 옵션 붙은 역할 · 꼴이 다르면 이름 그대로 · 한글은 '?' (cv2 는 한글 못 그림).
+    다시 재기 글자: 잼 → base dx · dy mm, 못 잼 → NOT MEASURED + 거절 코드."""
+    assert part_short_name('001_CHAIR_BENCH_V000_LEG_001_03') == 'LEG 1-3'
+    assert part_short_name('LEG_001_03') == 'LEG 1-3'
+    assert part_short_name('002_CHAIR_BACK_V012_BACK_REST_002_10') == 'BACK_REST 2-10'
+    assert part_short_name('odd') == 'odd' and part_short_name('의자').isascii()
+    c = (0.40, -0.05, 0.0075)
+    assert placed_note('001_CHAIR_BENCH_V000_LEG_001_03', None, c, 'FEW_POINTS') == 'LEG 1-3 NOT MEASURED FEW_POINTS'
+    assert placed_note('LEG_001_03', None, c) == 'LEG 1-3 NOT MEASURED'
+    meas = {'x_m': 0.4021, 'y_m': -0.0508, 'top_z_m': 0.015, 'yaw_deg': 1.0, 'up': 'THICKNESS'}
+    assert placed_note('LEG_001_03', meas, c) == 'LEG 1-3 base dx +2.1 dy -0.8 mm'
+
+
+def test_draw_workbench_colours_by_state_and_copy():
+    """check_progress 판정 색: present 초록 · occluded · unknown 주황 · absent 빨강(2 px) — 각 사각형 가운데가 손 계산 픽셀 근처 ·
+    모르는 state 값도 주황 · 입력은 그대로 · 크기 그대로 · 카메라 뒤(카메라보다 높은) 부품은 건너뛴다(예외 없음)."""
+    pytest.importorskip('cv2')
+    color = np.full((H, W, 3), 90, np.uint8)
+    parts = [_part('D_V000_LEG_001_01', 0.33, -0.06, 'present'), _part('D_V000_LEG_001_02', 0.47, -0.06, 'absent'),
+             _part('D_V000_SEAT_001_01', 0.33, 0.06, 'occluded'), _part('D_V000_SEAT_001_02', 0.47, 0.06, 'weird'),
+             {'part_id': 'D_V000_TOP_001_01', 'center': np.array([0.4, 0.0, 0.6]), 'rot': FLAT, 'state': 'present'}]
+    img = draw_workbench(color, parts, BENCH_INTR, BENCH_T, SIZE)
+    assert img.shape == color.shape and img.dtype == color.dtype and (color == 90).all()
+    fx, fy, ppx, ppy = BENCH_INTR
+    for p in parts[:4]:
+        bgr = STATE_BGR.get(p['state'], STATE_BGR['unknown'])
+        vs, us = np.nonzero((img == bgr).all(axis=2))
+        Z = 0.40 - SIZE[2]
+        hu, hv = fx * (p['center'][0] - 0.40) / Z + ppx, fy * (-p['center'][1]) / Z + ppy
+        near = (np.abs(us - hu) < 80) & (np.abs(vs - hv) < 30)
+        assert near.sum() > 100, p['state']                                  # 그 자리에 그 색 윤곽
+    assert STATE_BGR['occluded'] == STATE_BGR['unknown'] == (0, 165, 255) and STATE_BGR['absent'] == (0, 0, 255)
+
+
+def test_draw_workbench_labels_inside_image_and_skip_overlap():
+    """부품 짧은 이름(흰 글자)은 영상 안에 — 영상 테두리 부품도 잘리지 않게 당긴다. 같은 자리 부품 둘은 글자를 겹쳐 쓰지 않는다
+    (둘째는 사각형 아래로)."""
+    cv2 = pytest.importorskip('cv2')
+    color = np.zeros((H, W, 3), np.uint8)
+    edge = _part('D_V000_LEG_001_01', 0.40 + 0.20, 0.0, 'present')       # 오른쪽 끝(u ≈ 632) — 사각형이 영상 밖으로 나감
+    img = draw_workbench(color, [edge], BENCH_INTR, BENCH_T, SIZE)
+    vs, us = np.nonzero((img == 255).all(axis=2))
+    (tw, _), _ = cv2.getTextSize('LEG 1-1', cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, 1)
+    assert len(us) and us.max() < W - 1 and us.min() > 0 and vs.min() > 0 and vs.max() < H - 1
+    assert us.max() - us.min() + 1 >= 0.8 * tw
+    same = [_part('D_V000_LEG_001_01', 0.40, 0.0, 'present'), _part('D_V000_LEG_001_02', 0.40, 0.0, 'absent')]
+    img = draw_workbench(color, same, BENCH_INTR, BENCH_T, SIZE)
+    vs, _ = np.nonzero((img == 255).all(axis=2))
+    assert vs.max() - vs.min() > 25                                          # 글자 두 줄이 위아래로 나뉨(같은 자리에 겹쳐 쓰지 않음)
+
+
+def test_draw_workbench_assembly_target_measured_and_note():
+    """A4 다시 재기 그림: 설계 자리(state None) = 빨간 굵은 목표 상자 · 잰 블록 = 초록 · 왼쪽 위 글자(note). 잰 블록이 없으면 빨간 상자만."""
+    pytest.importorskip('cv2')
+    color = np.full((H, W, 3), 90, np.uint8)
+    target = _part('001_CHAIR_BENCH_V000_LEG_001_03', 0.40, 0.0, None)
+    meas = {'x_m': 0.403, 'y_m': -0.002, 'top_z_m': SIZE[2], 'yaw_deg': 4.0, 'up': 'THICKNESS'}
+    note = placed_note(target['part_id'], meas, target['center'])
+    img = draw_workbench(color, [target], BENCH_INTR, BENCH_T, SIZE, measured=meas, note=note)
+    assert (img == TARGET_BGR).all(axis=2).any() and (img == STATE_BGR['present']).all(axis=2).any()
+    assert (img[:30, :200] == 255).all(axis=2).any()                         # 왼쪽 위 글자(흰)
+    only = draw_workbench(color, [target], BENCH_INTR, BENCH_T, SIZE)
+    assert (only == TARGET_BGR).all(axis=2).any() and not (only == STATE_BGR['present']).all(axis=2).any()
+    assert (draw_workbench(color, [], BENCH_INTR, BENCH_T, SIZE) == color).all()
+
+
+def test_pick_redraw_key_decides_once_per_pick():
+    """state pick → 다시 그릴 열쇠: 기억한 그림 번호와 같고 지난번과 다를 때만. pick 없음 · null 번호 · 옛 번호 · 같은 pick · 기억 없음은 None.
+    ranks 가 없으면 빈 목록. 꼴이 틀리면 ValueError(노드는 경고 한 번만)."""
+    pick = {'image_seq': 3, 'index': 2, 'ranks': [2, 1, 3], 'reason': 'clear'}
+    assert pick_redraw_key(3, None, pick) == (3, 2, (2, 1, 3))
+    assert pick_redraw_key(3, (3, 2, (2, 1, 3)), pick) is None                 # 같은 pick 이 state 마다 다시 와도 한 번만
+    assert pick_redraw_key(3, (3, 2, (2, 1, 3)), {**pick, 'index': 1}) == (3, 1, (2, 1, 3))
+    assert pick_redraw_key(3, None, {**pick, 'image_seq': 2}) is None         # 그 사이 다시 찾음 — 옛 그림
+    assert pick_redraw_key(None, None, pick) is None                          # 노드가 다시 켜져 그림 기억 없음
+    assert pick_redraw_key(3, None, None) is None
+    assert pick_redraw_key(3, None, {**pick, 'image_seq': None}) is None
+    assert pick_redraw_key(3, None, {'image_seq': 3, 'index': 1}) == (3, 1, ())
+    for bad in ('x', [], {**pick, 'image_seq': '3'}, {**pick, 'image_seq': True}, {**pick, 'index': None},
+                {**pick, 'ranks': 'ab'}, {**pick, 'ranks': [1, 'a']}):
+        with pytest.raises(ValueError):
+            pick_redraw_key(3, None, bad)
