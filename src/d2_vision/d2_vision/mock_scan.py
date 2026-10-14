@@ -43,10 +43,10 @@ PREVIEW_FULL_POSES = 3          # 가짜 미리보기: 이만큼 자세를 찍�
 CLOUD_STEP_MM = 5.0             # PLY 점 간격 — 블록 윗면만 5 mm 격자(벤치 11개 ≈ 800점, IRD 복셀 3 mm · 2 MB 보다 훨씬 작다)
 IMG_W, IMG_H = 320, 240         # 가짜 사진 크기(px). 1 px = 1 mm 위에서 본 모습
 RUN_ID_RE = re.compile(r'^[A-Za-z0-9_-][A-Za-z0-9_.-]*$')   # run_id 는 폴더 이름이 된다 — '/' · 앞 '.' 을 막는다
-ORI_CODES = ('x', 'y', 'xe', 'ye', 'zx', 'zy')
 
-# IRD 4.2 · 245줄 find_blocks 예시 블록 하나(눕힘, 긴 쪽으로만 잡을 틈). clear 는 find() 가 gap_mm 으로 다시 계산한다
-DEFAULT_FIND_BLOCK = {'x_m': 0.412, 'y_m': 0.221, 'top_z_m': -0.003, 'yaw_deg': 12.0, 'up': 'THICKNESS',
+# IRD 4.2 find_blocks 예시 블록 하나(눕힘, 긴 쪽으로만 잡을 틈). clear 는 find() 가 gap_mm 으로 다시 계산한다.
+# top_z_m 만 지금 작업면(robot.yaml table_z_m 0, 10/11 E-85) 위 눕힌 블록 윗면 0.015 — IRD 예시의 −0.003 은 옛 작업면 −0.018 기준(10/14 점검)
+DEFAULT_FIND_BLOCK = {'x_m': 0.412, 'y_m': 0.221, 'top_z_m': 0.015, 'yaw_deg': 12.0, 'up': 'THICKNESS',
                       'gap_mm': {'LENGTH': 26.0, 'WIDTH': 8.5}, 'overlap': 'none', 'tilted': False, 'confidence': 0.91}
 
 
@@ -244,7 +244,7 @@ class MockScan:
         self.min_gap_mm = float(min_gap_mm)
         self.out_root = Path(out_root) if out_root else Path(tempfile.gettempdir()) / 'd2_scan'
         self.runs = OrderedDict()           # run_id → 촬영한 pose_id 목록
-        self.n_designs = 0                  # 스캔 설계 번호(scan_<family>_<번호>, IRD 2장 design_id) — 노드가 뜬 뒤 성공한 추론 수
+        self.n_designs = 0                  # 스캔 임시 이름 번호(scan_<family>_<번호> — wrist_block 과 같은 꼴, 저장 때 웹이 V 번호로 바꾼다) — 노드가 뜬 뒤 성공한 추론 수
 
     def capture(self, text):
         """scan_capture: {"pose_id","run_id"} → {"ok":true,"points"}. run_id 별로 pose_id 를 기억한다(MAX_RUNS 개까지)."""
