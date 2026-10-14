@@ -3,7 +3,7 @@
 
 흐름(10/13 PL E-105): 화면 마이크 버튼 → backend 가 d2/hmi/voice/listen(voice_listen/1) → 여기서 듣기 대기 →
 시동어 "hello rokey"(openWakeWord) → 높은 '삑' → 요청 녹음(말이 끊기면 끝 — Silero VAD) → 낮은 '삑' → 받아 적기(OpenAI STT) →
-  · '멈춰 · 정지 · 스톱 · 그만' 짧은 말 → d2/safety/stop/req {source: voice, reason: ''} → 다리 → 정지 노드(STOP_VOICE, 보조 정지 W046)
+  · 정지 말(대표 '정지' — '멈춰' · '스톱' · '그만'도 받음, 10/14 PL) → d2/safety/stop/req {source: voice, reason: ''} → 다리 → 정지 노드(STOP_VOICE, 보조 정지 W046)
   · 그 밖 → d2/hmi/intent {schema intent/1, intent: request_design, text, confidence} → backend → 화면이 글 창에 넣고 바로 생성(W045 · W120)
 음성으로 설계 고르기 · 조립 출발은 하지 않는다(E-96 ⑥ · E-105 ③). 진짜 정지는 펜던트 · 화면 [정지] · Ctrl+C 그대로.
 
@@ -11,7 +11,7 @@
   ① 말 끝 자동 감지 — 말이 END_SILENCE_S 끊기면 녹음 끝(최대 MAX_RECORD_S). 말소리가 없으면 받아 적기를 안 부른다
      (STT 는 무음에 '시청해 주셔서 감사합니다' 같은 자막식 문장이나 힌트를 그대로 내는 일이 있다 — 그런 글도 버림)
   ② 받아 적기 = gpt-4o-mini-transcribe(실패하면 whisper-1 한 번) + language ko + 가구 낱말 힌트(HINT)
-  ③ '멈춰' 빠른 길 — 정지 낱말로만 된 말('멈춰' · '정지요' · '스톱')은 받아 적자마자 바로 정지 요청('그만큼 높게'는 요청)
+  ③ '정지' 빠른 길 — 정지 낱말로만 된 말('정지' · '정지요' · '멈춰' · '스톱')은 받아 적자마자 바로 정지 요청('그만큼 높게'는 요청)
   ④ '들었어요' 소리 — 시동어 들음(높은 '삑') · 녹음 끝(낮은 '삑'). 말하는 TTS 가 아니다(TTS 는 없앤 기능). 소리 장치가 없으면 소리만 건너뜀
   ⑤ 확신도 — gpt-4o 계열 logprobs 평균을 intent/1 confidence 칸에(0 ~ 1, 못 구하면 null). design_gen 이 오인식 바로잡기에 쓸 수 있게
 
@@ -68,12 +68,12 @@ STOP_SERVICE = '/d2/safety/stop'
 
 
 def squash(text):
-    """비교용 — 소문자로, 공백 · 문장부호를 뺀다. 예: '멈춰!' → '멈춰', 'Stop.' → 'stop'."""
+    """비교용 — 소문자로, 공백 · 문장부호를 뺀다. 예: '정지!' → '정지', 'Stop.' → 'stop'."""
     return re.sub(r'[\s\.,!?~·…"\'()\[\]-]+', '', (text or '').lower())
 
 
 def is_stop(text):
-    """받아 적은 글이 '멈춰' 말인가 — 정지 낱말로만 된 글(STOP_RE)일 때만. 입력 글자, 출력 bool."""
+    """받아 적은 글이 정지 말(대표 '정지')인가 — 정지 낱말로만 된 글(STOP_RE)일 때만. 입력 글자, 출력 bool."""
     return bool(STOP_RE.match(squash(text)))
 
 
