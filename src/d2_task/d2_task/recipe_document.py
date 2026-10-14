@@ -13,7 +13,7 @@ import math
 import re
 from pathlib import Path
 
-RECIPE_SCHEMA = 'recipe/4.0'          # 10/13 PLM: stocks 자재 참조와 template 트리 사용, 최상위 parts 없애고 template.composition[역할].parts[그룹] 로(같은 3.0 안에서 바뀐 구조 — PL 결정)
+RECIPE_SCHEMA = 'recipe/4.0'          # 10/13 PLM: stocks 자재 참조와 template 트리 사용, 최상위 parts 없애고 template.composition[역할].parts[그룹] 로(10/13 3.0 안에서 바뀐 구조 — PL 결정, 10/14 C6로 4.0 — design_id · sequence)
 PLACEMENTS_SCHEMA = 'placements/4.0'
 GRASPS = ('FLAT_LONG', 'FLAT_SHORT', 'EDGE_LONG', 'EDGE_SHORT', 'STAND_LONG', 'STAND_SHORT')
 
@@ -221,26 +221,26 @@ class RecipeDocument:
         sequences, rows = {}, []
         for st in steps:
             if not isinstance(st, dict) or not isinstance(st.get('part_name'), str) or st['part_name'] not in instances:
-                raise ValueError('step 이 recipe(구조)에 없는 block 을 가리킨다')
+                raise ValueError('step 이 recipe(구조)에 없는 부품(part_name)을 가리킨다')
             seq = st.get('sequence')
             if isinstance(seq, bool) or not isinstance(seq, int) or seq <= 0 or seq in sequences.values() or st['part_name'] in sequences:
-                raise ValueError('sequence · step block 이 중복이거나 잘못됐다')
+                raise ValueError('sequence · step 부품(part_name)이 중복이거나 잘못됐다')
             if st.get('grasp_axis') not in ('LENGTH', 'WIDTH', 'THICKNESS') or st.get('grasp') not in GRASPS:
                 raise ValueError('grasp · grasp_axis 가 잘못됐다')
             if isinstance(st.get('stage'), bool) or not isinstance(st.get('stage'), int) or st['stage'] <= 0:
                 raise ValueError('stage 는 양의 정수여야 한다')
             supports = st.get('supports')
             if not isinstance(supports, list) or any(not isinstance(k, str) or k not in instances for k in supports):
-                raise ValueError('supports 가 구조에 없는 block 을 가리킨다')
+                raise ValueError('supports 가 구조에 없는 부품(part_name)을 가리킨다')
             if len(supports) != len(set(supports)):
-                raise ValueError('supports 에 같은 block 이 중복이다')
+                raise ValueError('supports 에 같은 부품(part_name)이 중복이다')
             sequences[st['part_name']] = seq
             pid = part_id(design_id, st['part_name'])
             if 'part_id' in st and st['part_id'] != pid:
-                raise ValueError(f'step 의 part_id({st["part_id"]!r})가 <모델ID 대문자>_<블록 이름>({pid!r})과 다르다')
+                raise ValueError(f'step 의 part_id({st["part_id"]!r})가 <설계 ID 대문자>_<부품 이름>({pid!r})과 다르다')
             rows.append(dict(st, instance_id=st['part_name'], part_id=pid, support_instance_ids=supports))
         if set(sequences) != set(instances):
-            raise ValueError('recipe(구조)의 모든 block 이 placements 에 한 번씩 있어야 한다')
+            raise ValueError('recipe(구조)의 모든 부품(part_name)이 placements 에 한 번씩 있어야 한다')
         for st in steps:
             if any(sequences[k] >= st['sequence'] for k in st['supports']):
                 raise ValueError('받침은 해당 블록보다 먼저 놓아야 한다')

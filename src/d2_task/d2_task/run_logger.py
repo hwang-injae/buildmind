@@ -104,7 +104,7 @@ class RunLogger:
         """run 을 닫고 build/2 요약(dict)을 돌려준다. result = DONE · STOPPED · ERROR. 이미 닫혔으면 None.
 
         요약: run_id · design_id · result · placed(놓은 블록 수) · total · duration_s · stop_count ·
-        blocks[part_id · dz_m · dx_m · dy_m(m, 못 잰 값 null)]. 요약은 메모리에서 바로 확정한다(파일 I/O 없음).
+        parts[part_id · dz_m · dx_m · dy_m(m, 못 잰 값 null)]. 요약은 메모리에서 바로 확정한다(파일 I/O 없음).
         CSV 끝 줄(end)과 닫기는 쓰기 스레드가 이어서 한다.
         """
         if result not in RESULTS:
@@ -486,9 +486,9 @@ def _invalid_summary(s, stem):
     if not _num_or_none(s.get('duration_s')) or s.get('duration_s') is None:
         return 'duration_s 가 숫자가 아니다'
     if not isinstance(s.get('parts'), list):
-        return 'blocks 가 목록이 아니다'
+        return 'parts 가 목록이 아니다'
     for b in s['parts']:
         if not isinstance(b, dict) or not isinstance(b.get('part_id'), str) or \
                 not all(k in b and _num_or_none(b[k]) for k in ('dz_m', 'dx_m', 'dy_m')):
-            return 'blocks 항목이 올바르지 않다'
+            return 'parts 항목이 올바르지 않다'
     return ''

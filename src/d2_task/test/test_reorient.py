@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """세우기 연결 시험 — 맞는 자세가 없을 때 눕힌 블록을 빈 자리(spare_spots)에 세우는 요청 (W130 · E-37 · E-77, 로봇 없음).
 
-10/11 16:50 PL 확정만 시험한다: 세움 FLAT_SHORT · 옆세움 FLAT_LONG, spare_spots 는 robot.yaml, 목표당 최대 1회,
+옛 세우기 길(E-87 ① — E-110으로 안 씀, 운영은 allow_reorient False)이 아직 코드에 있어 그 동작만 시험한다(10/11 16:50 PL 당시 규칙): 세움 FLAT_SHORT · 옆세움 FLAT_LONG, spare_spots 는 robot.yaml, 목표당 최대 1회,
 세운 뒤 재관측 · 후보 없으면 no_match_block, 세우기 성공은 조립 기록(placed · record_placed · VERIFY)에 남기지 않음.
 실제 세우기 실행(W131)·빈 자리 둘 다 찬 경우의 전용 처리·손가락 접근 공간은 범위 밖이다.
 """

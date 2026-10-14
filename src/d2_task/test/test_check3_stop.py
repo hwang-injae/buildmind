@@ -250,3 +250,25 @@ def test_수락_대기_중_CtrlC_에서_정지_요청이_실패해도_취소를_
     assert events[0] == ('stop', 'CTRL_C')
     pending.set_result(Handle())
     assert ('late cancel',) in events
+
+
+# ---------- 검사 묶음: 아주 큰 정수 ----------
+def test_아주_큰_정수는_숫자가_아니라_형식_오류로_돌려주고_예외를_내지_않는다():
+    from d2_task.design_checker import DesignChecker
+    from test_design_checker import base_design
+    assert DesignChecker._num(10 ** 400) is False and DesignChecker._num(10 ** 6) is True and DesignChecker._num(True) is False
+    req = base_design('001_CHAIR_BENCH_V000')
+    req['parts'][0]['x'] = 10 ** 400                     # float 로 못 바꾸는 정수 — 예전에는 OverflowError 로 서비스가 터졌다
+    res = DesignChecker(CFG).check(req)
+    assert res['ok'] is False and res['errors']
+
+
+# ---------- 레시피 지문: 정본을 따른다 ----------
+@pytest.mark.parametrize('bad', [float('nan'), float('inf'), float('-inf')])
+def test_RecipeBuilder_지문은_정본처럼_NaN_Inf_를_거절한다(bad):
+    from d2_task.recipe_builder import RecipeBuilder
+    from d2_task.recipe_document import recipe_sha256
+    with pytest.raises(ValueError):
+        RecipeBuilder().calculate_recipe_sha256({'schema': 'recipe/4.0', 'v': bad})
+    good = {'schema': 'recipe/4.0', 'v': 1.5, '이름': '다리'}
+    assert RecipeBuilder().calculate_recipe_sha256(good) == recipe_sha256(good)

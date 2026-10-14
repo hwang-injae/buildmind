@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """흩뿌림 집기 준비 ScatterFlow — 목표 블록을 유지한 채 find_blocks 결과로 후보를 고르고 집기 요청을 준비한다 (ROS 없이 동작, W130).
 
-TaskManager 의 SELECT 안에서(공개 상태를 늘리지 않고) 쓰려고 만든 계산 클래스다. 아직 TaskManager · 로봇 호출에 연결하지 않았다.
+TaskManager 의 SELECT 안에서(공개 상태를 늘리지 않고) 쓰는 계산 클래스다(supply_mode scatter 에서 TaskManager 가 부른다 — 로봇 호출은 하지 않는다).
 호출 흐름(연결할 때): ① SELECT 가 TaskPlanner 에서 목표 블록(part_id · 잡기 · 놓을 자세)을 정한다 → ② begin() 으로 요청 표를 받는다 →
 ③ 잠금 밖에서 observe_supply 로 가서 find_blocks 를 부르고 prepare() 로 후보를 계산한다(계산만 — 상태를 바꾸지 않는다) →
 ④ **TaskManager 잠금 안에서** commit() 이 요청 번호 · 상태 · 정지 · 종료를 다시 확인하고 같은 구간에서 후보를 적용한다(확인과 적용 사이에 정지가 끼지 못한다) →
@@ -16,15 +16,16 @@ import threading
 from d2_motion.motion_math import TILT_DEG as NODE_TILT_DEG, column, half_height, quat_from_axes, rot_z, rpy_matrix
 
 from d2_task.block_picker import BlockPicker, grasp_target
+from d2_task.recipe_document import GRASPS
 
 SUPPLY_SCATTER = 'scatter'
 # 받침 경유 1단계에서 고르는 잡기 — 모든 잡기(one_pick 과 같음). 옆으로 선 · 선 블록은 그 자세로 받침에 세워 놓고 받침에서 눕힌다(잡기 TIP)
-SPARE_GRASPS = ('FLAT_SHORT', 'FLAT_LONG', 'EDGE_SHORT', 'EDGE_LONG', 'STAND_SHORT', 'STAND_LONG', 'TILT')
+SPARE_GRASPS = GRASPS + ('TILT',)       # 받침으로 옮길 때 쓸 수 있는 잡기 = 정본 6가지 + 기울여 집기(10/14 점검 ③-5)
 SIZE_KEYS = ('LENGTH', 'WIDTH', 'THICKNESS')
 # 기울여 집는 윗면 기울기 범위 (°) — 위 끝은 집기 노드 기울여 집기 계산과 같은 motion_math.TILT_DEG(45°). 10/13 PL: tool_tilt_max_deg(30) 키를
 # 지움(30 ~ 35° 안전 모드는 충돌 민감도 오설정 탓). 위 끝 값은 석형님 확인
 TILT_DEG = (3.0, NODE_TILT_DEG[1])
-# 세우기(E-37 · E-77): 목표 자세(위 축) → 눕힌 블록을 집을 잡기 (10/11 16:50 PL — 세움 FLAT_SHORT · 옆세움 FLAT_LONG)
+# 옛 세우기(E-37 · E-77 · E-87 ① — E-110으로 안 씀: 운영은 allow_reorient False, 받침 경유 세우기는 아래 STANDUP): 목표 자세(위 축) → 눕힌 블록을 집을 잡기
 REORIENT_GRASP = {'LENGTH': 'FLAT_SHORT', 'WIDTH': 'FLAT_LONG'}
 # 받침 경유 세우기(W131 교시 동작, 10/13): 목표 자세(위 축) → (집기 노드 잡기 이름, 교시 동작 이름). 블록 방향 yaw 는 세운 뒤
 # find_blocks 규약(세움 = WIDTH 변 · 옆세움 = LENGTH 변 방향) — 교시대로 긴 축 y 로 눕힌 블록을 세우면 세움 0° · 옆세움 90°
@@ -267,6 +268,7 @@ class ScatterFlow:
         NO_MATCH      블록은 있는데 맞는 후보가 없다 → 제외 이유(counts · message)를 안내(guide 'CHECK_BLOCKS')
         LOOKUP_FAILED 조회 실패 · 잘못된 응답 — 공급 부족이 아니다(reason)
         REORIENT      (allow_reorient 이고 목표가 세움 · 옆세움인데 맞는 후보가 없을 때만) 눕힌 블록을 빈 자리(spare_spots)에 세우는 요청.
+                      옛 세우기 길(E-87 ① — E-110으로 안 씀): 운영 task 노드는 allow_reorient 를 넘기지 않아 만들지 않는다. 시험만 켠다.
                       request 는 PICK 과 같은 칸 + 내부 표시 'reorient': True(액션으로는 안 감 — task_node 는 이름 있는 칸만 읽는다).
                       세울 수 없으면(눕힌 후보 없음 · 기울어진 블록이 있음 · 빈 자리 없음) REORIENT 를 만들지 않고 NO_MATCH 그대로.
         target = {part_id, grasp, place_pose}. 목표 part_id · 놓을 자세 · 잡기는 그대로 유지하고 복사해서 쓴다.

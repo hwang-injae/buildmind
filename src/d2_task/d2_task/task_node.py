@@ -9,7 +9,7 @@
         /d2/safety/stop (StopRequest — 시간 초과 · Ctrl+C 때 먼저 정지 요청),
         /d2/vision/scan_capture · scan_infer (JsonQuery — 촬영 점군 수집과 추론),
         /d2/hmi/save_build (JsonQuery — 끝난 조립의 build/2 요약, 저장이 확인될 때까지 TaskManager 가 들고 있고 여기서 비동기로 보낸다)
-내보내는 것: /d2/task/state (JSON state/1), /d2/task/progress (JSON progress/2.0) — 늦게 붙는 쪽(다리)도 마지막 값을 받게 TRANSIENT_LOCAL
+내보내는 것: /d2/task/state (JSON state/2), /d2/task/progress (JSON progress/2.0) — 늦게 붙는 쪽(다리)도 마지막 값을 받게 TRANSIENT_LOCAL
         /d2/task/scan_result (JSON scan_result/2.0 — 구조 검사·저장은 HMI에서 진행)
 기록(CSV): ROS 파라미터 log_dir 아래 <run_id>.csv — 기본은 홈 아래 d2_data/runs(저장소 밖), `~` 는 홈으로 바뀐다. 빈 값을 주면 파일 기록이 꺼지고 run_id 만 만든다
 설계 조회: 설계 선택 때(출발은 받아 둔 설계, E-55 ①) /d2/hmi/get_design (JsonQuery, design/4.0) 을 비동기로 부르고 timeout.service_s 안에 답이 없으면 실패로 본다.
@@ -271,7 +271,7 @@ class TaskNode(Node):
         return self._scan_query(self.capture_cli, dict(pose_id=pose_id, run_id=run_id), should_abort)
 
     def scan_infer(self, run_id, should_abort):
-        """run_id의 점군 추론을 요청한다. 결과 좌표는 blocks/1의 mm, 제한 시간·실패는 _scan_query와 같다."""
+        """run_id의 점군 추론을 요청한다. 결과 좌표는 blocks/2의 mm, 제한 시간·실패는 _scan_query와 같다."""
         return self._scan_query(self.infer_cli, dict(run_id=run_id), should_abort)
 
     def find_blocks(self, run_id, should_abort, **opts):
