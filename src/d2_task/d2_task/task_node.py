@@ -608,8 +608,10 @@ class TaskNode(Node):
                 sent.add_done_callback(self._cancel_late)      # 아직 답이 없던 목표는 받아지는 대로 바로 취소
                 return False, ('STOPPED' if should_abort() else 'TIMEOUT')
         except KeyboardInterrupt:                              # Ctrl+C: 먼저 세우고, 받아지는 대로 취소하고 끝낸다(10/14 점검 ③-5)
-            self.request_stop('CTRL_C')
-            sent.add_done_callback(self._cancel_late)
+            try:
+                self._stop_on_interrupt()
+            finally:                                           # 정지 요청이 실패 · 예외여도 취소 예약은 반드시 건다
+                sent.add_done_callback(self._cancel_late)
             raise
         handle = sent.result()
         if not handle.accepted:
@@ -636,8 +638,10 @@ class TaskNode(Node):
             r = result.result().result
             return r.success, r.reason
         except KeyboardInterrupt:                              # Ctrl+C: 먼저 세우고(정지 요청) _active 를 지우기 전에 목표를 취소한다(10/14 점검 ③-5)
-            self.request_stop('CTRL_C')
-            self.cancel_active()
+            try:
+                self._stop_on_interrupt()
+            finally:                                           # 정지 요청이 실패 · 예외여도 목표 취소는 반드시 시도한다
+                self.cancel_active()
             raise
         finally:
             with self._active_lock:
@@ -649,6 +653,18 @@ class TaskNode(Node):
         handle = sent.result()
         if handle is not None and handle.accepted:
             handle.cancel_goal_async()
+
+    def _stop_on_interrupt(self):
+        """Ctrl+C 를 받은 pick_place 안에서 정지 노드에 먼저 세우라고 요청한다(CTRL_C). 반환 없음.
+
+        실패 · 예외는 로그만 남기고 삼킨다 — 부르는 쪽이 이어서 목표 취소를 해야 하고, 원래 KeyboardInterrupt 를 덮으면 안 된다.
+        """
+        try:
+            ok, message = self.request_stop('CTRL_C')
+            if not ok:
+                self.get_logger().error(f'Ctrl+C 정지 요청 거절 · 실패: {message}')
+        except Exception as e:                                 # noqa: BLE001
+            self.get_logger().error(f'Ctrl+C 정지 요청 예외: {e!r}')
 
     def cancel_active(self):
         """Ctrl+C 때: 진행 중인 pick_place 목표의 취소 요청이 나갈 때까지 잠깐 기다린다."""

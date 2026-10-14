@@ -33,6 +33,7 @@ def test_safety_state_가_객체가_아니면_버리고_작업은_계속_돈다(
 
 # ---------- Ctrl+C: 정지 요청이 목표 취소보다 먼저 ----------
 def test_집기_결과를_기다리다_CtrlC_면_정지_요청_뒤에_취소(node):
+    node = _with_interrupt_helper(node)
     events = []
     handle = Handle()
     node.pick_cli = SimpleNamespace(send_goal_async=lambda g: completed(handle))
@@ -51,6 +52,7 @@ def test_집기_결과를_기다리다_CtrlC_면_정지_요청_뒤에_취소(nod
 
 
 def test_목표_수락을_기다리다_CtrlC_면_정지_요청부터(node):
+    node = _with_interrupt_helper(node)
     events = []
     pending = Future()                                   # 수락 답이 아직 없다
     node.pick_cli = SimpleNamespace(send_goal_async=lambda g: pending)
@@ -183,3 +185,68 @@ def test_설계_조회_실패는_TIMEOUT_STOPPED_BUSY_만_코드_나머지는_�
     ok, reason = m.command('select_design', 'bench')
     assert ok is False and reason == expected
     assert '설계를 못 가져왔다' in io.states[-1]['message'] and m.state == 'IDLE'
+
+
+def _with_interrupt_helper(node):
+    """fixture node 에는 새 도움 함수가 없다 — 실제 본문을 붙인다."""
+    tree = ast.parse(TASK_NODE.read_text(encoding='utf-8'))
+    original = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'TaskNode')
+    fn = next(n for n in original.body if isinstance(n, ast.FunctionDef) and n.name == '_stop_on_interrupt')
+    scope = {}
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[fn], type_ignores=[])), str(TASK_NODE), 'exec'), scope)
+    node._stop_on_interrupt = scope['_stop_on_interrupt'].__get__(node)
+    return node
+
+
+@pytest.mark.parametrize('stop', ['raise', 'refuse'])
+def test_결과_대기_중_CtrlC_에서_정지_요청이_실패해도_취소하고_CtrlC_를_던진다(node, stop):
+    node = _with_interrupt_helper(node)
+    events = []
+    handle = Handle()
+    node.pick_cli = SimpleNamespace(send_goal_async=lambda g: completed(handle))
+
+    def request_stop(why):
+        events.append(('stop', why))
+        if stop == 'raise':
+            raise OSError('정지 서비스 고장')
+        return False, '거절'
+    node.request_stop = request_stop
+    node.cancel_active = lambda: events.append(('cancel',))
+    calls = {'n': 0}
+
+    def abort():
+        calls['n'] += 1
+        if calls['n'] > 3:
+            raise KeyboardInterrupt
+        return False
+    with pytest.raises(KeyboardInterrupt):
+        node.pick_place(goal(), abort)
+    assert events[:2] == [('stop', 'CTRL_C'), ('cancel',)]
+
+
+@pytest.mark.parametrize('stop', ['raise', 'refuse'])
+def test_수락_대기_중_CtrlC_에서_정지_요청이_실패해도_취소를_예약하고_CtrlC_를_던진다(node, stop):
+    node = _with_interrupt_helper(node)
+    events = []
+    pending = Future()
+    node.pick_cli = SimpleNamespace(send_goal_async=lambda g: pending)
+
+    def request_stop(why):
+        events.append(('stop', why))
+        if stop == 'raise':
+            raise OSError('정지 서비스 고장')
+        return False, '거절'
+    node.request_stop = request_stop
+    node._cancel_late = lambda f: events.append(('late cancel',))
+    calls = {'n': 0}
+
+    def abort():
+        calls['n'] += 1
+        if calls['n'] > 1:
+            raise KeyboardInterrupt
+        return False
+    with pytest.raises(KeyboardInterrupt):
+        node.pick_place(goal(), abort)
+    assert events[0] == ('stop', 'CTRL_C')
+    pending.set_result(Handle())
+    assert ('late cancel',) in events
