@@ -26,7 +26,7 @@ from rclpy.node import Node
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
-HELP = """명령: select <design_id> · start [design_id] · scan · cancel · stop · resume
+HELP = """명령: select <design_id> · start [design_id] · scan · cancel · gripper_open(STOPPED 일 때 — W183) · stop · resume
       intent <start|select_design|cancel|ask_progress> [design_id] · say <문장>(request_design) · alive on|off · help"""
 
 
@@ -115,7 +115,7 @@ class MockBridge(Node):
         if not words:
             return
         cmd, args = words[0], words[1:]
-        if cmd in ('select', 'start', 'scan', 'cancel'):
+        if cmd in ('select', 'start', 'scan', 'cancel', 'gripper_open'):     # 화면 버튼 = hmi/command cmd(IRD 2장 — gripper_open 은 10/13 W183)
             if cmd == 'select' and args:
                 self.design_id = args[0]
             design_id = args[0] if args else (self.design_id if cmd in ('select', 'start') else '')

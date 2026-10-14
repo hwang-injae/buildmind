@@ -16,7 +16,7 @@ export function setReqTimeout(s: number) {
 async function post(path: string, body?: unknown): Promise<CmdResult> {
   if (reqTimeoutS == null) {
     // 화면을 막 열어 아직 웹 서버와 한 번도 못 붙음 — 배너와 같은 안내(얼마나 기다릴지도 모르는 채 보내지 않는다)
-    return { success: false, reason: 'ERROR', message: '웹 서버와 아직 연결 전 — 잠시 뒤 다시. 급하면 정지는 로봇 PC 키 · 펜던트로' };
+    return { success: false, reason: 'ERROR', message: '웹 서버와 아직 연결 전 — 잠시 뒤 다시. 급하면 정지는 로봇 PC Ctrl+C · 펜던트로' };
   }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), reqTimeoutS * 1000 + MARGIN_MS);

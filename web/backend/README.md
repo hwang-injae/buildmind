@@ -1,6 +1,6 @@
 # web/backend — AI 설계 생성 파트 설계 노트 (W108, 10/7 황인재)
 
-> **10/8 E-69로 바뀜:** 템플릿 길(4장 · `templates.py` · `tune_system.txt` · `param_schema.json`) · `base_designs/`(10/3 lv*.json) · `blocks/2` 출력은 **옛것**이다. 지금 기준은 [../README.md](../README.md) 4장 — GPT-4o가 `parts/4.0`(role · part · stage · grasp 포함)을 직접 쓰고 후보 3개 중 사람이 1개를 고른다. 이 노트의 피드백 문구 · 기록 · 시험 틀(3 · 8 · 9장)은 그대로 쓴다.
+> **이 노트는 10/7 설계 노트(옛것)다 — 지금 기준은 [../README.md](../README.md) 4장과 코드(`design_gen.py` · `design_store.py`).** 10/8 E-69 · 10/13 E-99 · 10/14 E-111 로 바뀜: 템플릿 길(4장 · `templates.py` · `tune_system.txt` · `param_schema.json`) · `base_designs/` · `blocks/2` 출력 · 2 · 3장의 `gpt-4o` · 30 s · 재시도 1 · `rejected` · `OPENAI_API_KEY` 로 생성은 모두 옛것. 지금은 **설계 AI = Claude**(웹 PC 호스트 중계 `claude_bridge`, 키 없음 — E-99, 호출 제한 260 s · 다시 안 부름)가 `parts/4.0`(role · group · sequence · stage · grasp)을 직접 쓰고, 후보 3개 중 검사를 통과한 것만 사람이 1개 고른다(안 고른 후보는 메모리에서 버림 — `rejected` 없음). OpenAI 키는 음성 STT 만. 이 노트의 피드백 문구 · 기록 · 시험 틀(3 · 8 · 9장)의 생각만 그대로 쓴다.
 
 
 > 정본은 [SDD 3.1.1 · 6.6](../../docs/03_설계_SDD_v3_101321.md) · [IRD 6 · 7 · 8.3장](../../docs/02_인터페이스_IRD_v3_101315.md) · 결정 E-08 ~ E-15 · E-40 · E-41. 이 노트는 그것을 **코드로 옮길 때의 세부**(파일 · 함수 · 프롬프트 · 스키마 · 시험)만 적는다. 정본과 다르면 정본이 맞다.

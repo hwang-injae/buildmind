@@ -7,13 +7,15 @@
 실행(웹 PC 호스트, compose 전): cd web/backend && MQTT_HOST=localhost uvicorn app:app --host 0.0.0.0 --port 8000
 설정: 환경 변수 MQTT_HOST · MQTT_PORT(.env), ROBOT_YAML(컨테이너에서 robot.yaml 을 읽기 전용으로 연결한 경로, 비우면 저장소 파일),
       DATA_DIR(설계 · 기록 폴더, 비우면 web/backend/data — gitignore) · RECIPE_DIR(기본 설계 레시피 폴더, 비우면 저장소 d2_bringup/recipes),
+      DATABASE_URL(W088 — 있으면 PostgreSQL db 컨테이너에 저장, 비우면 DATA_DIR JSON 폴더. 비밀번호가 들어 있어 .env 에만 · 로그에 안 찍음),
       CORS_ORIGINS(화면 개발 때만 — 예 http://localhost:3000).
-OpenAI 키는 있는지만 로그에 찍고 값은 절대 찍지 않는다(팀 규칙 4).
+키 · 비밀번호(OPENAI_API_KEY — 음성 STT 만, DATABASE_URL)는 로그에 찍지 않는다(팀 규칙 4). 설계 AI 는 키 없는 Claude 중계(E-99).
 """
 import asyncio
 import logging
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
@@ -30,7 +32,7 @@ for _pkg in ('d2_bridge', 'd2_task'):          # 웹 PC 에 ROS 는 없고, 이 
         sys.path.insert(0, _path)
 
 from design_gen import LLM_URL, MODEL, DesignGenerator, load_grasp_options  # noqa: E402 — 위에서 d2_task 경로를 넣은 뒤
-from design_store import DesignStore   # noqa: E402
+from design_store import DesignStore, PgDesignStore   # noqa: E402
 from mqtt_client import MqttClient     # noqa: E402 — 위에서 d2_bridge 경로를 넣은 뒤
 from routes import designs, robot, voice, ws  # noqa: E402
 
@@ -38,6 +40,8 @@ ROBOT_YAML = Path(os.environ.get('ROBOT_YAML') or REPO / 'src' / 'd2_robot' / 'd
 FRONTEND_OUT = REPO / 'web' / 'frontend' / 'out'
 DATA_DIR = Path(os.environ.get('DATA_DIR') or REPO / 'web' / 'backend' / 'data')
 RECIPE_DIR = Path(os.environ.get('RECIPE_DIR') or REPO / 'src' / 'd2_robot' / 'd2_bringup' / 'recipes')
+DATABASE_URL = os.environ.get('DATABASE_URL') or ''
+DB_TRIES, DB_WAIT_S = 20, 1.5    # 웹 시작 때 DB 연결 시도 — db 컨테이너 첫 시작(표 만들기)까지 30초 안쪽
 log = logging.getLogger('web')
 
 
@@ -78,7 +82,21 @@ def load_rules(path=ROBOT_YAML):
 
 def open_store(rules):
     """DesignStore 를 열고 기본 설계를 레시피 파일에서 다시 등록한다(E-55 ① — 같은 ID 로 다시 등록될 수 있는 것은 기본 설계뿐)."""
-    store = DesignStore(DATA_DIR, RECIPE_DIR, [v * 1000 for v in rules['block_size_m']])
+    block_mm = [v * 1000 for v in rules['block_size_m']]
+    if DATABASE_URL:      # W088 — 시연 중 DB 가 말썽이면 .env 의 DATABASE_URL 을 비우고 web 만 다시 켜면 JSON 폴더로 돌아간다
+        for attempt in range(1, DB_TRIES + 1):    # compose 가 db 를 기다리지 않아(DB 를 안 켜도 web 이 떠야 함) 늦게 뜨는 db 를 잠깐 기다림
+            try:
+                store = PgDesignStore(DATABASE_URL, RECIPE_DIR, block_mm)
+                break
+            except OSError as e:
+                if attempt == DB_TRIES:
+                    raise
+                log.warning('[웹] DB 에 못 붙음(%d/%d) — 다시: %s', attempt, DB_TRIES, e)
+                time.sleep(DB_WAIT_S)
+        log.info('[웹] 저장소 = PostgreSQL(db 컨테이너)')
+    else:
+        store = DesignStore(DATA_DIR, RECIPE_DIR, block_mm)
+        log.info('[웹] 저장소 = JSON 폴더 %s', DATA_DIR)
     log.info('[웹] 기본 설계 등록 %s', store.register_bases() or '없음(레시피 폴더 확인)')
     return store
 

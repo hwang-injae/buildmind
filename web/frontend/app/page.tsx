@@ -45,7 +45,7 @@ export default function Home() {
       <header className="topbar">
         <div className="top-left">
           <h1>D2 젠가 가구</h1>
-          <ConnectionDots robot={robot} />
+          <ConnectionDots robot={robot} store={rules?.store} />
         </div>
         <ProgressTop robot={robot} />
         <ThemeToggle dark={dark} onChange={setDark} />
@@ -72,7 +72,7 @@ export default function Home() {
               <section className="panel">
                 <div className="panel-head">
                   <h2>추천 설계</h2>
-                  <span className="muted small">저장된 설계 중 스캔과 가장 비슷한 것 — GPT 없이 바로 조립</span>
+                  <span className="muted small">저장된 설계 중 스캔과 가장 비슷한 것 — AI 없이 바로 조립</span>
                 </div>
                 <ScanRecommend robot={robot} onView={setPicked} onLog={addLog} />
               </section>
