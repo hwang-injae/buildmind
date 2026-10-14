@@ -158,3 +158,6 @@ def test_display_name_on_db(pg):
     with pytest.raises(KeyError):
         pg.set_display_name('001_CHAIR_BENCH_V077', '없음')
     assert pg.set_display_name(BENCH, None) is None and 'display_name' not in pg.get_design(BENCH)
+    with psycopg.connect(URL) as conn:
+        rows = conn.execute("SELECT design_id, model, extra FROM gen_logs WHERE kind = 'rename' ORDER BY id").fetchall()
+    assert rows == [(BENCH, '-', {'old_name': None, 'new_name': '젠가 탑 4층'}), (BENCH, '-', {'old_name': '젠가 탑 4층', 'new_name': None})]

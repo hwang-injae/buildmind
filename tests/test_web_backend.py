@@ -715,6 +715,9 @@ def test_display_name_set_clear_and_kept_on_reregister(store):
     with pytest.raises(KeyError):
         store.set_display_name('001_CHAIR_BENCH_V077', '없는 설계')
     assert store.set_display_name(BENCH, '') is None and 'display_name' not in store.get_design(BENCH)
+    logs = [json.loads(f.read_text(encoding='utf-8')) for f in sorted(store.gen_logs_dir.glob('*_rename.json'))]
+    assert [(g['design_id'], g['old_name'], g['new_name']) for g in logs] == [(BENCH, None, '젠가 탑 4층'), (BENCH, '젠가 탑 4층', None)]
+    assert logs[0]['kind'] == 'rename' and logs[0]['model'] == '-'   # 이름 바꿈 이력(10/14 PL — 지움도, 같은 이름 · 실패는 안 남김)
 
 
 def test_rename_route(store):

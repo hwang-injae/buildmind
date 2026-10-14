@@ -33,6 +33,7 @@ SCHEMA_BUILD = 'build/2'
 RECIPE_SUFFIX = '_recipe.json'
 MADE_BY_NEW = ('web', 'voice', 'scan')       # save_design 으로 들어오는 made_by(IRD 2장) — cad 는 register_base 만
 DISPLAY_NAME_MAX = 40        # 표시 이름 글자 수 상한(W197) — 화면 제목 · 목록 한 줄에 들어가게
+RENAME_KIND = 'rename'       # gen_logs kind — 표시 이름 바꿈 이력(AI 호출 아님, 10/14 PL)
 AI_NONE = 'NONE'    # AI 판단 기록 ai_template — AI 가 Template 을 못 고름(맞는 모양 없음 · 호출 실패, 설계_DB 1절 · 10/13 PL 8절 B 나)
 SAFE_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.\-]*')   # 파일 이름으로 쓰는 ID — 경로 글자(/ \ ..)를 막는다
 DESIGN_ID = re.compile(r'([0-9]{3}(?:_[A-Z]+)+)_V([0-9]{3})')   # <Template ID>_V<3자리>(E-84) — 예 001_CHAIR_BENCH_V001
@@ -404,8 +405,9 @@ class DesignStore:
         """사람이 보는 설계 이름을 붙이거나(글자) 지운다(None · 빈 글자) — 10/14 PL W197(민범진 제안 2).
 
         design_id · 레시피 · 부품 이름 · 기록은 그대로다(로봇 쪽 영향 없음). 저장한 설계에서 이 칸만 고칠 수 있다(E-55 예외 — 결정 기록은 PM).
+        바꿀 때마다(지움 포함, 같은 이름이면 안 남김) AI 호출 기록(gen_logs)에 kind 'rename' 한 줄 — 이전 이름이 사라지지 않게(10/14 PL).
         입력: name = 앞뒤 빈칸을 뗀 DISPLAY_NAME_MAX 글자 이하, 줄바꿈 · 제어 글자 없음. 출력: 저장한 이름(지웠으면 None).
-        실패: 없는 설계 KeyError, 이름 꼴이 틀리면 ValueError(저장 안 함).
+        실패: 없는 설계 KeyError, 이름 꼴이 틀리면 ValueError(저장 안 함). 이력 한 줄을 못 남기면 로그만(이름은 이미 바뀜).
         """
         if name is not None and not isinstance(name, str):
             raise ValueError('표시 이름은 글자여야 한다')
@@ -415,8 +417,16 @@ class DesignStore:
                 raise ValueError(f'표시 이름은 {DISPLAY_NAME_MAX}자 이하다({len(name)}자)')
             if any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
                 raise ValueError('표시 이름에 줄바꿈 · 제어 글자를 쓸 수 없다')
+        old = self.get_design(design_id).get('display_name')      # 없으면 KeyError — 바꾸기 전에
         self._set_display(design_id, name)
-        log.info('[저장소] 표시 이름 %s = %r', design_id, name)
+        log.info('[저장소] 표시 이름 %s = %r(전 %r)', design_id, name, old)
+        if old != name:
+            try:        # AI 호출이 아니라 model · prompt_sha(DB 에선 빈칸 불가)는 '-'. 이전 · 새 이름은 DB 에서 extra 칸으로 간다
+                self.save_gen_log({'kind': RENAME_KIND, 'text': f'{old or "(없음)"} → {name or "(없음)"}', 'model': '-',
+                                   'prompt_sha': '-', 'started': round(time.time(), 3), 'design_id': design_id,
+                                   'old_name': old, 'new_name': name})
+            except (OSError, ValueError) as e:
+                log.warning('[저장소] 이름 바꿈 기록을 못 남김(%s): %s', design_id, e)
         return name
 
     # ---------- 조립 기록 ----------
