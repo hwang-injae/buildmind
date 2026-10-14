@@ -227,7 +227,11 @@ def main(args=None):
     spin = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
     spin.start()
     scene, light, pose = a.scene, a.light, a.pose
-    index = 1 + len(list(out.glob(f's{scene:02d}_*_color.png')))     # 같은 장면에 이미 있으면 이어서 번호(태그가 있어도 같은 glob 에 걸린다)
+    def next_index(n):
+        """장면 n 의 다음 저장 번호 — 이미 있는 컬러 사진 수 + 1(태그가 있어도 같은 glob 에 걸린다). 덮어쓰지 않으려고."""
+        return 1 + len(list(out.glob(f's{n:02d}_*_color.png')))
+
+    index = next_index(scene)     # 같은 장면에 이미 있으면 이어서 번호
     print(f'저장 폴더 {out}  장면 {scene:02d} 번호 {index:03d} 조명 {light} 자세 태그 {pose or "없음"}')
     print('Enter = 저장 · s = 다음 장면 · l = 조명 바꿈 · p = 자세 태그 돌리기(observe/front/side 를 쳐도 됨) · q = 끝')
     try:
@@ -239,7 +243,8 @@ def main(args=None):
             if key == 'q':
                 break
             if key == 's':
-                scene, index = scene + 1, 1
+                scene += 1
+                index = next_index(scene)     # 다음 장면에 이미 찍은 것이 있으면 이어서(1로 되돌리면 덮어썼다 — 10/14 점검)
                 print(f'→ 장면 {scene:02d} (블록을 새로 흩뿌린 뒤 Enter)')
             elif key == 'l':
                 light = 'b' if light == 'a' else 'a'

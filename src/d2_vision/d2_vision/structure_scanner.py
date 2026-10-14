@@ -96,7 +96,7 @@ class StructureScanner:
     """사람이 쌓은 구조물의 깊이 촬영(자세 2~5곳) + YOLO 마스크를 blocks/2 로 추론한다 (로봇 · ROS 없음, SDD §6.9).
 
     입력: cfg = robot.yaml 을 읽은 dict(assembly_origin · assembly_area_half_m · block_size_m · block_actual_m) ·
-          design_id = 결과 설계 이름(노드가 'scan_<run_id>' 등으로 정함) · family = 기본 'unknown' · stride = 미리보기 · PLY 점군 픽셀 간격.
+          design_id = 결과 임시 이름(기본 'scan' — wrist_block 은 추론 뒤 scan_<family>_<번호>로 바꿈) · family = 기본 'unknown'(bases 를 주면 가장 가까운 기본 설계의 것) · stride = 미리보기 · PLY 점군 픽셀 간격.
     바깥 영향: 없음(계산 · save_cloud 의 파일 쓰기만).
     한 번의 스캔(run)마다 새로 만들거나 reset() 한다.
     """
