@@ -48,7 +48,7 @@ pip install -r src/recipe_manager/requirements.txt
 python3 src/recipe_manager/recipe_manager/main.py build src/recipe_manager/cads/001_chair_bench_v000.dxf
 ```
 
-모델 ID는 CAD 파일 이름을 대문자로 바꿔 정한다. 순서 · 단계 · 잡기를 바꾸려면 **CAD 속성(SEQ · STAGE · GRASP)을 고치고** 다시 `build` 한다. 저장된 레시피에 사람 칸이 없으면(처음 만드는 설계) 계산 값만 저장하고 빠진 칸을 알린다. 같은 이름의 출력 파일이 있으면 덮어쓰기 / 다른 이름으로 저장 / 취소를 묻는다(입력을 받을 수 없는 환경에서는 기존 파일을 지키려고 취소).
+모델 ID는 CAD 파일 이름을 대문자로 바꿔 정한다. 순서 · 단계 · 잡기를 바꾸려면 **CAD 속성(SEQ · STAGE · GRASP)을 고치고** 다시 `build` 한다. 저장된 레시피에 사람 칸이 없으면(처음 만드는 설계) 계산 값만 저장하고 빠진 칸을 알린다. 출력 두 파일 중 하나라도 있으면 **둘 다 덮어쓰기 / 취소**를 한 번 묻는다 — 짝 해시로 묶여 있어 둘 다 쓰거나 둘 다 안 쓴다. 이름은 CAD 파일 이름으로만 정하므로 다른 이름으로 저장하지 않는다(입력을 받을 수 없는 환경에서는 기존 파일을 지키려고 취소).
 
 | CAD 속성 | 입력 내용 |
 |---|---|

@@ -52,7 +52,7 @@ class RecipeManager:
 
         입력:
             cad_path: DXF 파일 경로
-        바깥 영향: recipe_dir 에 두 파일을 쓰고(save_file), 배치표를 터미널에 출력한다.
+        바깥 영향: recipe_dir 에 두 파일을 함께 쓰고(save_recipe_pair), 배치표를 터미널에 출력한다.
         실패: CAD · 이름 · 속성 · 배치가 틀리면 ValueError (파일을 쓰지 않는다), ezdxf가 없으면 ImportError.
         """
         # DXF → 레시피 → 사람 칸 옮기기 → 조립 방법(recipe_sha256 = 사람 칸까지 넣은 레시피 객체의 해시)
@@ -86,8 +86,8 @@ class RecipeManager:
 
 
         # 레시피 · 조립 방법 저장
-        self.save_file(self.recipe_dir / f'{design_id}_recipe.json', self.builder.make_json_text(recipe))
-        self.save_file(self.recipe_dir / f'{design_id}_placements.csv', buffer.getvalue())
+        self.save_recipe_pair({self.recipe_dir / f'{design_id}_recipe.json': self.builder.make_json_text(recipe),
+                               self.recipe_dir / f'{design_id}_placements.csv': buffer.getvalue()})
 
     def load_recipe(self, cad_path, design_id):
         """DXF를 읽어 레시피와 블록마다의 CAD 속성(순서 · 단계 · 잡기)을 만든다.
@@ -141,41 +141,43 @@ class RecipeManager:
             print(f'사람 칸 없음(HMI에서 써야 함): {", ".join(missing)}\n')
         return dict(recipe, template=template)
 
-    def save_file(self, path, text):
-        """text를 파일로 저장한다. 같은 이름이 있으면 덮어쓰기 / 다른 이름으로 저장 / 취소 중에서 고르게 한다.
+    def save_recipe_pair(self, texts):
+        """레시피 · 조립 방법 두 파일을 함께 저장한다 — 둘 다 쓰거나 둘 다 안 쓴다.
+
+        조립 방법은 recipe_sha256 으로 레시피에 묶여 있어 한쪽만 바뀌면 짝이 어긋나 모두가 못 읽는다(10/14 점검 ④2).
+        이름(모델 ID)은 DXF 파일 이름에서만 정한다 — 읽는 쪽은 짝 파일을 레시피 안의 design_id 로 찾으므로
+        파일 이름만 바꿔 저장하면 옛 짝을 읽는다. 그래서 '다른 이름으로 저장'은 두지 않는다(10/14 한세교).
 
         입력:
-            path: 저장할 파일 경로
-            text: 파일 내용
-        출력: 실제로 저장한 경로. 취소하면 None
-        바깥 영향: 파일을 쓰고, 같은 이름이 있으면 input()으로 묻는다.
-        실패: 입력을 받을 수 없으면(EOFError) 기존 파일을 지키려고 저장하지 않고 None.
+            texts: {저장할 파일 경로: 파일 내용} — 레시피 · 조립 방법 두 개
+        출력: 저장했으면 True, 취소하면 False
+        바깥 영향: 파일을 쓰고, 하나라도 이미 있으면 input()으로 한 번 묻는다.
+        실패: 입력을 받을 수 없으면(EOFError) 기존 파일을 지키려고 둘 다 저장하지 않고 False.
         """
-        # 같은 이름 파일이 있으면 묻는다. 다른 이름을 골랐는데 그 파일도 있으면 다시 묻는다.
-        path = Path(path)
-        while path.exists():
+        # 하나라도 있으면 한 번만 묻는다. [1] · [2] 말고는 다시 묻는다.
+        existing = [path for path in texts if Path(path).exists()]
+        while existing:
             try:
-                choice = input(f'{path} 파일이 이미 있습니다. [1] 덮어쓰기  [2] 다른 이름으로 저장  [3] 취소 > ').strip()
-                if choice == '1':
-                    break
-                if choice == '2':
-                    new_name = input('새 파일 이름 (같은 폴더에 저장) > ').strip()
-                    if new_name:
-                        path = path.parent / new_name
-                elif choice == '3':
-                    print(f'저장 취소: {path}')
-                    return None
+                names = ', '.join(Path(path).name for path in existing)
+                choice = input(f'{names} 이(가) 이미 있습니다. [1] 둘 다 덮어쓰기  [2] 취소 > ').strip()
             except EOFError:
                 # 자동 실행처럼 입력을 받을 수 없으면 기존 파일을 지키려고 취소한다.
-                print(f'저장 취소 (입력 없음): {path}')
-                return None
+                print(f'저장 취소 (입력 없음): {names}')
+                return False
+            if choice == '1':
+                break
+            if choice == '2':
+                print(f'저장 취소: {names}')
+                return False
 
 
         # 저장
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding='utf-8')
-        print(f'저장: {path}')
-        return path
+        for path, text in texts.items():
+            path = Path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding='utf-8')
+            print(f'저장: {path}')
+        return True
 
 
 def main(argv=None):
