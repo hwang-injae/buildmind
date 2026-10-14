@@ -45,7 +45,7 @@ WAKE_THRESHOLD = 0.3         # 강의 값. VAD_GATE 와 같이 써서 소음 오
 VAD_GATE = 0.5               # 시동어는 말소리(VAD ≥ 이 값)일 때만 인정(openWakeWord vad_threshold)
 VAD_SPEECH = 0.5             # 녹음 중 이 값 이상이면 말소리 프레임
 WAKE_WAIT_S = 6.0            # 누른 뒤 시동어를 기다리는 시간. 화면은 누른 뒤 20초 안에 문장이 와야 한다(GeneratePanel LISTEN_MS)
-SPEECH_START_WAIT_S = 3.0    # 시동어 뒤 이 안에 말을 시작하지 않으면 그만
+SPEECH_START_WAIT_S = 4.0    # 시동어 뒤 이 안에 말을 시작하지 않으면 그만(10/14 이 PC 시험: 3초면 삑 듣고 말 꺼내기 전에 끝난 적 있음)
 END_SILENCE_S = 0.8          # 말이 시작된 뒤 이만큼 조용하면 녹음 끝
 MAX_RECORD_S = 7.0           # 녹음 상한(시동어 6 + 삑 0.3 + 녹음 7 + 받아 적기 몇 초 < 화면 기다림 20초)
 MIN_SPEECH_S = 0.3           # 말소리 프레임이 이보다 적으면 받아 적기를 안 부른다
@@ -145,7 +145,7 @@ class VoiceListener:
             mic.close()
         self._beep(BEEP_LOW_HZ)
         if speech_s < MIN_SPEECH_S:
-            return self._none(f'말소리가 없어요({speech_s:.1f}초)', t0)
+            return self._none(f'말소리가 없어요({speech_s:.1f}초, 말소리 최고 점수 {self.vad_max:.2f} / 문턱 {VAD_SPEECH})', t0)
         try:
             text, conf, model = self.stt(to_wav(audio))
         except Exception as e:                       # 키 · 크레딧 · 인터넷 — 화면은 20초 뒤 '못 받았어요'
@@ -179,10 +179,13 @@ class VoiceListener:
         for _ in range(math.ceil(BEEP_SKIP_S / FRAME_S - 1e-9)):
             mic.read()
         frames, speech, quiet, started = [], 0, 0, False
+        self.vad_max = 0.0                           # 로그 — '말소리가 없어요'일 때 목소리가 작았는지(문턱 아래) 가른다
         for i in range(int(MAX_RECORD_S / FRAME_S)):
             f = mic.read()
             frames.append(f)
-            if self.vad(f) >= VAD_SPEECH:
+            v = self.vad(f)
+            self.vad_max = max(self.vad_max, v)
+            if v >= VAD_SPEECH:
                 speech, quiet, started = speech + 1, 0, True
             elif started:
                 quiet += 1
