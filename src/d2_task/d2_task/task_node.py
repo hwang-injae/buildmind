@@ -293,13 +293,14 @@ class TaskNode(Node):
         opts = 선택 칸(받침 경유 10/13): height_map=True(공급 영역 높이 지도) · area='spare'(받침 위 블록 하나를 깊이로)."""
         return self._scan_query(self.find_cli, dict(run_id=run_id, **opts), should_abort, default_reason='ERROR', timeout_s=self.find_blocks_s)
 
-    def w144_measure(self, run_id, part_id, should_abort):
-        """W144 A4(E-119): 조립 자리에서 방금 놓은 part_id 하나를 /d2/vision/find_blocks {area: assembly, part_id} 로 잰다.
+    def w144_measure(self, run_id, design_id, part_id, should_abort):
+        """W144 A4(E-119): 조립 자리에서 방금 놓은 part_id 하나를 /d2/vision/find_blocks {area: assembly, design_id, part_id} 로 잰다
+        (design_id 필수 — 비전이 check_progress 와 같은 설계 캐시로 설계 자리를 찾는다, #177 · E-52 블록 이름에서 설계 이름을 잘라 내지 않음).
         반환: w144_measure 파라미터가 false 면 None(조회 안 함), 켜져 있으면 find_blocks 와 같은 (성공, reason, 응답 dict) —
         단 실패여도 응답 본문을 넘긴다(거절 까닭 기록용, 다른 find_blocks 호출은 그대로 버림). 로봇은 안 움직인다."""
         if not bool(self.get_parameter('w144_measure').value):
             return None
-        return self._scan_query(self.find_cli, dict(run_id=run_id, area='assembly', part_id=part_id), should_abort,
+        return self._scan_query(self.find_cli, dict(run_id=run_id, area='assembly', design_id=design_id, part_id=part_id), should_abort,
                                 default_reason='ERROR', timeout_s=self.find_blocks_s, keep_failed_body=True)
 
     def scene_detach(self):

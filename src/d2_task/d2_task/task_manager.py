@@ -61,43 +61,58 @@ SERVICE_LABEL = {'/d2/motion/move_to': '로봇 이동 · 집기 기능', '/d2/mo
                  '/d2/vision/scan_infer': '손목 카메라 기능', '/d2/vision/find_blocks': '손목 카메라 기능'}
 
 
-def placed_offset(center_m, ok, why, body):
+def _finite(v):
+    """유한한 수(bool · 글자 · 아주 큰 정수 제외)면 float, 아니면 None. 바깥 영향 없음."""
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return None
+    try:
+        v = float(v)
+    except OverflowError:
+        return None
+    return v if math.isfinite(v) else None
+
+
+def placed_offset(center_m, part_id, ok, why, body):
     """W144 A4(E-119): 놓은 블록 다시 재기(find_blocks area assembly) 답 → 기록용 dict. ROS 없음 · 바깥 영향 없음.
 
-    입력: 설계 중심 center_m([x, y, z] base_link m), io.w144_measure 의 (ok, reason, 응답 dict).
-    출력: 잰 블록이 정확히 1개이고 x_m · y_m 이 유한한 수면 {'status': 'MEASURED', 'x_m', 'y_m'(잰 값 m), 'target_x_m', 'target_y_m'(비교한 설계 중심 m),
-    'dx_mm', 'dy_mm'(잰 값 − 설계, mm), 'yaw_deg', 'up'(이상하면 None)} — 'x · y 기록 가능'일 뿐 다시 집기 판정이 아니다,
-    그 밖은 {'status': 'UNMEASURED', 'reason'} — 못 잰 것을 오차 0 으로 만들지 않는다(E-119 ②). 측정 시각 · 거절 이유 칸은 계약 확정 전이라 읽지 않는다.
+    응답 꼴은 비전 #177(민범진, 10/14): 성공 {"ok": true, "part_id", "blocks": [b], "rejected": null, "detail": "", "measured_stamp"} ·
+    측정 거절 · 블록 없음 = ok true · blocks [] · rejected 코드(블록 없음은 NO_PART) + detail · 요청 오류 = success false(SCAN_FAILED '요청 오류: …').
+    measured_stamp = 쓴 깊이 중 마지막 장을 비전 노드가 받은 시각(초, 노드 시계 — 영상 header.stamp 아님).
+    입력: 설계 중심 center_m([x, y, z] base_link m), 요청한 part_id, io.w144_measure 의 (ok, reason, 응답 dict).
+    출력: {'status': 'MEASURED', 'x_m', 'y_m'(잰 값 m), 'target_x_m', 'target_y_m'(비교한 설계 중심 m), 'dx_mm', 'dy_mm', 'yaw_deg', 'up', 'measured_stamp'}
+      — 'x · y 기록 가능'일 뿐 다시 집기 판정이 아니다. 그 밖은 {'status': 'UNMEASURED', 'reason', 'detail', 'measured_stamp'}:
+      reason = 실패 reason(요청 오류 · ERROR · TIMEOUT …) | 거절 코드(rejected 글자 그대로 — NO_PART 포함) | BAD_RESPONSE(꼴이 계약과 다름).
+      못 잰 것을 오차 0 으로 만들지 않는다(E-119 ②). 이상한 칸은 None.
     """
+    def unmeasured(reason, detail, stamp=None):
+        return {'status': 'UNMEASURED', 'reason': reason, 'detail': detail if isinstance(detail, str) else None, 'measured_stamp': stamp}
+
     if not ok or not isinstance(body, dict):
-        detail = body.get('detail') if isinstance(body, dict) else None      # 거절 까닭 글자 그대로(코드 목록은 계약 전이라 해석하지 않음)
-        return {'status': 'UNMEASURED', 'reason': why or 'ERROR', 'detail': detail if isinstance(detail, str) else None}
-    blocks = body.get('blocks')
-    if not isinstance(blocks, list) or len(blocks) != 1 or not isinstance(blocks[0], dict):
+        return unmeasured(why or 'ERROR', body.get('detail') if isinstance(body, dict) else None)
+    stamp = _finite(body.get('measured_stamp'))
+    if body.get('ok') is not True or body.get('part_id') != part_id:     # 다른 블록의 답을 이 블록 값으로 적지 않는다
+        return unmeasured('BAD_RESPONSE', f'ok · part_id 가 요청과 다름({body.get("part_id")!r})', stamp)
+    blocks, rejected = body.get('blocks'), body.get('rejected')
+    if blocks == []:
+        if isinstance(rejected, str) and rejected:
+            return unmeasured(rejected, body.get('detail'), stamp)        # 측정 거절 · 블록 없음(NO_PART) — 코드는 비전 정의 그대로
+        return unmeasured('BAD_RESPONSE', 'blocks [] 인데 rejected 코드 없음', stamp)
+    if not isinstance(blocks, list) or len(blocks) != 1 or not isinstance(blocks[0], dict) or rejected is not None:
         n = len(blocks) if isinstance(blocks, list) else None
-        return {'status': 'UNMEASURED', 'reason': 'NO_BLOCK' if n == 0 else 'BAD_RESPONSE', 'detail': f'blocks {n}개'}
+        return unmeasured('BAD_RESPONSE', f'blocks {n}개 · rejected {rejected!r}', stamp)
     b = blocks[0]
-    try:
-        if not all(isinstance(b.get(k), (int, float)) and not isinstance(b.get(k), bool) for k in ('x_m', 'y_m')):
-            raise TypeError('x_m · y_m 이 숫자가 아님')        # 글자 '0.4' 같은 것도 숫자로 읽지 않는다
-        x, y = float(b['x_m']), float(b['y_m'])
-        dx, dy = round((x - center_m[0]) * 1000.0, 2), round((y - center_m[1]) * 1000.0, 2)
-    except (KeyError, TypeError, ValueError, OverflowError):
-        return {'status': 'UNMEASURED', 'reason': 'BAD_RESPONSE', 'detail': 'x_m · y_m 없음 · 숫자 아님'}
+    x, y = _finite(b.get('x_m')), _finite(b.get('y_m'))
+    if x is None or y is None:
+        return unmeasured('BAD_RESPONSE', 'x_m · y_m 없음 · 유한한 수 아님', stamp)
+    dx, dy = round((x - center_m[0]) * 1000.0, 2), round((y - center_m[1]) * 1000.0, 2)
     if not (math.isfinite(dx) and math.isfinite(dy)):
-        return {'status': 'UNMEASURED', 'reason': 'BAD_RESPONSE', 'detail': 'x_m · y_m 이 유한하지 않음'}
-    yaw = b.get('yaw_deg')
-    try:
-        yaw = float(yaw) if isinstance(yaw, (int, float)) and not isinstance(yaw, bool) else None
-    except OverflowError:                          # 아주 큰 정수
-        yaw = None
-    if yaw is not None and not math.isfinite(yaw):
-        yaw = None
+        return unmeasured('BAD_RESPONSE', 'x_m · y_m 이 유한하지 않음', stamp)
     up = b.get('up') if b.get('up') in ('THICKNESS', 'WIDTH', 'LENGTH') else None
-    # top_z_m 은 기록하지 않는다 — 받침 재기 방식(spare_measure)의 top_z_m 은 잰 높이가 아니라 '아랫면 + 자세 치수' 계산값이다
+    # top_z_m 은 적지 않는다 — 다시 집기 높이 입력은 미확정(측정 계약 · 독립 기준 검증 전 자동 집기에 쓰지 않음)
     # MEASURED = 'x · y 를 기록할 수 있음'일 뿐 — yaw · 측정 시각 · 대상 확인까지 갖춘 다시 집기 판정이 아니다
     return {'status': 'MEASURED', 'x_m': round(x, 5), 'y_m': round(y, 5), 'target_x_m': round(float(center_m[0]), 5),
-            'target_y_m': round(float(center_m[1]), 5), 'dx_mm': dx, 'dy_mm': dy, 'yaw_deg': yaw, 'up': up}
+            'target_y_m': round(float(center_m[1]), 5), 'dx_mm': dx, 'dy_mm': dy, 'yaw_deg': _finite(b.get('yaw_deg')), 'up': up,
+            'measured_stamp': stamp}
 
 
 def wait_until(event, should_abort, poll_s=0.05, timeout_s=None):
@@ -1144,15 +1159,16 @@ class TaskManager:
             return False
         with self._lock:
             token = (self._epoch, self._stop_count, self.run_id, self.placed)
+            design_id = self.design_id
         try:
-            res = fn(self.run_id, self.placed, self.halted)
+            res = fn(token[2], design_id, token[3], self.halted)     # run_id · part_id · design_id 를 같은 잠금 시점 값으로
         except Exception as e:                     # noqa: BLE001 — 기록용 측정이 조립을 멈추게 하지 않는다(못 잰 것으로 적음)
             res = (False, 'ERROR', {'detail': f'{type(e).__name__}: {e}'})
         if res is None:                            # 꺼짐(task_node w144_measure false)
             return False
         if not (isinstance(res, tuple) and len(res) == 3):
             res = (False, 'ERROR', {'detail': f'io 답 꼴이 이상함: {type(res).__name__}'})
-        row = placed_offset(part['center'], *res)
+        row = placed_offset(part['center'], token[3], *res)
         try:
             text = json.dumps(row, ensure_ascii=False, allow_nan=False)
         except (TypeError, ValueError):

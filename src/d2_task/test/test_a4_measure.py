@@ -8,22 +8,28 @@ from d2_task.task_manager import TaskManager, placed_offset
 from test_task_manager import CFG, IDS, SAFE_OK, SAFE_STOP, FakeIO, drive
 
 
+def ok_body(part_id, blocks, rejected=None, detail='', stamp=1791960000.123):
+    """비전 #177 응답 꼴(성공 · 측정 거절 · 블록 없음 — 모두 ok true)."""
+    return {'ok': True, 'part_id': part_id, 'blocks': blocks, 'rejected': rejected, 'detail': detail, 'measured_stamp': stamp}
+
+
 class MeasureIO(FakeIO):
     """FakeIO + w144_measure(script: 'off' = None, 'ok' = 설계 중심 + (1.5, −2.0) mm, 그 밖 = 그대로 돌려줄 값) · w144_event 기록."""
 
     def __init__(self, script='ok'):
         super().__init__()
-        self.script, self.measured, self.w144_events = script, [], []
+        self.script, self.measured, self.w144_events, self.design_ids = script, [], [], []
 
-    def w144_measure(self, run_id, part_id, should_abort):
+    def w144_measure(self, run_id, design_id, part_id, should_abort):
         self.events.append(('call', 'measure', part_id))
         self.measured.append((run_id, part_id))
+        self.design_ids.append(design_id)
         if self.script == 'off':
             return None
         if self.script == 'ok':
             c = next(p for p in self.manager.planner.parts if p['part_id'] == part_id)['center']
-            return True, '', {'ok': True, 'blocks': [{'x_m': c[0] + 0.0015, 'y_m': c[1] - 0.002, 'top_z_m': c[2], 'yaw_deg': 1.0,
-                                                      'up': 'THICKNESS', 'confidence': 1.0}]}
+            return True, '', ok_body(part_id, [{'x_m': c[0] + 0.0015, 'y_m': c[1] - 0.002, 'top_z_m': c[2], 'yaw_deg': 1.0,
+                                                'up': 'THICKNESS', 'confidence': 1.0}])
         return self.script
 
     def w144_event(self, event, **fields):
@@ -62,19 +68,22 @@ def test_켜면_VERIFY_통과한_블록마다_그_블록만_한번_재서_기록
     io = MeasureIO('ok')
     m, rows = run(io)
     assert [p for _, p in io.measured] == IDS and all(r for r, _ in io.measured)        # 놓은 차례대로 · run_id 를 실어 부름
+    assert set(io.design_ids) == {m.design_id} and m.design_id                            # design_id 필수(#177) — 블록 이름에서 잘라 내지 않음
     rec = [json.loads(v) for k, _, v in rows if k == 'a4_measure']
-    assert len(rec) == len(IDS) and all({k: r[k] for k in ('status', 'dx_mm', 'dy_mm', 'yaw_deg', 'up')} ==
-                                        {'status': 'MEASURED', 'dx_mm': 1.5, 'dy_mm': -2.0, 'yaw_deg': 1.0, 'up': 'THICKNESS'} for r in rec)
+    assert len(rec) == len(IDS) and all({k: r[k] for k in ('status', 'dx_mm', 'dy_mm', 'yaw_deg', 'up', 'measured_stamp')} ==
+                                        {'status': 'MEASURED', 'dx_mm': 1.5, 'dy_mm': -2.0, 'yaw_deg': 1.0, 'up': 'THICKNESS',
+                                         'measured_stamp': 1791960000.123} for r in rec)
     assert rec[0]['target_x_m'] is not None and abs(rec[0]['x_m'] - rec[0]['target_x_m'] - 0.0015) < 1e-6   # 잰 값 · 비교한 목표 둘 다 남김
     assert [f['part_id'] for e, f in io.w144_events if e == 'placed_measured'] == IDS
     assert io.world == set(IDS)                                  # 기록만 — 다시 집기 · 상태 변화 없음
 
 
 def test_측정이_실패해도_조립은_이어가고_오차_0으로_적지_않는다():
-    io = MeasureIO((False, 'SCAN_FAILED', {'ok': False, 'reason': 'SCAN_FAILED', 'detail': '점 부족'}))
+    io = MeasureIO((False, 'SCAN_FAILED', {'ok': False, 'reason': 'SCAN_FAILED', 'detail': '요청 오류: 설계에 없는 part_id'}))
     _, rows = run(io)
     rec = [json.loads(v) for k, _, v in rows if k == 'a4_measure']
-    assert len(rec) == len(IDS) and all(r == {'status': 'UNMEASURED', 'reason': 'SCAN_FAILED', 'detail': '점 부족'} for r in rec)
+    assert len(rec) == len(IDS) and all(r == {'status': 'UNMEASURED', 'reason': 'SCAN_FAILED', 'detail': '요청 오류: 설계에 없는 part_id',
+                                              'measured_stamp': None} for r in rec)
     assert io.world == set(IDS)
 
 
@@ -93,48 +102,60 @@ def test_VERIFY가_실패한_블록은_재지_않는다():
 C = [0.40, -0.05, 0.02]
 
 
+P = 'P1'
+
+
+def U(reason, detail, stamp=None):
+    return {'status': 'UNMEASURED', 'reason': reason, 'detail': detail, 'measured_stamp': stamp}
+
+
+ST = 1791960000.123
+
+
 @pytest.mark.parametrize('res, want', [
-    ((True, '', {'ok': True, 'blocks': []}), {'status': 'UNMEASURED', 'reason': 'NO_BLOCK', 'detail': 'blocks 0개'}),
-    ((True, '', {'ok': True, 'blocks': [{'x_m': 0.4, 'y_m': 0.0}, {'x_m': 0.4, 'y_m': 0.0}]}),
-     {'status': 'UNMEASURED', 'reason': 'BAD_RESPONSE', 'detail': 'blocks 2개'}),
-    ((True, '', {'ok': True, 'blocks': [{'x_m': math.nan, 'y_m': 0.0}]}),
-     {'status': 'UNMEASURED', 'reason': 'BAD_RESPONSE', 'detail': 'x_m · y_m 이 유한하지 않음'}),
-    ((True, '', {'ok': True, 'blocks': [{'y_m': 0.0}]}), {'status': 'UNMEASURED', 'reason': 'BAD_RESPONSE', 'detail': 'x_m · y_m 없음 · 숫자 아님'}),
-    ((True, '', {'ok': True, 'blocks': [{'x_m': 10 ** 400, 'y_m': 0.0}]}),                   # 너무 큰 정수(OverflowError)
-     {'status': 'UNMEASURED', 'reason': 'BAD_RESPONSE', 'detail': 'x_m · y_m 없음 · 숫자 아님'}),
-    ((True, '', {'ok': True, 'blocks': [{'x_m': '0.4', 'y_m': 0.0}]}),                        # 글자 숫자는 숫자로 읽지 않는다
-     {'status': 'UNMEASURED', 'reason': 'BAD_RESPONSE', 'detail': 'x_m · y_m 없음 · 숫자 아님'}),
-    ((True, '', {'ok': True, 'blocks': [{'x_m': True, 'y_m': 0.0}]}),
-     {'status': 'UNMEASURED', 'reason': 'BAD_RESPONSE', 'detail': 'x_m · y_m 없음 · 숫자 아님'}),
-    ((False, 'SCAN_FAILED', {'ok': False, 'detail': {'code': 'X'}}), {'status': 'UNMEASURED', 'reason': 'SCAN_FAILED', 'detail': None}),
-    ((False, 'TIMEOUT', {}), {'status': 'UNMEASURED', 'reason': 'TIMEOUT', 'detail': None}),
-    ((False, '', None), {'status': 'UNMEASURED', 'reason': 'ERROR', 'detail': None}),
+    ((True, '', ok_body(P, [], 'NO_PART', '윗면 점 거의 없음')), U('NO_PART', '윗면 점 거의 없음', ST)),               # 블록 없음
+    ((True, '', ok_body(P, [], 'NEIGHBOR_MERGED', '옆 블록과 붙음')), U('NEIGHBOR_MERGED', '옆 블록과 붙음', ST)),     # 측정 거절
+    ((False, 'SCAN_FAILED', {'ok': False, 'reason': 'SCAN_FAILED', 'detail': '요청 오류: design_id 없음'}),
+     U('SCAN_FAILED', '요청 오류: design_id 없음')),                                                                  # 요청 오류
+    ((True, '', ok_body(P, [], None)), U('BAD_RESPONSE', 'blocks [] 인데 rejected 코드 없음', ST)),
+    ((True, '', ok_body('P2', [{'x_m': 0.4, 'y_m': 0.0}])), U('BAD_RESPONSE', "ok · part_id 가 요청과 다름('P2')", ST)),
+    ((True, '', ok_body(P, [{'x_m': 0.4, 'y_m': 0.0}], 'FEW_POINTS')), U('BAD_RESPONSE', "blocks 1개 · rejected 'FEW_POINTS'", ST)),
+    ((True, '', ok_body(P, [{'x_m': 0.4, 'y_m': 0.0}, {'x_m': 0.4, 'y_m': 0.0}])), U('BAD_RESPONSE', 'blocks 2개 · rejected None', ST)),
+    ((True, '', ok_body(P, [{'x_m': math.nan, 'y_m': 0.0}])), U('BAD_RESPONSE', 'x_m · y_m 없음 · 유한한 수 아님', ST)),
+    ((True, '', ok_body(P, [{'y_m': 0.0}])), U('BAD_RESPONSE', 'x_m · y_m 없음 · 유한한 수 아님', ST)),
+    ((True, '', ok_body(P, [{'x_m': 10 ** 400, 'y_m': 0.0}])), U('BAD_RESPONSE', 'x_m · y_m 없음 · 유한한 수 아님', ST)),
+    ((True, '', ok_body(P, [{'x_m': '0.4', 'y_m': 0.0}])), U('BAD_RESPONSE', 'x_m · y_m 없음 · 유한한 수 아님', ST)),
+    ((True, '', ok_body(P, [{'x_m': True, 'y_m': 0.0}])), U('BAD_RESPONSE', 'x_m · y_m 없음 · 유한한 수 아님', ST)),
+    ((True, '', ok_body(P, [], 'COVERED', stamp='어제')), U('COVERED', '', None)),                                    # 시각이 이상하면 None
+    ((False, 'SCAN_FAILED', {'ok': False, 'detail': {'code': 'X'}}), U('SCAN_FAILED', None)),
+    ((False, 'TIMEOUT', None), U('TIMEOUT', None)),
+    ((False, '', None), U('ERROR', None)),
 ])
 def test_못_잰_답은_UNMEASURED_로_오차를_만들지_않는다(res, want):
-    assert placed_offset(C, *res) == want
+    assert placed_offset(C, P, *res) == want
 
 
 def test_잰_답은_설계_중심과의_차를_mm_로():
-    r = placed_offset(C, True, '', {'ok': True, 'blocks': [{'x_m': 0.403, 'y_m': -0.0525, 'yaw_deg': -2.0, 'up': 'THICKNESS'}]})
+    r = placed_offset(C, P, True, '', ok_body(P, [{'x_m': 0.403, 'y_m': -0.0525, 'yaw_deg': -2.0, 'up': 'THICKNESS'}]))
     assert r == {'status': 'MEASURED', 'x_m': 0.403, 'y_m': -0.0525, 'target_x_m': 0.4, 'target_y_m': -0.05,
-                 'dx_mm': 3.0, 'dy_mm': -2.5, 'yaw_deg': -2.0, 'up': 'THICKNESS'}
+                 'dx_mm': 3.0, 'dy_mm': -2.5, 'yaw_deg': -2.0, 'up': 'THICKNESS', 'measured_stamp': ST}
 
 
 def test_측정_호출이_예외여도_조립은_이어가고_못_잰_것으로_적는다():
     class Boom(MeasureIO):
-        def w144_measure(self, run_id, part_id, should_abort):
+        def w144_measure(self, run_id, design_id, part_id, should_abort):
             self.measured.append((run_id, part_id))
             raise RuntimeError('비전 노드 없음')
     io = Boom()
     _, rows = run(io)
     rec = [json.loads(v) for k, _, v in rows if k == 'a4_measure']
-    assert len(rec) == len(IDS) and rec[0] == {'status': 'UNMEASURED', 'reason': 'ERROR', 'detail': 'RuntimeError: 비전 노드 없음'}
+    assert len(rec) == len(IDS) and rec[0] == {'status': 'UNMEASURED', 'reason': 'ERROR', 'detail': 'RuntimeError: 비전 노드 없음', 'measured_stamp': None}
     assert io.world == set(IDS)
 
 
 def test_yaw_up_이_이상하면_None_으로_적고_top_z_m_은_적지_않는다():
     for yaw in (math.inf, 10 ** 400, True, '3.0'):                # 무한 · 아주 큰 정수(OverflowError) · bool · 글자
-        r = placed_offset(C, True, '', {'ok': True, 'blocks': [{'x_m': 0.4, 'y_m': -0.05, 'yaw_deg': yaw, 'up': 'SIDEWAYS', 'top_z_m': 0.03}]})
+        r = placed_offset(C, P, True, '', ok_body(P, [{'x_m': 0.4, 'y_m': -0.05, 'yaw_deg': yaw, 'up': 'SIDEWAYS', 'top_z_m': 0.03}]))
         assert r['status'] == 'MEASURED' and r['yaw_deg'] is None and r['up'] is None and 'top_z_m' not in r
 
 
@@ -158,17 +179,17 @@ def test_측정_시간초과는_기존_TIMEOUT_경로로_정지요청_뒤_정지
     assert ('stop', 'TIMEOUT') in io.calls and m._timeout_pending
     assert io.states[-1]['message_id'] == 'stop_pending' and 'SELECT' not in [s['state'] for s in io.states[-3:]]
     rec = [json.loads(v) for k, _, v in rows if k == 'a4_measure']
-    assert rec == [{'status': 'UNMEASURED', 'reason': 'TIMEOUT', 'detail': None}]
+    assert rec == [{'status': 'UNMEASURED', 'reason': 'TIMEOUT', 'detail': None, 'measured_stamp': None}]
     assert len(io.measured) == 1 and len(io.world) == 1          # 다음 블록으로 가지 않았다
 
 
 def test_측정_중_정지면_답을_버리고_다음_단계로_가지_않는다():
     m, io, rows = _on()
 
-    def stop_during(run_id, part_id, should_abort):
+    def stop_during(run_id, design_id, part_id, should_abort):
         io.measured.append((run_id, part_id))
         m.on_safety(SAFE_STOP)                                    # 조회 중 정지 노드가 세움
-        return True, '', {'ok': True, 'blocks': [{'x_m': 0.4, 'y_m': 0.0}]}
+        return True, '', ok_body(part_id, [{'x_m': 0.4, 'y_m': 0.0}])
     io.w144_measure = stop_during
     drive(m, 'STOPPED')
     assert not [r for r in rows if r[0] == 'a4_measure'] and len(io.world) == 1
@@ -177,10 +198,10 @@ def test_측정_중_정지면_답을_버리고_다음_단계로_가지_않는다
 def test_측정_중_run이_바뀌면_늦은_답을_새_run_에_적지_않는다():
     m, io, rows = _on()
 
-    def run_changes(run_id, part_id, should_abort):
+    def run_changes(run_id, design_id, part_id, should_abort):
         io.measured.append((run_id, part_id))
         m._epoch += 1                                             # 그 사이 상태가 바뀜(새 run · 다른 단계)
-        return True, '', {'ok': True, 'blocks': [{'x_m': 0.4, 'y_m': 0.0}]}
+        return True, '', ok_body(part_id, [{'x_m': 0.4, 'y_m': 0.0}])
     io.w144_measure = run_changes
     for _ in range(40):
         m.run_once()
@@ -247,15 +268,15 @@ def _failed(body_text):
 def test_꺼짐이면_노드도_조회하지_않는다():
     n = _node(False)
     n.find_cli = _Done(_failed('{}'))
-    assert n.w144_measure('R1', 'P1', lambda: False) is None and n.find_cli.requests == []
+    assert n.w144_measure('R1', 'D1', 'P1', lambda: False) is None and n.find_cli.requests == []
 
 
-def test_측정_호출만_실패_본문을_넘기고_요청은_assembly_와_part_id():
+def test_측정_호출만_실패_본문을_넘기고_요청은_assembly_design_id_part_id():
     n = _node(True)
-    n.find_cli = _Done(_failed(json.dumps({'ok': False, 'reason': 'SCAN_FAILED', 'detail': 'FEW_POINTS: 점 120'})))
-    ok, why, body = n.w144_measure('R1', 'P1', lambda: False)
-    assert (ok, why, body['detail']) == (False, 'SCAN_FAILED', 'FEW_POINTS: 점 120')
-    assert n.find_cli.requests == [{'run_id': 'R1', 'area': 'assembly', 'part_id': 'P1'}]
+    n.find_cli = _Done(_failed(json.dumps({'ok': False, 'reason': 'SCAN_FAILED', 'detail': '요청 오류: 설계 D1 에 없는 part_id P1'})))
+    ok, why, body = n.w144_measure('R1', 'D1', 'P1', lambda: False)
+    assert (ok, why, body['detail']) == (False, 'SCAN_FAILED', '요청 오류: 설계 D1 에 없는 part_id P1')
+    assert n.find_cli.requests == [{'run_id': 'R1', 'area': 'assembly', 'design_id': 'D1', 'part_id': 'P1'}]
     assert n.find_blocks('R1', lambda: False) == (False, 'SCAN_FAILED', None)          # 다른 find_blocks 는 예전처럼 본문을 버림
 
 
@@ -263,7 +284,7 @@ def test_측정_호출만_실패_본문을_넘기고_요청은_assembly_와_part
 def test_실패_본문을_못_읽으면_None(text):
     n = _node(True)
     n.find_cli = _Done(_failed(text))
-    assert n.w144_measure('R1', 'P1', lambda: False) == (False, 'SCAN_FAILED', None)
+    assert n.w144_measure('R1', 'D1', 'P1', lambda: False) == (False, 'SCAN_FAILED', None)
 
 
 def test_확인과_기록_사이에_정지가_끼어도_기록하지_않는다(monkeypatch):
