@@ -74,12 +74,19 @@ def test_3mm_넘으면_잰_자리에서_집어_설계_자리에_놓고_다시_�
     assert [v for k, p, v in rows if k == 'a4_regrasp'][0].startswith('1번째 다시 집기')
 
 
-def test_두번_다시_놓아도_벗어나면_사람_확인():
+def test_두번_다시_놓아도_벗어나면_남은_오차를_적고_다음_블록으로():
+    """10/14 19:47 사용자 확정: 2번 다시 놓은 뒤에도 3 mm 넘으면 사람 대기 없이 남은 dx · dy 와 소진을 적고 SELECT 로 이어 간다."""
     io = RegraspIO([(5.0, 0.0)] * 3)
     m, rows = start(io)
-    drive(m, 'WAIT_SUPPLY')
-    assert len(picks_of(io, IDS[0])) == 1 + A4_MAX_TRIES
-    assert io.states[-1]['message_id'] == 'no_match_block' and '2번 다시 놓아도' in io.states[-1]['message']
+    drive(m, 'DONE')
+    assert len(picks_of(io, IDS[0])) == 1 + A4_MAX_TRIES                     # 처음 + 2번, 더는 안 집음
+    assert all(len(picks_of(io, p)) == 1 for p in IDS[1:])                    # 다음 블록들은 그대로 한 번씩
+    assert 'WAIT_SUPPLY' not in [s['state'] for s in io.states]                 # 사람 대기 없음
+    logs = [v for k, p, v in rows if k == 'a4_regrasp']
+    assert logs[-1].startswith('보정 소진') and 'dx 5.0' in logs[-1]
+    assert [f['part_id'] for e, f in io.w144_events if e == 'regrasp_exhausted'] == [IDS[0]]
+    assert [p for _, p in io.measured].count(IDS[0]) == 1 + A4_MAX_TRIES        # 놓을 때마다 한 번씩 잼(3번)
+    assert m.last_build['placed'] == len(IDS) and io.world == set(IDS)           # 놓은 수 · 완료 중복 없음
 
 
 def test_측정_거절이면_자동_모드는_사람_확인():
@@ -131,7 +138,10 @@ def test_판단_함수_목표_칸():
                 dict(row, yaw_deg=None), dict(row, top_z_m=None)):
         assert regrasp_decision(bad, 99.0, 101.0, part, sent, CFG, 0)[0] == 'HUMAN'
     assert regrasp_decision(row, 99.0, 101.0, part, None, CFG, 0)[0] == 'HUMAN'          # 원래 목표를 모름
-    assert regrasp_decision(row, 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'HUMAN'
+    assert regrasp_decision(row, 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'EXHAUSTED'              # 소진 — 이어 감
+    assert regrasp_decision(dict(row, dx_mm=1.0), 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'OK'
+    for bad in (dict(row, status='UNMEASURED', reason='FEW_POINTS', detail=''), dict(row, tilted=True), dict(row, measured_stamp=None)):
+        assert regrasp_decision(bad, 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'HUMAN'       # 측정 불가는 소진으로 치지 않음
     assert json.dumps(goal['place_pose'])
 
 

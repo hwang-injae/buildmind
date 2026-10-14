@@ -118,7 +118,7 @@ def placed_offset(center_m, part_id, ok, why, body):
 
 
 A4_TOL_MM = 3.0            # 축별 이보다 크면 다시 집어 놓는다(일정표 W144 · E-119 '문턱 3 mm 그대로')
-A4_MAX_TRIES = 2           # 같은 블록 다시 집기 최대 횟수(W144 '최대 2번' → 그래도 크면 사람)
+A4_MAX_TRIES = 2           # 같은 블록 다시 집기 최대 횟수(W144 '최대 2번') — 다 쓰고도 크면 남은 오차를 적고 다음 블록으로(10/14 19:47 사용자 확정)
 STAMP_ROUND_S = 0.0005     # 비전 #177 이 measured_stamp 를 소수 3자리(1 ms)로 반올림해 보낸다 — 비교에 그 반올림 폭만 둔다(새 문턱 아님)
 UP_NAMES = ('LENGTH', 'WIDTH', 'THICKNESS')
 
@@ -138,7 +138,8 @@ def regrasp_decision(row, t_req, t_resp, part, place_pose, cfg, tries):
     최신성: #177 은 요청 뒤에 받은 깊이만 쓰고(fresh_frames) measured_stamp 는 그중 마지막 장을 받은 시각(노드 시계)이다 —
           같은 로봇 PC 시계라는 가정 아래 t_req ≤ measured_stamp ≤ t_resp 일 때만 '이번 요청의 영상'으로 본다(밖이면 시계 · 영상을 믿지 않음).
           measured_stamp 는 1 ms 로 반올림돼 오므로 양 끝에 STAMP_ROUND_S(0.5 ms)만 둔다.
-    출력: ('OK', None) = 축별 3 mm 안 — 그대로 이어 감 / ('REGRASP', 목표) = PickPlace 목표 {part_id, supply_slot '', grasp(레시피), pick_pose(잰 중심 ·
+    출력: ('OK', None) = 축별 3 mm 안 — 그대로 이어 감 / ('EXHAUSTED', 글) = 3 mm 넘지만 이미 A4_MAX_TRIES 번 다시 놓음 — 남은 오차를 적고
+          이어 감(유효한 측정일 때만 — 측정 불가 · 기울어짐 등은 그 전에 HUMAN) / ('REGRASP', 목표) = PickPlace 목표 {part_id, supply_slot '', grasp(레시피), pick_pose(잰 중심 ·
           잰 yaw · 잰 윗면에서 자세 치수로 구한 중심 높이 — block_pose), place_pose(설계), open_width_m 0, obstacles []} /
           ('HUMAN', 까닭) = 사람 확인. 측정을 못 했거나 믿을 수 없으면(대상 · 자세 다름 · 기울어짐 · 좌표 · yaw · 윗면 없음 · 측정 시각이 요청 · 답 사이가 아님 ·
           원래 놓은 목표를 모름) 다시 집지 않는다. 놓는 목표는 원래 놓을 때 보낸 것 그대로(설계 중심으로 덮어쓰지 않음).
@@ -159,10 +160,10 @@ def regrasp_decision(row, t_req, t_resp, part, place_pose, cfg, tries):
         return 'HUMAN', '잰 yaw · 윗면 높이가 없습니다'
     if abs(row['dx_mm']) <= A4_TOL_MM and abs(row['dy_mm']) <= A4_TOL_MM:
         return 'OK', None
+    if tries >= A4_MAX_TRIES:                      # 다시 집기를 다 썼다 — 남은 오차만 적고 이어 감(기존 VERIFY 판정은 이미 통과, 사람 대기 없음)
+        return 'EXHAUSTED', f'다시 집기 {A4_MAX_TRIES}번을 다 써도 남은 오차 dx {row["dx_mm"]} · dy {row["dy_mm"]} mm — 그대로 다음 블록'
     if place_pose is None:
         return 'HUMAN', '이 블록을 놓을 때 보낸 목표를 몰라 다시 놓을 자리를 정할 수 없어요'
-    if tries >= A4_MAX_TRIES:
-        return 'HUMAN', f'{A4_MAX_TRIES}번 다시 놓아도 설계 자리에서 {A4_TOL_MM:g} mm 넘게 벗어나 있어요(dx {row["dx_mm"]} · dy {row["dy_mm"]} mm)'
     pick = block_pose(cfg, row['up'], row['yaw_deg'], row['x_m'], row['y_m'], row['top_z_m'])
     return 'REGRASP', {'part_id': part['part_id'], 'supply_slot': '', 'grasp': part['grasp'], 'pick_pose': pick,
                        'place_pose': copy.deepcopy(place_pose), 'open_width_m': 0.0, 'obstacles': []}
@@ -1271,6 +1272,10 @@ class TaskManager:
                 return True
             if verdict == 'OK':
                 return False
+            if verdict == 'EXHAUSTED':
+                self.logger.log('a4_regrasp', self.placed, f'보정 소진: {out}')
+                self._w144_event('regrasp_exhausted', self.placed, dx_mm=row['dx_mm'], dy_mm=row['dy_mm'], tries=self._a4_tries.get(self.placed, 0))
+                return False                       # 기존 흐름(W144 촬영 → SELECT)으로 다음 블록
             if verdict == 'HUMAN':
                 self.logger.log('a4_regrasp', self.placed, f'사람 확인: {out}')
                 self._hold(self.placed, f'{self.placed}: {out} — 손으로 바로 놓은 뒤 [계속]을 누르면 다시 확인합니다', then='verify')
