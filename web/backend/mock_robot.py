@@ -329,7 +329,8 @@ class MockRobot:
         if self.stop_pending and cmd in ('start', 'scan'):     # 진짜 시작 점검(_precheck)과 같은 거절
             return self._reject('STOPPED', '시간 초과 뒤 정지 상태 확인을 기다린다')
         if self.grasped and cmd in ('select_design', 'start', 'scan'):   # 진짜 시작 점검 — 설계 고르기 · 출발 · 스캔 모두
-            return self._reject('', '시작 점검 실패: 그리퍼가 블록을 쥐고 있어 시작할 수 없어요. 로봇 담당자에게 정리 · 복구를 요청해 주세요')
+            return self._reject('', '시작 점검 실패: 그리퍼가 블록을 쥐고 있어 시작할 수 없어요 → 조립 · 스캔 전에 블록을 빼야 해요 → '
+                                    '블록을 받칠 사람과 함께 [정지] → [그리퍼 열기] → [다시 시작]')
         if cmd == 'select_design':
             try:
                 self.design(design_id)
@@ -389,7 +390,8 @@ class MockRobot:
             # 진짜: 정지 노드는 잠기지 않았어도 받고 safety/state 를 다시 내며, 작업 관리자는 ERROR 에서 그 신호로 RECOVER(시간 초과 대기 중엔 무시)
             recover = was or (self.st['state'] == 'ERROR' and not self.stop_pending)
             if recover and self.assembling and self.grasped:     # 진짜 RECOVER — 쥐고 있으면 이어 가지 않고 ERROR(사람이 빼야 함)
-                self.set_state('ERROR', '블록을 쥐고 있거나 그리퍼 상태를 모른다. 사람이 확인한 뒤 [다시 시작]')
+                self.set_state('ERROR', '그리퍼가 블록을 쥐고 있어 이어 갈 수 없어요 → 쥔 블록을 먼저 빼야 해요 → '
+                                        '블록을 받칠 사람과 함께 [정지] → [그리퍼 열기] → [다시 시작]')
             elif recover and self.assembling and self.st['design_id'] and self.st['run_id']:
                 self._run(self._assemble, self.st['design_id'], self.st['run_id'], self.placed, True)   # 같은 run_id 로 이어서
             elif recover:
