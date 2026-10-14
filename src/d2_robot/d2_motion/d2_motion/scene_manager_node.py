@@ -33,8 +33,7 @@ class SceneManagerNode(Node):
     """MoveIt2 장면을 고치는 유일한 노드. 다른 노드는 apply_planning_scene 을 부르지 않는다.
 
     받는 것: /d2/motion/scene/attach (SceneAttach — 잡은 뒤 붙이기 / 놓은 뒤 떼기 = 놓인 블록으로),
-             /d2/task/progress (JSON progress/2.0 — 놓인 블록 blk_<part_id> 를 관측 자세로 맞춤),
-             /d2/task/state (JSON state/2 — DONE 이 되면 놓인 블록을 비움, 10/14 박진용)
+             /d2/task/progress (JSON progress/2.0 — 놓인 블록 blk_<part_id> 를 관측 자세로 맞춤)
     부르는 것: MoveIt2 apply_planning_scene, get_planning_scene
     파라미터 recipe: 레시피 파일 경로 (여럿이면 쉼표로, 세트 배치) — 요청에 쥔 상자 · 놓은 자리가 없을 때(옛 방식)만 여기서 계산한다(E-76).
                     비우면 share/d2_bringup/recipes/ 의 레시피(*_recipe.json)를 하나씩(세트 배치 없이) 모두 읽는다 — run_recipe 가 번호로 고를 때.
@@ -74,11 +73,7 @@ class SceneManagerNode(Node):
         self.get_cli = self.create_client(GetPlanningScene, 'get_planning_scene', callback_group=cb)
         self.create_service(SceneAttach, '/d2/motion/scene/attach', self._on_attach, callback_group=cb)
         self.create_subscription(String, '/d2/task/progress', self._on_progress, PROGRESS_QOS, callback_group=cb)
-        self.create_subscription(String, '/d2/task/state', self._on_state, PROGRESS_QOS, callback_group=cb)
         self.placed = set()               # 장면에 넣은 놓인 블록 id
-        self._done_run = None             # DONE 으로 장면을 비운 조립 run_id — 그 run 의 진행표가 늦게 와도 블록을 다시 넣지 않는다
-        # 진행표 · 상태는 다른 토픽이라 콜백이 겹쳐 돌 수 있다(Reentrant) — 비우기와 넣기가 섞이지 않게 차례로
-        self._progress_lock = threading.Lock()
 
     def apply(self, scene):
         """장면 변경(diff)을 move_group 에 보낸다. 반환: 적용됐으면 True."""
@@ -238,32 +233,14 @@ class SceneManagerNode(Node):
         진행표에 없는 놓인 블록(앞 설계 것)도 뺀다 — 진행표는 지금 설계의 블록 전부라, 설계가 바뀌면 앞 설계 블록이
         조립 영역에 남아 새 설계의 놓기 경로를 막는다(10/7 실기: 벤치 11개가 남아 003 PLAN_FAILED).
         빈 진행표(parts [] — 작업 관리자가 [조립] 출발 때 보냄)면 장면의 놓인 블록을 전부 지운다(_clear_placed).
-        DONE 으로 비운 조립(같은 run_id)의 진행표는 늦게 와도 받지 않는다 — 상태와 진행표는 다른 토픽이라 도착 순서가 보장되지 않는다.
+        조립 끝(DONE) · 정지 · 다시 시작 · [정리 끝]에는 장면을 그대로 둔다 — DONE 뒤 [스캔](E-102)은 다 지은 가구를 그대로 두고
+        촬영 자세로 움직여서 장면이 가구를 피해야 한다(10/14 PL — 통합 때 DONE 비우기는 뺌).
         """
-        data = json.loads(msg.data)
-        blocks = data.get('parts', [])
-        with self._progress_lock:
-            if not blocks:
-                self._clear_placed('빈 진행표')
-                return
-            if data.get('run_id') and data.get('run_id') == self._done_run:
-                return
-            self._apply_progress(blocks)
-
-    def _on_state(self, msg):
-        """작업 상태 state/2 가 DONE(조립 끝)이 되면 장면의 놓인 블록(blk_*)을 전부 지운다 — 화면에 '완료' 버튼이 없어
-        조립이 끝나면 사람이 치운다고 본다(10/14 박진용). 같은 run_id 의 DONE 이 다시 와도 한 번만. 정지 · 다시 시작은 장면을 그대로 둔다.
-        완성 뒤 [스캔] 이동은 실물 구조물이 장면에 없는 채로 계획된다. 바깥 영향: move_group 장면 변경.
-        """
-        data = json.loads(msg.data)
-        run_id = data.get('run_id')
-        if data.get('state') != 'DONE' or not run_id:
+        blocks = json.loads(msg.data).get('parts', [])
+        if not blocks:
+            self._clear_placed('빈 진행표')
             return
-        with self._progress_lock:
-            if run_id == self._done_run:
-                return
-            self._done_run = run_id
-            self._clear_placed(f'조립 끝({run_id})')
+        self._apply_progress(blocks)
 
     def _clear_placed(self, why):
         """move_group 장면에 실제로 있는 놓인 블록(blk_*)을 전부 지우고 목록(placed)을 비운다 — 내 목록이 아니라 장면을 보고 지운다:
