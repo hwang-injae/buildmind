@@ -4,40 +4,40 @@
 
 - 같은 폴더의 `COLCON_IGNORE` 때문에 `colcon build`는 이 폴더를 건너뛴다(ROS 패키지가 아님).
 - 레시피를 로봇 목표(TCP)로 바꾸는 일은 집기·놓기 노드(`src/d2_robot/d2_motion`)가 한다. 작업 폴더의 `Recipe_to_Robot`(두산 직접 실행)은 이 저장소에 넣지 않았다 — W104 합의(pose = 블록 중심)로 역할이 집기·놓기에 있고, 로봇을 움직이는 코드는 팀 정지 규칙(서기 궤적·`SignalHandlerOptions.NO`)을 따라야 하기 때문.
-- 형식은 **E-69**(작명 규칙 v3, `docs/작명규칙_설계_레시피_블록_v3_*.md`) · IRD 6장 `recipe/3.0` · `placements/3.0`을 따른다(10/8 — 옛 E-52 `cad_structure/1.0` · `cad_recipe/1.0` · `_structure.json`은 없앰). 용어: **레시피 = 구조**(`_recipe.json`), **조립 방법 = placements**(`_placements.csv`).
+- 형식은 **E-69**(작명 규칙 v3, `docs/작명규칙_설계_레시피_블록_v3_*.md`) · IRD 6장 `recipe/4.0` · `placements/4.0`을 따른다(10/14 E-111 C6 — 레시피 열쇠 `design_id`, 3.0 이하는 읽기 거절. 10/8 — 옛 E-52 `cad_structure/1.0` · `cad_recipe/1.0` · `_structure.json`은 없앰). 용어: **레시피 = 구조**(`_recipe.json`), **조립 방법 = placements**(`_placements.csv`).
 
 ```
-cads/<id>.dxf (블록 이름 · SEQ · STAGE · GRASP 속성 = 원본)
-      └── build(검증) ──▶ recipes/<ID>_recipe.json      레시피 = 무엇을 어디에 (recipe/3.0 — 자재 stocks + template.composition[역할].parts[그룹] 부품마다 자재 참조 · 중심 · 방향 · CAD 핸들)
+cads/<id>.dxf (부품 이름 · SEQ · STAGE · GRASP 속성 = 원본)
+      └── build(검증) ──▶ recipes/<ID>_recipe.json      레시피 = 무엇을 어디에 (recipe/4.0 — 자재 stocks + template.composition[역할].parts[그룹] 부품마다 자재 참조 · 중심 · 방향 · CAD 핸들)
                           recipes/<ID>_placements.csv  조립 방법 = 어떻게 (순서 · 단계 · 잡기 · 닫힘 축 · 받침 + 표시 칸, recipe_sha256 · schema)
                      │
                      └──▶ 작업 판단(d2_task) · 손목 블록 인식(d2_vision) · 집기·놓기 · 장면(d2_motion)이 읽음
-                          (웹 backend는 기본 설계 등록 때 변환기 ②로 parts/3.0 으로 바꿔 DB에 — E-59 · E-69)
+                          (웹 backend는 기본 설계 등록 때 변환기 ②로 parts/4.0 으로 바꿔 DB에 — E-59 · E-69)
 ```
 
 ## 폴더
 
 | 폴더·파일 | 내용 |
 |---|---|
-| `cads/` | **입력 = 원본.** DXF(도구가 읽는 조립 정의 — INSERT 블록 이름 = 블록 이름, INSERT 속성 SEQ · STAGE · GRASP = 순서 · 단계 · 잡기) + STEP(치수 참고용 — 도구는 읽지 않음, 제품 이름 = 블록 이름). 계획 파일은 없다(E-52) |
-| `recipes/` | **결과.** 모형마다 `<ID>_recipe.json` · `<ID>_placements.csv` 2개(E-69). 손으로 고치지 않는다 — CAD를 고치고 `build`를 다시. 단 사람 칸(`template`의 `name` · `description` · `tags`, 역할마다 `label` · `revision`)은 HMI에서 사람이 쓰는 값이라 도구가 만들지 않고, `build`가 저장된 파일의 사람 칸을 그대로 옮긴다(10/13 한세교). 블록 JSON(`parts/3.0`) 파일은 두지 않는다 — 웹이 등록 때 변환기 ②(`d2_task.recipe_to_parts`)로 바꾼다(10/8 E-59 · E-69) |
+| `cads/` | **입력 = 원본.** DXF(도구가 읽는 조립 정의 — INSERT 블록 이름 = 부품 이름 `part_name`, INSERT 속성 SEQ · STAGE · GRASP = 순서 · 단계 · 잡기) + STEP(치수 참고용 — 도구는 읽지 않음, 제품 이름 = 부품 이름). 계획 파일은 없다(E-52) |
+| `recipes/` | **결과.** 모형마다 `<ID>_recipe.json` · `<ID>_placements.csv` 2개(E-69). 손으로 고치지 않는다 — CAD를 고치고 `build`를 다시. 단 사람 칸(`template`의 `name` · `description` · `tags`, 역할마다 `label` · `revision`)은 HMI에서 사람이 쓰는 값이라 도구가 만들지 않고, `build`가 저장된 파일의 사람 칸을 그대로 옮긴다(10/13 한세교). 부품 JSON(`parts/4.0`) 파일은 두지 않는다 — 웹이 등록 때 변환기 ②(`d2_task.recipe_to_parts`)로 바꾼다(10/8 E-59 · E-69). 웹 PC backend가 켜질 때마다 이 파일에서 같은 ID로 다시 등록하고(덮어씀), 등록 때 검사(`check_design`)는 부르지 않는다 — 레시피 PR의 CI(`tests/test_recipe_manager.py`)가 확인한다(10/14 PL) |
 | `recipe_manager/` | 코드(아래 '코드 구조') |
 | `requirements.txt` | `ezdxf`, `numpy` |
 
 ## 쓰는 레시피 — 의자 2 · 책상 2 (10/6 한세교 결정, 004는 10/7 추가)
 
-| 가구 | 모델 ID (= `design_id`, 파일 이름) | CAD 파일 이름 | 블록 | 층 | 크기 (mm) | 파지 방법 | 블록 이름 | 상태 |
+| 가구 | 모델 ID (= `design_id`, 파일 이름) | CAD 파일 이름 | 블록 | 층 | 크기 (mm) | 파지 방법(CSV 셈, 10/14) | 부품 이름(`part_name`) | 상태 |
 |---|---|---|---|---|---|---|---|---|
-| 의자 | `001_CHAIR_BENCH_V000` (옛 LV1) | `001_chair_bench_v000` | 11 | 5 | 75 × 75 × 75 | FLAT_SHORT 9, FLAT_LONG 2 | `LEG_001_01~04` · `LEG_002_01~04` · `SEAT_001_01~03` | 1차 (10/6 실기 11/11) |
-| 의자 | `002_CHAIR_BACK_V000` (옛 LV2) | `002_chair_back_v000` | 16 | 10 | 75 × 75 × 150 | FLAT_SHORT 14, FLAT_LONG 2 | 벤치 + `BACK_001_01~05` | 10/6 실기 16/16 |
-| 책상 | `003_DESK_STAND_V000` (옛 LV4) | `003_desk_stand_v000` | 9 | 3 | 75 × 75 × 105 | STAND_SHORT 4, FLAT_SHORT 3, FLAT_LONG 2 | `LEG_001~004_01` · `BEAM_001~002_01` · `TOP_001_01~03` | 10/6 실기 9/9 — **세운 블록 공급 칸 필요** |
-| 책상 | `004_DESK_PEDESTAL_V000` (가운데 기둥, 工자) | `004_desk_pedestal_v000` | 11 | 7 | 75 × 75 × 105 | FLAT_SHORT 7, FLAT_LONG 4 | `BASE_001_01~03` · `COLUMN_001_01~05` · `TOP_001_01~03` | 받은 DXF(`A안_가운데기둥_책상_11블록.dxf`)를 001~003과 같은 꼴로 정리(10/7 — 원점 십자선 · 번호 글자 층 뺌, SEQ · STAGE · GRASP 속성, 핸들 그대로). STEP은 이 DXF에서 Open CASCADE 7.9로 변환. 검사 묶음 통과(최소 여유 12.5 mm), 실기 전 |
+| 의자 | `001_CHAIR_BENCH_V000` (옛 LV1) | `001_chair_bench_v000` | 11 | 5 | 75 × 75 × 75 | FLAT_SHORT 8, FLAT_LONG 3 | `LEG_001_01~04` · `LEG_002_01~04` · `SEAT_001_01~03` | 1차 (10/6 실기 11/11) |
+| 의자 | `002_CHAIR_BACK_V000` (옛 LV2) | `002_chair_back_v000` | 16 | 10 | 75 × 75 × 150 | FLAT_SHORT 13, FLAT_LONG 3 | 벤치 + `BACK_001_01~05` | 10/6 실기 16/16 |
+| 책상 | `003_DESK_STAND_V000` (옛 LV4) | `003_desk_stand_v000` | 9 | 3 | 75 × 75 × 105 | STAND_SHORT 4, FLAT_SHORT 2, FLAT_LONG 3 | `LEG_001~004_01` · `BEAM_001~002_01` · `TOP_001_01~03` | 10/6 실기 9/9 — 세운 다리는 받침에서 세워 집음(`STANDUP_HIGH`, 10/14 E-110 · W131 #156) |
+| 책상 | `004_DESK_PEDESTAL_V000` (가운데 기둥, 工자) | `004_desk_pedestal_v000` | 11 | 7 | 75 × 75 × 105 | FLAT_SHORT 5, FLAT_LONG 6 | `BASE_001_01~03` · `COLUMN_001_01~05` · `TOP_001_01~03` | 받은 DXF(`A안_가운데기둥_책상_11블록.dxf`)를 001~003과 같은 꼴로 정리(10/7 — 원점 십자선 · 번호 글자 층 뺌, SEQ · STAGE · GRASP 속성, 핸들 그대로). STEP은 이 DXF에서 Open CASCADE 7.9로 변환. 검사 묶음 통과(최소 여유 12.5 mm), 실기 전 |
 
 - 크기는 레시피 CAD 치수(명목 블록 75 × 25 × 15 mm)로 계산한 바깥 크기다. 실측 블록은 74.5 × 24.8 × 14.75 mm다. 조립 작업 영역은 30 × 30 × 30 cm다.
-- 세운 블록(STAND_*)은 같은 자세로 놓인 공급 칸에서 집어야 한다(재파지 없음). `003_DESK_STAND_V000`를 쓰기 전에 세운 블록 칸을 교시하고 집기·놓기를 실기 확인한다.
+- 세운 블록(STAND_*) · 옆세운 블록(EDGE_*)은 흩뿌린 공급에서 집어 받침에 눕힌 뒤 받침에서 세워(`STANDUP_HIGH` 세움 · `STANDUP_SIDE` 옆세움) 레시피 잡기로 다시 집는다(10/13 E-103 받침 경유 · 10/14 E-110). 옛 '같은 자세로 놓인 공급 칸에서 집기'는 공급 칸을 없애며(E-103) 끝났다.
 - 모델 ID = `<번호 3자리>_<가구>_<모양>`(의자 먼저, 책상 다음, 새로 만들면 다음 번호). CAD 파일 이름 = 모델 ID 소문자, 기본 설계 `design_id` = 모델 ID 그대로(대문자 — W121 · E-60), 레시피 파일 = `<모델ID>_recipe.json` · `_placements.csv`(이름 안 구분은 `_`, 점은 확장자 앞 하나만).
-- **블록 이름**(E-52 · E-69) = `<역할>[_<옵션>]_<부품 3자리>_<블록 2자리>`(역할 · 옵션은 영문 대문자 한 단어씩, 옵션 0~1개 — `build`가 검사) — 역할 `LEG` · `SEAT` · `BACK` · `BEAM` · `TOP` · `BASE` · `COLUMN`. 부품 번호는 같은 역할 부품을 앞(−y)→뒤, 왼(−x)→오른 순, 블록 번호는 부품 안에서 아래층부터 · 앞→뒤 · 왼→오른(`build`가 위치와 대조해 틀리면 거부). 노드 사이 `part_id` = `<모델ID>_<블록 이름>`(예 `001_CHAIR_BENCH_V000_LEG_001_01`) — 레시피 파일 안에는 블록 이름만 쓴다. 놓는 순서는 이름이 아니라 `sequence`.
-- **잡기는 짧은 쪽 우선**(10/7 한세교 — 긴 쪽 잡기에서 놓기 오차가 더 컸다): 놓는 순간 두 손가락이 들어가면 `*_SHORT`, 막히면 `*_LONG`(손가락 판단은 task 검사 묶음 `grasp_options`). CAD 4종의 GRASP 속성도 이 규칙으로 맞춰 12개 블록이 긴 쪽 → 짧은 쪽으로 바뀌었다(001 `SEAT_001_01`, 002 `SEAT_001_01` · `BACK_001_01~05`, 003 `BEAM_001_01` · `BEAM_002_01` · `TOP_001_01`, 004 `BASE_001_01` · `TOP_001_01`) — 10/6 실기는 긴 쪽이었으므로 **W118에서 실기 재확인**.
+- **부품 이름 `part_name`**(E-52 · E-69 → 10/13 E-94 용어 B) = `<역할>[_<옵션>]_<그룹 3자리>_<부품 2자리>`(역할 · 옵션은 영문 대문자 한 단어씩, 옵션 0~1개 — `build`가 검사) — 역할 `LEG` · `SEAT` · `BACK` · `BEAM` · `TOP` · `BASE` · `COLUMN`. 그룹 번호는 같은 역할 그룹을 앞(−y)→뒤, 왼(−x)→오른 순, 부품 번호는 그룹 안에서 아래층부터 · 앞→뒤 · 왼→오른(`build`가 위치와 대조해 틀리면 거부). 노드 사이 `part_id` = `<design_id>_<part_name>`(예 `001_CHAIR_BENCH_V000_LEG_001_01`) — 레시피 파일 안에는 부품 이름만 쓴다. 놓는 순서는 이름이 아니라 `sequence`. 이름 규칙 함수는 정본 `d2_task.recipe_document`(`part_name` · `part_id`)를 쓴다(10/14 E-111 C3).
+- **잡기: 연짝(같은 층에 나란히 붙은 줄 — `d2_task.row_grasp.row_orders`)은 모두 `FLAT_LONG`**(10/13 E-104 — CAD · AI · 스캔 설계 모두, `FLAT_LONG` 손가락이 들어가는 블록만), **그 밖은 짧은 쪽 우선**(10/7 한세교 — 긴 쪽 잡기에서 놓기 오차가 더 컸다): 놓는 순간 두 손가락이 들어가면 `*_SHORT`, 막히면 `*_LONG`(손가락 판단은 task 검사 묶음 `grasp_options`). CAD 4종의 GRASP 속성도 이 규칙으로 맞춰 12개 블록이 긴 쪽 → 짧은 쪽으로 바뀌었다(001 `SEAT_001_01`, 002 `SEAT_001_01` · `BACK_001_01~05`, 003 `BEAM_001_01` · `BEAM_002_01` · `TOP_001_01`, 004 `BASE_001_01` · `TOP_001_01`) — 10/6 실기는 긴 쪽이었으므로 **W118에서 실기 재확인**. (→ 10/13 E-104: 좌판 · 상판 · 바닥 줄은 다시 `FLAT_LONG` — 위 표의 CSV 셈)
 - 10/7 W139: CAD 4종 안 블록 이름을 `<모델ID>_B<순서>` → 역할 이름으로 바꿈(DXF INSERT · 블록 정의 · XDATA, STEP 제품 이름 — 핸들 · 좌표 · 속성 그대로). 블록 중심 · 회전 · 순서 · 받침 높이는 4종 모두 바꾸기 전과 같다(잡기만 위 12개가 바뀜).
 - 책장(LV3)·아치(LV5)·세운 의자(LV6)는 쓰지 않아 뺐다. 원본은 한세교 작업 폴더에 있다.
 
@@ -58,7 +58,7 @@ python3 src/recipe_manager/recipe_manager/main.py build src/recipe_manager/cads/
 
 ### build 검사 항목
 
-- 블록 이름이 규칙에 맞고 겹치지 않으며, 번호가 위치 순서와 맞다.
+- 부품 이름이 규칙에 맞고 겹치지 않으며, 번호가 위치 순서와 맞다.
 - 블록이 축에 평행한 직육면체이고, 서로 겹치지 않고, 책상 아래에 있지 않다.
 - 모든 블록에 SEQ · STAGE · GRASP가 있고(빠진 블록은 한 번에 알린다) 순서 · 단계 규칙을 지킨다.
 - 파지 방법의 상태(눕힘·옆세움·세움)가 CAD 배치와 같다 → 닫힘 축은 늘 수평.
@@ -73,22 +73,22 @@ python3 src/recipe_manager/recipe_manager/main.py build src/recipe_manager/cads/
 
 | 파일 | 클래스 | 하는 일 |
 |---|---|---|
-| `recipe_manager/cad_reader.py` | `CadReader` | DXF → 블록 목록 `[{'block', 'handle', 'vertices', 'hints'}]` |
+| `recipe_manager/cad_reader.py` | `CadReader` | DXF → 부품 목록 `[{'part_name', 'handle', 'vertices', 'hints'}]` |
 | `src/d2_task/d2_task/recipe_builder.py` | `RecipeBuilder` | 블록 → 레시피(`make_recipe` — 이름 · 번호 · 겹침 검사, 계산 칸 `count` · `parts`만) → 조립 방법(`make_placements` — 순서 · 잡기 · 받침 · `recipe_sha256`) · CSV 줄(`make_placement_rows`). ROS·파일 없음. 변환기 ①(W110, 10/10)과 한 벌로 쓰려고 d2_task 에 있다(E-58) — `main.py`가 소스 폴더를 import 경로에 넣어 쓴다 |
-| `src/d2_task/d2_task/parts_to_recipe.py` | `PartsToRecipe` | **변환기 ①**(W110, E-69): AI 설계도 `parts/3.0` → `recipe/3.0` + `placements/3.0`. AI 값(역할 · 부품 묶음 · 순서 · 단계 · 잡기)은 그대로, 번호 · 중심 · R · 받침 · 닫힘 축만 계산(`RecipeBuilder`). AI 실수 ① 역할 목록 ② 같은 부품 면 맞닿음 ③ 고른 잡기(`DesignChecker.grasp_options`)는 `DesignRejected(errors)` → 검사 묶음이 `CHECK_FAILED` |
+| `src/d2_task/d2_task/parts_to_recipe.py` | `PartsToRecipe` | **변환기 ①**(W110, E-69): AI 설계도 `parts/4.0` → `recipe/4.0` + `placements/4.0`. AI 값(역할 · 그룹 · 순서 · 단계 · 잡기)은 그대로, 번호 · 중심 · R · 받침 · 닫힘 축만 계산(`RecipeBuilder`). AI 실수 ① 역할 목록 ② 같은 그룹 면 맞닿음 ③ 고른 잡기(`DesignChecker.grasp_options`)는 `DesignRejected(errors)` → 검사 묶음이 `CHECK_FAILED` |
 | `src/d2_task/d2_task/roles.json` | — | 역할 · 옵션 목록(작명 규칙 v3 3장). HMI 프롬프트와 변환기 ①이 같이 읽는다. 새 이름은 뜻 한 줄과 함께 PR로 |
 | `recipe_manager/main.py` | `RecipeManager` | 명령(`build`) · 저장 파일의 사람 칸 옮기기(`copy_human_fields`) · 파일 저장(덮어쓰기 질문) |
 
-시험: 저장소 루트에서 `python3 -m pytest tests/test_recipe_manager.py -q` — 4종을 DXF에서 다시 만들어(저장 파일의 사람 칸을 옮겨) 저장 파일(`_recipe.json` · `_placements.csv`)과 같은지 + 사람 칸 옮기기 · 폴더엔 모형마다 2개 · 짝 해시 `recipe_sha256`(구조 객체의 키 정렬 · 공백 없는 JSON, 값 고정) · 이름 · 옵션 하나 · 번호 · 겹침 · 뜬 블록 · 순서 · 단계 · 잡기 상태 · 빠진 속성 거부 · 옛 잡기 이름 변환. 변환기 ① 시험은 W110 PR(10/10)과 함께 온다(지금 없음).
+시험: 저장소 루트에서 `python3 -m pytest tests/test_recipe_manager.py -q` — 4종을 DXF에서 다시 만들어(저장 파일의 사람 칸을 옮겨) 저장 파일(`_recipe.json` · `_placements.csv`)과 같은지 + 사람 칸 옮기기 · 폴더엔 모형마다 2개 · 짝 해시 `recipe_sha256`(구조 객체의 키 정렬 · 공백 없는 JSON, 값 고정) · 이름 · 옵션 하나 · 번호 · 겹침 · 뜬 블록 · 순서 · 단계 · 잡기 상태 · 빠진 속성 거부 · 옛 잡기 이름 변환. 변환기 ① 시험은 `src/d2_task/test/test_parts_to_recipe.py`(W110 #99) · `test_check_design_service.py`(#100)에 있다.
 
 ## 지켜야 할 약속
 
 - 단위 mm, 설계 원점 = 바닥 외곽 가운데, X 오른쪽·Y 뒤쪽·Z 위, 책상면 Z = 0.
-- **잡기 이름은 파지 방법 6가지** `<FLAT|EDGE|STAND>_<LONG|SHORT>`(IRD 2장, S-25). 다리 벽 `FLAT_SHORT`, 좌판 `FLAT_LONG`. 상태(눕힘·옆세움·세움)는 CAD 배치와 같아야 하고, 공급 블록도 놓을 때와 같은 상태여야 한다(재파지 없음).
-- CAD 레시피의 순서와 잡기는 사람이 CAD 속성에 적는다(잡기는 짧은 쪽 우선 규칙대로). AI 생성 · 스캔 설계는 **AI가** 역할 · 부품 · 순서 · 단계 · 잡기를 쓰고, 변환기 ①은 번호 · 중심 · R · 받침 · 닫힘 축만 채워 검사한다 — 빠지거나 틀리면 `CHECK_FAILED`로 재생성, 코드가 대신 정하지 않는다(10/8 E-69).
+- **잡기 이름은 파지 방법 6가지** `<FLAT|EDGE|STAND>_<LONG|SHORT>`(IRD 2장, S-25). 다리 벽 `FLAT_SHORT`, 좌판 `FLAT_LONG`. 상태(눕힘·옆세움·세움)는 CAD 배치와 같아야 한다. 공급 블록은 받침에서 놓을 상태로 맞춘 뒤 다시 집는다(받침 경유 — 10/13 E-103 · 세우기 10/14 E-110).
+- CAD 레시피의 순서와 잡기는 사람이 CAD 속성에 적는다(잡기는 위 규칙 — 연짝 `FLAT_LONG`, 그 밖 짧은 쪽 우선). AI 생성 · 스캔 설계는 **AI가** 역할 · 그룹 · 순서 · 단계 · 잡기를 쓰고, 변환기 ①은 번호 · 중심 · R · 받침 · 닫힘 축만 채워 검사한다 — 빠지거나 틀리면 `CHECK_FAILED`로 재생성, 코드가 대신 정하지 않는다(10/8 E-69). 예외: 연짝 잡기는 웹이 검사 전에 `FLAT_LONG`으로 맞춘다(10/13 E-104 ③).
 - 레시피에는 로봇·현장 값(TCP, 조립 원점, 그리퍼 명령값)을 넣지 않는다. 조립 원점은 `src/d2_robot/d2_bringup/config/robot.yaml`의 `assembly_origin` 하나만 쓴다.
-- CAD 핸들(`cad.handle`) · `source_cad.sha256`은 CAD 대응 검증용이다 — 사람 · 노드 사이에서는 블록 이름만 쓴다.
+- CAD 핸들(`cad.handle`) · `source_cad.sha256`은 CAD 대응 검증용이다 — 사람 · 노드 사이에서는 부품 이름(`part_name` · `part_id`)만 쓴다.
 
 ## 남은 일
 
-- 변환기 ① 본체(`parts_to_recipe` — `d2_task` 안 별도 파일, 10/8 E-58)와 task 노드 연결(`task_node.py`의 `DesignChecker(cfg)`에 `parts_to_recipe` 인자): 한세교 W110 — **끝(#99 본체 · #100 검사 묶음 연결, 10/8 밤)**: AI 칸(`role` · `part` · `stage` · `grasp`) 받기 · 공식 채움 없음 · 역할 목록 파일 `src/d2_task/d2_task/roles.json`(10/8 E-69).
+- 변환기 ① 본체(`parts_to_recipe` — `d2_task` 안 별도 파일, 10/8 E-58)와 task 노드 연결(`task_node.py`의 `DesignChecker(cfg)`에 `parts_to_recipe` 인자): 한세교 W110 — **끝(#99 본체 · #100 검사 묶음 연결, 10/8 밤)**: AI 칸(`role` · `group`(10/13 E-94 전 `part`) · `stage` · `grasp`) 받기 · 공식 채움 없음 · 역할 목록 파일 `src/d2_task/d2_task/roles.json`(10/8 E-69).
