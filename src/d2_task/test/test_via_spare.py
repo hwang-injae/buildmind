@@ -645,3 +645,15 @@ def test_조립_중이_아닐_때_정지가_풀려도_장면은_그대로_둔다
     m._recover()
     assert m.state == 'IDLE'
     assert io.progress == []
+
+
+def test_초기화_뒤_정리_끝이면_빈_진행표로_장면을_비운다():
+    """10/14 박진용: [초기화](STOPPED 의 cancel = 사람이 치웠다는 확인) → [정리 끝](다시 시작)이면 장면의 blk_* 를 비운다."""
+    m, io = make()
+    io.progress.clear()
+    m.state, m._assembling = 'STOPPED', True
+    assert m._cleanup_stopped() == (True, '')
+    m.state = 'RECOVER'
+    m._recover()
+    assert m.state == 'IDLE'
+    assert io.progress and io.progress[-1]['parts'] == [] and io.progress[-1]['schema'] == 'progress/2.0'
