@@ -151,6 +151,8 @@ export interface Design {
   parent_id: string | null;
   made_by: string;
   display_name?: string | null; // 사람이 붙인 표시 이름(W197 — 없으면 '벤치 V001'만)
+  ai_template?: string | null; // 스캔 설계 — AI 가 고른 바탕 Template('NONE' = 못 고름) · 그 까닭(글 · 음성은 비움)
+  ai_reason?: string | null;
   parts: { schema: string; parts: DesignPart[] };
   placements: { steps: { part_id: string; sequence: number }[] };
 }
