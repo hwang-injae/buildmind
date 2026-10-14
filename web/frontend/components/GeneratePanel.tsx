@@ -172,6 +172,8 @@ function JobView({ job, rules, dark, canPick, onPick }: { job: GenJob; rules: Ru
   return (
     <>
       <p className={`result ${job.state === 'failed' ? 'bad' : job.state === 'running' ? '' : 'ok'}`}>{status}</p>
+      {/* 기다리는 시간 안내(W108 — 민범진 #147 측정 31 ~ 165초, 10/14 시험 165 ~ 384초 → 전체 상한 5분 = design_gen GEN_LIMIT_S) */}
+      {job.state === 'running' && <p className="muted small">AI가 만드는 데 몇 분 걸려요(최대 5분) — 끝나면 검사를 통과한 후보만 보여 줘요</p>}
       {job.state !== 'running' && job.base_id && (
         <p className="muted small">
           바탕 {designName(job.base_id)}
