@@ -77,7 +77,7 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 | 로봇 PC 끊김 | `/ws` `{type: bridge_alive, alive}` | `d2/bridge/alive`(LWT `alive: false`) | — |
 | 버튼 기다림 시간 | `/ws` 붙을 때 `{type: timing, req_timeout_s}` — 화면은 이 값 + 3초까지 기다림(숫자를 화면 코드에 두지 않음, 10/9). 아직 못 받았으면 보내지 않고 안내 | — | — (`robot.yaml` `mqtt.req_timeout_s`) |
 | 웹 연결 신호 | backend가 1초마다 냄 | `d2/web/alive` | 다리 → `/d2/hmi/alive` |
-| 마이크 버튼 | `POST /api/voice/listen` → `{success, reason}` | `d2/hmi/voice/listen` `{schema: voice_listen/1, stamp}`(QoS 1, retained ✗ — 웹 PC 안, 다리 안 거침) → voice.py 듣기 대기 → 시동어 'hello rokey' → 녹음 · 받아 적기(E-105 — 시동어 뒤 '멈춰'는 정지 요청) | — |
+| 마이크 버튼 | `POST /api/voice/listen` → `{success, reason}` | `d2/hmi/voice/listen` `{schema: voice_listen/1, stamp}`(QoS 1, retained ✗ — 웹 PC 안, 다리 안 거침) → voice.py 듣기 대기 → 시동어 'hello rokey' → 녹음 · 받아 적기(E-105 — 시동어 뒤 '정지'는 정지 요청, '멈춰' · '스톱' · '그만'도 받음 — 10/14 PL 대표 낱말 '정지') | — |
 | 음성 문장 | `/ws` `{type: intent, …}` — 화면은 마이크를 누른 뒤 온 `request_design`만 받음. 생성은 `POST /api/designs/generate`에 `made_by: voice` · `confidence`(받아 적기 확신도, 없으면 null)를 실어 AI 가 오인식을 바로잡아 읽고, 그래도 모르면 `VOICE_UNCLEAR`('이렇게 들었어요: … — 다시 말씀해 주세요', 10/14 PL #171) | `d2/hmi/intent`(voice.py → 브로커, backend도 구독) | 다리 → `/d2/hmi/intent` |
 | 설계 규칙 숫자 | `GET /api/designs/rules` | — | — (backend가 `robot.yaml`을 읽음, 10/9 ①) |
 | 설계 생성 | `POST /api/designs/generate {text, design_id}`(design_id = 사람이 고른 설계 = 부모, 없으면 404 — 10/13 PL, 옛 `/template` 없앰) → `{job_id}`(한 번에 하나 — 409), 진행은 `/ws` `{type: gen, job_id, stage: reading · candidates · checked · retry · done · failed · saved, …}` · `GET /api/designs/generate/{job_id}` ✅(10/10 W108 — 화면은 W112) | 검사만 `d2/task/check_design/req` × 3 | `/d2/task/check_design` |
@@ -182,7 +182,7 @@ web/backend/
 │                     new_design_id · save_design(E-84 이름) · save_build(같은 run_id 한 번) + 로봇 get_design · save_build 답.
 │                     기본 설계는 도면에서 온 것이라 등록 때 check_design 을 부르지 않는다(로봇 PC 없이도 목록이 떠야 함)
 ├── prompts/          design_system.txt(설계 직접 작성 + 역할 목록 + 잡기 규칙 · 스캔 채우기 절). 후보 3개 JSON Schema 는 design_gen._candidates_format(코드)
-├── voice.py          VoiceListener — 호스트(마이크 버튼 → 시동어 → STT → d2/hmi/intent · '멈춰'면 d2/safety/stop/req, 점검 --check)
+├── voice.py          VoiceListener — 호스트(마이크 버튼 → 시동어 → STT → d2/hmi/intent · '정지'면 d2/safety/stop/req, 점검 --check)
 ├── mock_robot.py     가짜 로봇 PC(W126 ✅, MQTT 만): 다리 연결 신호 · 처음 상태 · 가짜 조립(블록마다 progress) · 정지 · 스캔(→ SCAN_REVIEW +
 │                     scan_result, 추정 2개) · check_design = 진짜 검사 묶음(DesignChecker + 변환기 ①). 실행 python3 web/backend/mock_robot.py --step 1.0
 ├── requirements.txt  fastapi · uvicorn[standard] · paho-mqtt · pyyaml (W108 openai · W088 psycopg 더함)
