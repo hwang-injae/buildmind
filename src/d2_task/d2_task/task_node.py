@@ -89,6 +89,8 @@ class TaskNode(Node):
         # 촬영기(저장소 tools/w144_capture/placement_recorder.py)가 없으면 끈다. 기본 끔 — 카메라 없는 가상 · 가짜 로봇에서 [조립]이 바로 ERROR 가 되지 않게,
         # A4 자료를 모을 실기 때만 -p w144_record:=true (10/13 19시 PL)
         self.declare_parameter('w144_record', False)
+        # W144 A4 놓은 블록 다시 재기(E-119 — find_blocks area assembly). 기본 끔: 켜면 VERIFY 통과 뒤 방금 놓은 블록만 재서 기록(다시 집기 없음)
+        self.declare_parameter('w144_measure', False)
         self.declare_parameter('w144_camera_prefix', '/camera/camera')   # 손목 카메라 토픽 접두(표준 RealSense — 다르면 이 값으로, INTEGRATION.md)
         cb = ReentrantCallbackGroup()
         cfg = load_robot_yaml()
@@ -243,11 +245,12 @@ class TaskNode(Node):
             waiting.append('/d2/vision/find_blocks')
         return waiting
 
-    def _scan_query(self, client, body, should_abort, default_reason='SCAN_FAILED', timeout_s=None):
+    def _scan_query(self, client, body, should_abort, default_reason='SCAN_FAILED', timeout_s=None, keep_failed_body=False):
         """JsonQuery(스캔 · find_blocks)를 timeout_s(없으면 service_s) 초 안에 처리한다. 단위 없음, 반환 (success, reason, 응답 dict).
 
         JSON 깨짐·객체 아님·유한하지 않은 수는 ERROR. 서버 없음은 ERROR, 정지·시간 초과는 공통 reason으로 돌려준다.
-        서버가 실패하면서 이유를 안 주면 default_reason.
+        서버가 실패하면서 이유를 안 주면 default_reason. 실패 응답 본문은 버린다 — keep_failed_body=True(W144 A4 측정만)면
+        읽을 수 있는 JSON 객체일 때 세 번째 값으로 넘긴다(못 읽으면 None, success · reason 은 그대로).
         """
         if not client.service_is_ready():
             return False, 'ERROR', None
@@ -257,7 +260,7 @@ class TaskNode(Node):
         if res is None:
             return False, why or 'ERROR', None
         if not res.success:
-            return False, res.reason or default_reason, None
+            return False, res.reason or default_reason, (self._failed_body(res.response_json) if keep_failed_body else None)
         try:
             response = json.loads(res.response_json)
             json.dumps(response, allow_nan=False)
@@ -266,6 +269,16 @@ class TaskNode(Node):
             return True, '', response
         except (ValueError, TypeError):
             return False, 'ERROR', None
+
+    @staticmethod
+    def _failed_body(text):
+        """실패 응답 JSON 글자 → dict(객체이고 유한한 수만일 때) 또는 None. 바깥 영향 없음."""
+        try:
+            body = json.loads(text or '')
+            json.dumps(body, allow_nan=False)
+        except (ValueError, TypeError, RecursionError):
+            return None
+        return body if isinstance(body, dict) else None
 
     def scan_capture(self, pose_id, run_id, should_abort):
         """촬영 자세 이름·run_id를 비전에 보내 점군을 모은다. 단위 없음, 제한 시간·실패는 _scan_query와 같다."""
@@ -279,6 +292,15 @@ class TaskNode(Node):
         """흩뿌린 공급 영역을 /d2/vision/find_blocks 로 조회한다(IRD 4.2). 반환: (성공, reason, 응답 dict). 제한 시간 · 실패는 _scan_query 와 같다.
         opts = 선택 칸(받침 경유 10/13): height_map=True(공급 영역 높이 지도) · area='spare'(받침 위 블록 하나를 깊이로)."""
         return self._scan_query(self.find_cli, dict(run_id=run_id, **opts), should_abort, default_reason='ERROR', timeout_s=self.find_blocks_s)
+
+    def w144_measure(self, run_id, part_id, should_abort):
+        """W144 A4(E-119): 조립 자리에서 방금 놓은 part_id 하나를 /d2/vision/find_blocks {area: assembly, part_id} 로 잰다.
+        반환: w144_measure 파라미터가 false 면 None(조회 안 함), 켜져 있으면 find_blocks 와 같은 (성공, reason, 응답 dict) —
+        단 실패여도 응답 본문을 넘긴다(거절 까닭 기록용, 다른 find_blocks 호출은 그대로 버림). 로봇은 안 움직인다."""
+        if not bool(self.get_parameter('w144_measure').value):
+            return None
+        return self._scan_query(self.find_cli, dict(run_id=run_id, area='assembly', part_id=part_id), should_abort,
+                                default_reason='ERROR', timeout_s=self.find_blocks_s, keep_failed_body=True)
 
     def scene_detach(self):
         """출발 때 장면에 남은 쥔 상자를 뗀다(SceneAttach part_id '' · attach false — one_pick 시작과 같음). 앞 실행이 쥔 채 멈췄으면 장면 속

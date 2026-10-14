@@ -61,6 +61,45 @@ SERVICE_LABEL = {'/d2/motion/move_to': '로봇 이동 · 집기 기능', '/d2/mo
                  '/d2/vision/scan_infer': '손목 카메라 기능', '/d2/vision/find_blocks': '손목 카메라 기능'}
 
 
+def placed_offset(center_m, ok, why, body):
+    """W144 A4(E-119): 놓은 블록 다시 재기(find_blocks area assembly) 답 → 기록용 dict. ROS 없음 · 바깥 영향 없음.
+
+    입력: 설계 중심 center_m([x, y, z] base_link m), io.w144_measure 의 (ok, reason, 응답 dict).
+    출력: 잰 블록이 정확히 1개이고 x_m · y_m 이 유한한 수면 {'status': 'MEASURED', 'x_m', 'y_m'(잰 값 m), 'target_x_m', 'target_y_m'(비교한 설계 중심 m),
+    'dx_mm', 'dy_mm'(잰 값 − 설계, mm), 'yaw_deg', 'up'(이상하면 None)} — 'x · y 기록 가능'일 뿐 다시 집기 판정이 아니다,
+    그 밖은 {'status': 'UNMEASURED', 'reason'} — 못 잰 것을 오차 0 으로 만들지 않는다(E-119 ②). 측정 시각 · 거절 이유 칸은 계약 확정 전이라 읽지 않는다.
+    """
+    if not ok or not isinstance(body, dict):
+        detail = body.get('detail') if isinstance(body, dict) else None      # 거절 까닭 글자 그대로(코드 목록은 계약 전이라 해석하지 않음)
+        return {'status': 'UNMEASURED', 'reason': why or 'ERROR', 'detail': detail if isinstance(detail, str) else None}
+    blocks = body.get('blocks')
+    if not isinstance(blocks, list) or len(blocks) != 1 or not isinstance(blocks[0], dict):
+        n = len(blocks) if isinstance(blocks, list) else None
+        return {'status': 'UNMEASURED', 'reason': 'NO_BLOCK' if n == 0 else 'BAD_RESPONSE', 'detail': f'blocks {n}개'}
+    b = blocks[0]
+    try:
+        if not all(isinstance(b.get(k), (int, float)) and not isinstance(b.get(k), bool) for k in ('x_m', 'y_m')):
+            raise TypeError('x_m · y_m 이 숫자가 아님')        # 글자 '0.4' 같은 것도 숫자로 읽지 않는다
+        x, y = float(b['x_m']), float(b['y_m'])
+        dx, dy = round((x - center_m[0]) * 1000.0, 2), round((y - center_m[1]) * 1000.0, 2)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return {'status': 'UNMEASURED', 'reason': 'BAD_RESPONSE', 'detail': 'x_m · y_m 없음 · 숫자 아님'}
+    if not (math.isfinite(dx) and math.isfinite(dy)):
+        return {'status': 'UNMEASURED', 'reason': 'BAD_RESPONSE', 'detail': 'x_m · y_m 이 유한하지 않음'}
+    yaw = b.get('yaw_deg')
+    try:
+        yaw = float(yaw) if isinstance(yaw, (int, float)) and not isinstance(yaw, bool) else None
+    except OverflowError:                          # 아주 큰 정수
+        yaw = None
+    if yaw is not None and not math.isfinite(yaw):
+        yaw = None
+    up = b.get('up') if b.get('up') in ('THICKNESS', 'WIDTH', 'LENGTH') else None
+    # top_z_m 은 기록하지 않는다 — 받침 재기 방식(spare_measure)의 top_z_m 은 잰 높이가 아니라 '아랫면 + 자세 치수' 계산값이다
+    # MEASURED = 'x · y 를 기록할 수 있음'일 뿐 — yaw · 측정 시각 · 대상 확인까지 갖춘 다시 집기 판정이 아니다
+    return {'status': 'MEASURED', 'x_m': round(x, 5), 'y_m': round(y, 5), 'target_x_m': round(float(center_m[0]), 5),
+            'target_y_m': round(float(center_m[1]), 5), 'dx_mm': dx, 'dy_mm': dy, 'yaw_deg': yaw, 'up': up}
+
+
 def wait_until(event, should_abort, poll_s=0.05, timeout_s=None):
     """event 가 켜질 때까지 기다리되, should_abort() 가 참이 되면 바로 빠져나온다. timeout_s 를 주면 그 시간(monotonic)이 지나도 빠져나온다.
 
@@ -1079,6 +1118,8 @@ class TaskManager:
             return self._offset_over(problems)
         if self.planner.progress[self.placed]['state'] == 'present':     # 오류가 없다는 것만으로는 부족하다 — 놓인 것이 확인된 블록의 시도 횟수만 지운다
             self._scatter_fail.pop(self.placed, None)
+        if self._measure_placed(part):
+            return None                            # 측정 시간 초과(정지 요청 → ERROR) 또는 측정 중 정지 — 다음 단계로 가지 않는다
         if getattr(self.io, 'w144_after_place', None) is not None:
             # W144: 최종 자리 확인이 끝난 블록을 observe 에서 촬영(one_pick final_placed — 설계 중심 · 방향). 촬영 실패면 io 가 세우고 ERROR
             aid = self._w144_open.pop(self.placed, None) if hasattr(self, '_w144_open') else None
@@ -1088,6 +1129,44 @@ class TaskManager:
                 return self._failed(why, 'W144 촬영')
         self._set('SELECT', None, '')
         return None
+
+    def _measure_placed(self, part):
+        """W144 A4(E-119): VERIFY 를 통과한 방금 놓은 블록만 find_blocks area assembly 로 다시 재서 기록한다(기본 꺼짐 — io 가 None 을 주면 아무것도 안 함).
+
+        기록만 한다 — 판정 · 다음 블록은 바꾸지 않고, 못 잰 것(실패 · 거절 · 이상 응답 · 예외)은 UNMEASURED 로 적고 이어 간다(다시 집기는 측정 검증 뒤 따로).
+        시간 초과는 다른 조회와 같이 기존 TIMEOUT 경로(정지 요청 → 정지 확인 대기 ERROR, 10/14 16:32 확정)로 보낸다.
+        조회 중 정지 · 다른 run 으로 바뀜이면 답을 버린다(새 run 에 옛 측정을 적지 않음).
+        반환: True = 측정이 흐름을 멈췄다(TIMEOUT · 정지) — 부르는 쪽은 다음 단계로 가지 않는다. False = 이어 가도 된다.
+        바깥 영향: find_blocks 조회 1번(로봇 안 움직임 — 손목은 이미 observe), CSV 'a4_measure' 한 줄 · W144 events 'placed_measured' 한 줄.
+        """
+        fn = getattr(self.io, 'w144_measure', None)
+        if fn is None:
+            return False
+        with self._lock:
+            token = (self._epoch, self._stop_count, self.run_id, self.placed)
+        try:
+            res = fn(self.run_id, self.placed, self.halted)
+        except Exception as e:                     # noqa: BLE001 — 기록용 측정이 조립을 멈추게 하지 않는다(못 잰 것으로 적음)
+            res = (False, 'ERROR', {'detail': f'{type(e).__name__}: {e}'})
+        if res is None:                            # 꺼짐(task_node w144_measure false)
+            return False
+        if not (isinstance(res, tuple) and len(res) == 3):
+            res = (False, 'ERROR', {'detail': f'io 답 꼴이 이상함: {type(res).__name__}'})
+        row = placed_offset(part['center'], *res)
+        try:
+            text = json.dumps(row, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError):
+            row, text = {'status': 'UNMEASURED', 'reason': 'BAD_RESPONSE', 'detail': None}, '{"status": "UNMEASURED", "reason": "BAD_RESPONSE"}'
+        with self._lock:                           # 확인과 기록을 한 잠금 안에서 — 확인 뒤 기록 전에 정지 · run 바뀜이 끼지 않게(commit 과 같은 방식)
+            if (self._epoch, self._stop_count, self.run_id, self.placed) != token or self.halted():
+                LOG.info('A4 측정 답을 버림(조회 중 정지 또는 run 바뀜): %s', token[3])
+                return True                        # 늦은 답은 버리고 다음 run_once 가 정지 절차를 밟는다
+            self.logger.log('a4_measure', self.placed, text)
+            self._w144_event('placed_measured', self.placed, **row)
+        if res[1] == 'TIMEOUT':                    # 정지 요청은 잠금 밖에서(기존 _failed 규칙)
+            self._failed('TIMEOUT', f'{self.placed} 놓은 블록 다시 재기')
+            return True
+        return False
 
     def _wait_supply(self):
         """WAIT_SUPPLY: 먼저 관측 자세로 1번 간다. 도착한 뒤에야 '공급 채워 주세요'(supply_empty)를 방송하고 [계속]을 받는다.
