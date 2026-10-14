@@ -75,7 +75,7 @@ def test_3mm_넘으면_잰_자리에서_집어_설계_자리에_놓고_다시_�
 
 
 def test_두번_다시_놓아도_벗어나면_남은_오차를_적고_다음_블록으로():
-    """10/14 19:47 사용자 확정: 2번 다시 놓은 뒤에도 3 mm 넘으면 사람 대기 없이 남은 dx · dy 와 소진을 적고 SELECT 로 이어 간다."""
+    """10/14 19:47 사용자 확정: 2번 다시 놓은 뒤에도 문턱(A4_TOL_MM) 이상이면 사람 대기 없이 남은 dx · dy 와 소진을 적고 SELECT 로 이어 간다."""
     io = RegraspIO([(5.0, 0.0)] * 3)
     m, rows = start(io)
     drive(m, 'DONE')
@@ -132,7 +132,8 @@ def test_판단_함수_목표_칸():
     v, goal = regrasp_decision(row, 99.0, 101.0, part, sent, CFG, 0)
     assert v == 'REGRASP' and goal['pick_pose'] == block_pose(CFG, 'THICKNESS', 2.0, 0.405, -0.05, 0.0150)
     assert goal['place_pose'] == sent and goal['grasp'] == 'FLAT_SHORT' and goal['open_width_m'] == 0.0      # 설계 중심으로 덮어쓰지 않음
-    assert regrasp_decision(dict(row, dx_mm=3.0), 99.0, 101.0, part, sent, CFG, 0) == ('OK', None)        # 3 mm 는 안(초과만 다시 집기)
+    assert regrasp_decision(dict(row, dx_mm=1.99), 99.0, 101.0, part, sent, CFG, 0) == ('OK', None)       # 2 mm 미만만 그대로
+    assert regrasp_decision(dict(row, dx_mm=2.0), 99.0, 101.0, part, sent, CFG, 0)[0] == 'REGRASP'      # 2 mm 는 다시 집기(10/14 20:04)
     for bad in (None, dict(row, status='UNMEASURED', reason='FEW_POINTS', detail=''), dict(row, measured_stamp=None),
                 dict(row, measured_stamp=98.0), dict(row, measured_stamp=102.0), dict(row, tilted=None), dict(row, up='WIDTH'),
                 dict(row, yaw_deg=None), dict(row, top_z_m=None)):
@@ -140,6 +141,7 @@ def test_판단_함수_목표_칸():
     assert regrasp_decision(row, 99.0, 101.0, part, None, CFG, 0)[0] == 'HUMAN'          # 원래 목표를 모름
     assert regrasp_decision(row, 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'EXHAUSTED'              # 소진 — 이어 감
     assert regrasp_decision(dict(row, dx_mm=1.0), 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'OK'
+    assert regrasp_decision(dict(row, dx_mm=2.0), 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'EXHAUSTED'
     for bad in (dict(row, status='UNMEASURED', reason='FEW_POINTS', detail=''), dict(row, tilted=True), dict(row, measured_stamp=None)):
         assert regrasp_decision(bad, 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'HUMAN'       # 측정 불가는 소진으로 치지 않음
     assert json.dumps(goal['place_pose'])
@@ -204,7 +206,7 @@ def test_받침_경유_모드_다시_놓는_자리는_처음_보낸_1mm_띄운_�
 def test_OK_판정_뒤라도_정지가_끼면_다음_단계로_가지_않는다(monkeypatch):
     import d2_task.task_manager as tm
     from test_task_manager import SAFE_STOP
-    io = RegraspIO([(0.5, 0.0)])                                  # 3 mm 안 — OK 판정
+    io = RegraspIO([(0.5, 0.0)])                                  # 2 mm 안 — OK 판정
     m, rows = start(io)
     real = tm.regrasp_decision
 
@@ -230,3 +232,32 @@ def test_measured_stamp_1ms_반올림은_받고_그보다_밖은_막는다():
         assert regrasp_decision(dict(row, measured_stamp=stamp), t_req, t_resp, part, sent, CFG, 0)[0] == 'REGRASP'
     for stamp in (t_req - STAMP_ROUND_S - 1e-4, t_resp + STAMP_ROUND_S + 1e-4):
         assert regrasp_decision(dict(row, measured_stamp=stamp), t_req, t_resp, part, sent, CFG, 0)[0] == 'HUMAN'
+
+
+def _judge(dx_m, dy_m):
+    """설계 중심 (0.4, −0.05) 에서 잰 중심이 (dx_m, dy_m) 만큼 비킨 응답 → placed_offset → regrasp_decision 결과."""
+    from d2_task.task_manager import placed_offset
+    part = {'part_id': 'P', 'center': (0.4, -0.05, 0.0074), 'quat': (0.0, 0.0, 0.0, 1.0), 'grasp': 'FLAT_SHORT'}
+    body = ok_body('P', [{'x_m': 0.4 + dx_m, 'y_m': -0.05 + dy_m, 'yaw_deg': 0.0, 'up': 'THICKNESS', 'tilted': False, 'top_z_m': 0.0148}],
+                   stamp=100.0)
+    row = placed_offset(part['center'], 'P', True, '', body)
+    return regrasp_decision(row, 99.0, 101.0, part, (part['center'], part['quat']), CFG, 0)[0], row
+
+
+def test_경계_2mm_이상이면_다시_집기_미만이면_그대로_반올림_전_값으로():
+    """10/14 20:04: |dx| ≥ 2 mm 또는 |dy| ≥ 2 mm 면 다시 집기. 두 축 모두 2 mm 미만일 때만 OK. 기록용 반올림(소수 2자리) 전 값으로 판단."""
+    from d2_task.task_manager import A4_TOL_MM
+    assert A4_TOL_MM == 2.0
+    cases = {}
+    for sign in (1, -1):
+        for v, want in ((0.00199, 'OK'), (0.002, 'REGRASP'), (0.00201, 'REGRASP')):
+            cases[(sign * v, 0.0)] = want                            # x 만
+            cases[(0.0, sign * v)] = want                            # y 만
+    cases.update({(0.00199, -0.00199): 'OK', (-0.00199, 0.002): 'REGRASP', (0.002, -0.002): 'REGRASP', (-0.00201, 0.00199): 'REGRASP',
+                  (-0.00199, -0.00199): 'OK'})
+    for (dx, dy), want in cases.items():
+        assert _judge(dx, dy)[0] == want, (dx, dy)
+    verdict, row = _judge(0.001996, 0.0)                         # 기록은 2.0 으로 보이지만 실제 1.996 mm
+    assert row['dx_mm'] == 2.0 and verdict == 'OK'
+    verdict, row = _judge(0.0, -0.001996)
+    assert row['dy_mm'] == -2.0 and verdict == 'OK'

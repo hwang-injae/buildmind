@@ -105,7 +105,8 @@ def placed_offset(center_m, part_id, ok, why, body):
     x, y = _finite(b.get('x_m')), _finite(b.get('y_m'))
     if x is None or y is None:
         return unmeasured('BAD_RESPONSE', 'x_m · y_m 없음 · 유한한 수 아님', stamp)
-    dx, dy = round((x - center_m[0]) * 1000.0, 2), round((y - center_m[1]) * 1000.0, 2)
+    dx_raw, dy_raw = (x - center_m[0]) * 1000.0, (y - center_m[1]) * 1000.0     # 판단용(반올림 전) — 기록용 dx_mm 은 소수 2자리
+    dx, dy = round(dx_raw, 2), round(dy_raw, 2)
     if not (math.isfinite(dx) and math.isfinite(dy)):
         return unmeasured('BAD_RESPONSE', 'x_m · y_m 이 유한하지 않음', stamp)
     up = b.get('up') if b.get('up') in ('THICKNESS', 'WIDTH', 'LENGTH') else None
@@ -113,11 +114,13 @@ def placed_offset(center_m, part_id, ok, why, body):
     # top_z_m = #177 윗면 점 가운데 값(잰 값). 다시 집기 높이는 이것과 자세 치수로 구한다(regrasp_decision) — 설계 z 로 대신하지 않음
     # MEASURED = 'x · y 를 기록할 수 있음'일 뿐 — 다시 집기 판정은 regrasp_decision(대상 · 자세 · 기울기 · 시각 · 횟수)이 따로 한다
     return {'status': 'MEASURED', 'x_m': round(x, 5), 'y_m': round(y, 5), 'target_x_m': round(float(center_m[0]), 5),
-            'target_y_m': round(float(center_m[1]), 5), 'dx_mm': dx, 'dy_mm': dy, 'yaw_deg': _finite(b.get('yaw_deg')), 'up': up,
+            'target_y_m': round(float(center_m[1]), 5), 'dx_mm': dx, 'dy_mm': dy, 'dx_raw_mm': dx_raw, 'dy_raw_mm': dy_raw,
+            'yaw_deg': _finite(b.get('yaw_deg')), 'up': up,
             'tilted': tilted, 'top_z_m': _finite(b.get('top_z_m')), 'measured_stamp': stamp}
 
 
-A4_TOL_MM = 3.0            # 축별 이보다 크면 다시 집어 놓는다(일정표 W144 · E-119 '문턱 3 mm 그대로')
+A4_TOL_MM = 2.0            # 축별 이 값 이상이면 다시 집어 놓는다(10/14 20:37 PL 승인 — 일정표 W144 · E-119 의 3 mm 초과를 바꿈)
+FLOAT_EPS_MM = 1e-9        # 부동소수 표현 오차만 흡수(예 0.402 − 0.4 = 1.9999999999996 mm) — 문턱을 바꾸는 값이 아님
 A4_MAX_TRIES = 2           # 같은 블록 다시 집기 최대 횟수(W144 '최대 2번') — 다 쓰고도 크면 남은 오차를 적고 다음 블록으로(10/14 19:47 사용자 확정)
 STAMP_ROUND_S = 0.0005     # 비전 #177 이 measured_stamp 를 소수 3자리(1 ms)로 반올림해 보낸다 — 비교에 그 반올림 폭만 둔다(새 문턱 아님)
 UP_NAMES = ('LENGTH', 'WIDTH', 'THICKNESS')
@@ -138,10 +141,10 @@ def regrasp_decision(row, t_req, t_resp, part, place_pose, cfg, tries):
     최신성: #177 은 요청 뒤에 받은 깊이만 쓰고(fresh_frames) measured_stamp 는 그중 마지막 장을 받은 시각(노드 시계)이다 —
           같은 로봇 PC 시계라는 가정 아래 t_req ≤ measured_stamp ≤ t_resp 일 때만 '이번 요청의 영상'으로 본다(밖이면 시계 · 영상을 믿지 않음).
           measured_stamp 는 1 ms 로 반올림돼 오므로 양 끝에 STAMP_ROUND_S(0.5 ms)만 둔다.
-    출력: ('OK', None) = 축별 3 mm 안 — 그대로 이어 감 / ('EXHAUSTED', 글) = 3 mm 넘지만 이미 A4_MAX_TRIES 번 다시 놓음 — 남은 오차를 적고
+    출력: ('OK', None) = 두 축 모두 A4_TOL_MM 미만(반올림 전 값) — 그대로 이어 감 / ('EXHAUSTED', 글) = A4_TOL_MM 이상이지만 이미 A4_MAX_TRIES 번 다시 놓음 — 남은 오차를 적고
           이어 감(유효한 측정일 때만 — 측정 불가 · 기울어짐 등은 그 전에 HUMAN) / ('REGRASP', 목표) = PickPlace 목표 {part_id, supply_slot '', grasp(레시피), pick_pose(잰 중심 ·
           잰 yaw · 잰 윗면에서 자세 치수로 구한 중심 높이 — block_pose), place_pose(설계), open_width_m 0, obstacles []} /
-          ('HUMAN', 까닭) = 사람 확인. 측정을 못 했거나 믿을 수 없으면(대상 · 자세 다름 · 기울어짐 · 좌표 · yaw · 윗면 없음 · 측정 시각이 요청 · 답 사이가 아님 ·
+          ('HUMAN', 까닭) = 사람 확인. 다시 집기 조건 = |dx| ≥ A4_TOL_MM 또는 |dy| ≥ A4_TOL_MM(반올림 전 값). 측정을 못 했거나 믿을 수 없으면(대상 · 자세 다름 · 기울어짐 · 좌표 · yaw · 윗면 없음 · 측정 시각이 요청 · 답 사이가 아님 ·
           원래 놓은 목표를 모름) 다시 집지 않는다. 놓는 목표는 원래 놓을 때 보낸 것 그대로(설계 중심으로 덮어쓰지 않음).
     """
     if row is None:
@@ -158,7 +161,8 @@ def regrasp_decision(row, t_req, t_resp, part, place_pose, cfg, tries):
         return 'HUMAN', f'놓은 블록 자세({row.get("up")})가 설계({want_up})와 다릅니다'
     if row.get('yaw_deg') is None or row.get('top_z_m') is None:
         return 'HUMAN', '잰 yaw · 윗면 높이가 없습니다'
-    if abs(row['dx_mm']) <= A4_TOL_MM and abs(row['dy_mm']) <= A4_TOL_MM:
+    dx_raw, dy_raw = row.get('dx_raw_mm', row['dx_mm']), row.get('dy_raw_mm', row['dy_mm'])   # 반올림 전 값으로 판단(1.996 이 2.00 으로 보여도 다시 집지 않음)
+    if abs(dx_raw) < A4_TOL_MM - FLOAT_EPS_MM and abs(dy_raw) < A4_TOL_MM - FLOAT_EPS_MM:
         return 'OK', None
     if tries >= A4_MAX_TRIES:                      # 다시 집기를 다 썼다 — 남은 오차만 적고 이어 감(기존 VERIFY 판정은 이미 통과, 사람 대기 없음)
         return 'EXHAUSTED', f'다시 집기 {A4_MAX_TRIES}번을 다 써도 남은 오차 dx {row["dx_mm"]} · dy {row["dy_mm"]} mm — 그대로 다음 블록'
