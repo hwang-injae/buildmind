@@ -142,9 +142,8 @@ class MockRobot:
 
     def local_design(self, design_id):
         """레시피 두 파일 → (doc, parts/4.0) — 기본 설계만 있다. 없으면 OSError · ValueError."""
-        family = 'chair' if 'CHAIR' in design_id.upper() else 'desk'
         doc = RecipeDocument.load(RECIPES, design_id)
-        return doc, RecipeToParts(design_id, family, self.block_mm).convert(doc.recipe, doc.placements)
+        return doc, RecipeToParts(design_id, self.block_mm).convert(doc.recipe, doc.placements)
 
     # ---------- 방송 ----------
     def pub(self, topic, body, qos=1):
