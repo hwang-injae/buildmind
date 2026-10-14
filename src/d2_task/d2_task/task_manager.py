@@ -54,6 +54,10 @@ RUN_STATES = ('CHECK', 'SELECT', 'PICK_PLACE', 'WAIT_SUPPLY', 'WAIT_HMI', 'VERIF
 # 로봇이 서야 하는 결과 — 정지 노드가 세웠다(STOPPED · CANCELED). 그리퍼 응답 없음(GRIPPER_NO_RESPONSE) · 피드백 없음(NO_FEEDBACK)은
 # 정지 노드가 잠그지 않으니 신호를 기다리지 않고 작업 관리자가 ERROR 로 멈춘다(E-74, 10/9 PL)
 STOP_REASONS = ('STOPPED', 'CANCELED')
+# 시작 점검 화면 글의 노드 이름표 — 서비스 경로는 로그에만 남기고 화면에는 사람이 알아볼 이름으로(10/14 점검 ③ 안내 정리)
+SERVICE_LABEL = {'/d2/motion/move_to': '로봇 이동 · 집기 기능', '/d2/motion/pick_place': '로봇 이동 · 집기 기능',
+                 '/d2/vision/check_progress': '손목 카메라 기능', '/d2/vision/scan_capture': '손목 카메라 기능',
+                 '/d2/vision/scan_infer': '손목 카메라 기능', '/d2/vision/find_blocks': '손목 카메라 기능'}
 
 
 def wait_until(event, should_abort, poll_s=0.05, timeout_s=None):
@@ -383,7 +387,7 @@ class TaskManager:
                 return self._begin_scan()
             if cmd == 'cancel':
                 if not self._cancel_to_idle():
-                    return self._reject(self._busy_reason(), '준비·오류·스캔 검토 상태에서만 취소할 수 있다')
+                    return self._reject(self._busy_reason(), '지금은 [취소]할 수 없어요(준비 · 오류 · 스캔 검토에서만). 움직이는 중이면 [정지]를 누르세요')
                 return True, ''
             return self._reject('', f'모르는 명령: {cmd}')
 
@@ -1041,11 +1045,13 @@ class TaskManager:
         """
         # DONE 도 받는다(10/13 PL): 끝난 조립 기록은 이미 닫혀 있고 last_build · pending_builds 는 그대로 두며 새 run_id 로 시작한다
         if self.state not in ('IDLE', 'SCAN_REVIEW', 'DONE') or self._shutdown:
-            return self._reject(self._busy_reason(), '지금은 스캔을 시작할 수 없다')
+            return self._reject(self._busy_reason(), '지금은 스캔을 시작할 수 없어요(대기 · 조립 끝 · 스캔 검토에서만). 하던 일이 끝난 뒤 누르세요')
         poses = self.cfg.get('scan', {}).get('poses')
-        if not isinstance(poses, list) or not poses or any(
-                not isinstance(p, str) or f'{p}_pose' not in self.cfg for p in poses) or len(set(poses)) != len(poses):
-            return self._reject('', 'scan.poses가 없거나 촬영 자세 설정과 맞지 않는다')     # 맞는 코드 없는 거절 = 빈 값 + 글(E-111 A3)
+        bad_poses = not isinstance(poses, list) or not poses or any(
+            not isinstance(p, str) or f'{p}_pose' not in self.cfg for p in poses) or len(set(poses)) != len(poses)
+        if bad_poses:
+            LOG.warning('스캔 시작 거절: robot.yaml scan.poses %r 와 각 <이름>_pose 가 없거나 맞지 않는다', poses)   # 설정 키는 로그(담당자용)
+            return self._reject('', '스캔 촬영 자세 설정이 없거나 맞지 않아 시작할 수 없어요. 로봇 담당에게 설정 확인을 부탁하세요')     # 맞는 코드 없는 거절 = 빈 값 + 글(E-111 A3)
         ok, code, text = self._precheck(scan=True)
         if not ok:
             return self._reject(code, f'스캔 시작 점검 실패: {text}')
@@ -1375,9 +1381,9 @@ class TaskManager:
                 if design_id is None:
                     return self._start()
             if mode == 'select' and self.state not in ('IDLE', 'READY', 'DONE', 'SCAN_REVIEW'):
-                return self._reject(self._busy_reason(), '지금은 설계를 바꿀 수 없다')
+                return self._reject(self._busy_reason(), '작업 중에는 설계를 바꿀 수 없어요. 작업이 끝난 뒤 선택해 주세요')
             if not design_id:
-                return self._reject('', f'설계 파일을 못 읽었다: {design_id!r}')
+                return self._reject('', f'설계 파일을 못 읽었다: {design_id!r} — 설계를 고르지 않았어요. 화면 설계 목록에서 고른 뒤 다시 누르세요')
             self._lookup_token += 1
             token, epoch, was_halted = self._lookup_token, self._epoch, self.halted()    # 이미 정지 중이면 시작 점검이 이유를 알린다
         try:
@@ -1387,17 +1393,17 @@ class TaskManager:
             LOG.warning('설계 조회 중 예외: %r', e)
         with self._lock:
             if self._shutdown or (self.halted() and not was_halted):      # 조회하는 동안 정지 · 종료가 왔다
-                return self._reject('STOPPED', '정지 · 종료 중이라 설계 조회 결과를 버렸다')
+                return self._reject('STOPPED', '정지 또는 종료로 설계 조회를 중단했어요. 복구가 끝난 뒤 다시 선택해 주세요')
             if token != self._lookup_token or epoch != self._epoch:
-                return self._reject('BUSY', '조회하는 동안 다른 요청이나 상태 변화가 있어 이 조회 결과를 버렸다')
+                return self._reject('BUSY', '조회하는 동안 다른 요청이나 상태 변화가 있어 이 조회 결과를 버렸어요. 다시 눌러 주세요')
             if self._clock() - received > self.command_s:      # 늦은 출발 · 선택은 허용하지 않는다(웹은 이미 시간 초과로 보였다)
-                return self._reject('TIMEOUT', f'명령을 받은 뒤 {self.command_s} 초 안에 확정하지 못해 실행하지 않았다')
+                return self._reject('TIMEOUT', f'명령을 받은 뒤 {self.command_s} 초 안에 끝내지 못해 실행하지 않았어요. 웹 PC와 로봇 PC 연결(다리 · 브로커)을 확인하고 다시 누르세요')
             if not ok:
                 code = why if why in ('TIMEOUT', 'STOPPED', 'BUSY') else ''      # E-111 A3: 이 셋만 코드, 나머지(ERROR · 서버 이유)는 빈 값 + 글
-                return self._reject(code, f'설계를 못 가져왔다: {design_id!r} ({why or "이유 없음"})')
+                return self._reject(code, f'설계를 못 가져왔다: {design_id!r} ({why or "이유 없음"}) — 설계 목록에 이 설계가 있는지 확인하고 다시 골라 주세요. 계속 안 되면 설계 저장소(웹) 담당에게 알려 주세요')
             planner, problem = self._planner_from(design, design_id)
             if problem:
-                return self._reject('', problem)
+                return self._reject('', f'이 설계 레시피로는 조립 계획을 만들 수 없어요({problem}). 다른 설계를 고르세요')
             if mode == 'select':
                 return self._apply_select(planner, design_id)
             if self.state == 'IDLE':
@@ -1433,7 +1439,7 @@ class TaskManager:
     def _apply_select(self, planner, design_id):
         """(잠금 안) 조회한 설계로 시작 점검을 통과하면 READY. IDLE · READY · DONE 에서만."""
         if self.state not in ('IDLE', 'READY', 'DONE', 'SCAN_REVIEW'):
-            return self._reject(self._busy_reason(), '지금은 설계를 바꿀 수 없다')
+            return self._reject(self._busy_reason(), '작업 중에는 설계를 바꿀 수 없어요. 작업이 끝난 뒤 선택해 주세요')
         ok, code, text = self._precheck()
         if not ok:
             return self._reject(code, f'시작 점검 실패: {text}')
@@ -1464,8 +1470,8 @@ class TaskManager:
             return True, ''
         if self.state != 'READY':
             if self.state == 'IDLE':
-                return self._reject('', '설계를 먼저 고르세요')
-            return self._reject(self._busy_reason(), '지금은 출발할 수 없다')
+                return self._reject('', '설계를 먼저 고르세요 — 화면 설계 목록에서 고른 뒤 [조립]')
+            return self._reject(self._busy_reason(), '지금은 출발할 수 없어요(설계를 고른 준비 상태에서만). 하던 일이 끝난 뒤 누르세요')
         ok, code, text = self._precheck()
         if not ok:
             return self._reject(code, f'시작 점검 실패: {text}')
@@ -1488,25 +1494,31 @@ class TaskManager:
     def _precheck(self, scan=False):
         """시작 점검(M-06) 중 숫자 없는 항목. 반환: (통과, 거절 reason, 이유 글자).
 
-        ① 조립 또는 scan=True의 촬영·추론 서버가 떠 있다 ② 정지 노드 신호를 받았고 잠기지 않았다 ③ 그리퍼가 비었다.
+        ① 조립 또는 scan=True의 촬영·추론 서버가 떠 있다(정지 서비스가 없으면 사람이 할 일 중심 글, 경로는 로그) ② 정지 노드 신호를 받았고 잠기지 않았다 ③ 그리퍼가 비었다.
         신호가 몇 초 안에 왔는지(신선도)는 숫자가 필요해서 보지 않는다. 사람이 영역 밖인지는 누르는 사람이 확인한다.
         """
         missing = self.io.services_ready(scan=True) if scan else self.io.services_ready()
         if missing:
-            return False, '', f'서버가 안 떠 있다: {", ".join(missing)}'
+            LOG.warning('시작 점검: 안 떠 있는 서버 %s', ', '.join(missing))     # 기술 경로는 로그에만(화면 글은 사람이 할 일 중심)
+            if '/d2/safety/stop' in missing:
+                # 10/14 점검 ③: 정지 서비스 경로만 보이면 무엇을 해야 할지 모른다 — 팀 실행 절차(복구 절차 3-2, robot_nodes.launch.py)로 안내
+                LOG.warning('시작 점검: 정지 서비스 /d2/safety/stop 없음 — 로봇 PC 로봇 노드 실행(ros2 launch d2_bringup robot_nodes.launch.py) 확인(복구 절차 3-2)')
+                return False, '', '로봇을 멈추는 기능(정지 노드)이 준비되지 않아 시작할 수 없어요. 로봇 PC의 로봇 노드가 켜져 있는지 확인한 뒤 다시 누르세요'
+            names = sorted({SERVICE_LABEL.get(n, n) for n in missing})
+            return False, '', f'서버가 안 떠 있다: {" · ".join(names)} 준비 안 됨 — 로봇 PC에서 해당 기능이 켜져 있는지 확인한 뒤 다시 누르세요'
         if self._timeout_pending:
-            return False, 'STOPPED', '시간 초과 뒤 정지 상태 확인을 기다린다'
+            return False, 'STOPPED', '시간 초과로 로봇을 멈추라고 요청했고, 정지 확인을 기다리는 중이라 시작할 수 없어요. 확인 후 화면의 복구 안내를 따라 주세요'
         if not self._hmi_fresh():
-            return False, '', '웹 연결 신호를 못 받았어요. 연결을 확인하세요'      # IRD 7장 BUSY 는 '기다렸다 다시'라 웹이 자동 재시도한다 → 맞는 코드가 없어 비움(E-62)
+            return False, '', '웹 연결 신호를 못 받았어요. 웹 PC의 웹 · 브로커와 로봇 PC의 다리(bridge)가 켜져 있는지 확인한 뒤 다시 누르세요'      # IRD 7장 BUSY 는 '기다렸다 다시'라 웹이 자동 재시도한다 → 맞는 코드가 없어 비움(E-62)
         st = self.safety
         if st is None:
-            return False, '', '정지 노드 신호를 아직 못 받았다'
+            return False, '', '정지 노드 신호를 아직 못 받았어요. 로봇 PC의 로봇 노드가 켜져 있는지 확인한 뒤 다시 누르세요'
         if st.get('stopped') or st.get('locked'):
-            return False, 'STOPPED', '정지 상태다. [다시 시작]을 먼저 누르세요'
+            return False, 'STOPPED', '정지 상태예요. 원인을 없앤 뒤 [다시 시작]을 먼저 누르세요'
         if self.gripper is None:
-            return False, '', '그리퍼 신호를 아직 못 받았다'
+            return False, '', '그리퍼 신호를 아직 못 받았어요. 로봇 PC의 로봇 노드(그리퍼)와 그리퍼 전원 · 연결을 확인한 뒤 다시 누르세요'
         if self.gripper.get('grasped'):
-            return False, '', '그리퍼가 블록을 쥐고 있다'
+            return False, '', '그리퍼가 블록을 쥐고 있어 시작할 수 없어요. 로봇 담당자에게 정리 · 복구를 요청해 주세요'
         return True, '', ''
 
     # ---------- 상태 바꾸기 · 방송 ----------

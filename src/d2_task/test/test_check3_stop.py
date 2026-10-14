@@ -156,12 +156,23 @@ def test_스캔_시작_점검은_정지_서비스가_없으면_막는다():
     assert _services_ready_node(True).services_ready(scan=True) == []
 
 
-def test_정지_서비스가_없으면_스캔을_시작하지_않는다():
+@pytest.mark.parametrize('cmd', ['scan', 'start'])
+def test_정지_서비스가_없으면_스캔_출발을_거절하고_할_일을_글로_알린다(cmd, monkeypatch):
     m, io = make()
+    if cmd == 'start':
+        assert m.command('select_design', 'bench') == (True, '')
     io.missing = ['/d2/safety/stop']
     io.services_ready = lambda scan=False: list(io.missing)
-    ok, reason = m.command('scan')
-    assert ok is False and m.state == 'IDLE'
+    import d2_task.task_manager as tm
+    logged = []
+    monkeypatch.setattr(tm, 'LOG', SimpleNamespace(warning=lambda msg, *a: logged.append(msg % a if a else msg),
+                                                    info=lambda *a, **k: None, exception=lambda *a, **k: None))
+    ok, reason = m.command(cmd)
+    text = io.states[-1]['message']
+    assert ok is False and reason == '' and m.state in ('IDLE', 'READY')
+    assert '로봇을 멈추는 기능(정지 노드)이 준비되지 않아' in text and '로봇 노드' in text
+    assert '/d2/safety/stop' not in text and 'ros2 launch' not in text      # 경로 · 실행 명령은 화면 글에 안 넣는다
+    assert any('robot_nodes.launch.py' in t and '/d2/safety/stop' in t for t in logged)       # 담당자용은 로그로
 
 
 # ---------- E-111 A3: 맞는 코드 없는 거절 = 빈 값 + 글 ----------
@@ -174,7 +185,7 @@ def test_scan_poses_설정_오류는_빈_reason():
     m.on_safety(SAFE_OK)
     m.on_gripper({'grasped': False})
     assert m.command('scan') == (False, '')
-    assert 'scan.poses' in io.states[-1]['message'] and m.state == 'IDLE'
+    assert '스캔 촬영 자세 설정' in io.states[-1]['message'] and m.state == 'IDLE'
 
 
 @pytest.mark.parametrize('why,expected', [('ERROR', ''), ('NOT_FOUND', ''), ('', ''), ('TIMEOUT', 'TIMEOUT'),
