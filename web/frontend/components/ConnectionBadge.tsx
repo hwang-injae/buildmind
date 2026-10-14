@@ -1,6 +1,6 @@
 'use client';
 // 연결 표시 — 화면 ↔ backend(/ws) · backend ↔ 브로커 · 로봇 PC 다리(연결 신호 3초, IRD 10.3).
-// 점 3개는 위 띠에, 끊김 배너는 그 아래 크게(로봇 PC 가 끊기면 [출발] · [스캔] 막음 — 정지는 Ctrl+C · 펜던트 — 키로 정지를 보내는 프로그램은 없음, 10/14 PL).
+// 점 3개는 위 띠에, 끊김 배너는 그 아래 크게(로봇 PC 가 끊기면 [조립] · [스캔] 막음 — 정지는 Ctrl+C · 펜던트 — 키로 정지를 보내는 프로그램은 없음, 10/14 PL).
 import type { Robot } from '@/lib/ws';
 
 function Dot({ ok, label }: { ok: boolean; label: string }) {
