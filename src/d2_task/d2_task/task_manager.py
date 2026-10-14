@@ -436,7 +436,7 @@ class TaskManager:
         self.planner, self.design_id, self.part_id, self.goal = None, None, None, None
         self._assembling = False
         self._clear_run()
-        self._publish('stopped', '정리를 확인했어요. [다시 시작]을 누르면 대기로 돌아갑니다')
+        self._publish('stopped', '정리를 확인했어요. 다 치웠으면 [정리 끝]을 누르세요 — 대기로 돌아갑니다')
         return True, ''
 
     def _gripper_open(self):
