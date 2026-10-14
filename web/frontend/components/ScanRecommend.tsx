@@ -9,6 +9,7 @@ import * as api from '@/lib/api';
 import { designName, rejectText } from '@/lib/names';
 import type { CmdResult, ScanMatch } from '@/lib/types';
 import { gripperOpening, holdingBlock, type Robot } from '@/lib/ws';
+import CountUp from './CountUp';
 
 const GOOD_RATE = 0.9; // V-48 기준(일치율 ≥ 90 %) — 이보다 낮으면 '많이 달라요'(새 모양인지 스캔 실수인지 사람이 3D 로 확인 → [그대로 저장] · [다시 스캔], 10/14 PL)
 
@@ -44,7 +45,7 @@ export default function ScanRecommend({ robot, onView, onLog }: Props) {
   const best = list[0];
   const st = robot.state;
   const canSend = !sending && !robot.safety?.locked && !gripperOpening(robot) && !holdingBlock(robot) && robot.bridge && st?.state === 'SCAN_REVIEW';
-  const line = (m: ScanMatch) => `부품 ${m.matched}/${Math.max(m.scan_count, m.part_count)} 일치 (${Math.round(m.rate * 100)} %)`;
+  const line = (m: ScanMatch) => <>부품 {m.matched}/{Math.max(m.scan_count, m.part_count)} 일치 (<CountUp value={Math.round(m.rate * 100)} /> %)</>;
   // 추천 설계와 스캔이 다른 블록 수 — 하나라도 다르면 [조립]은 스캔한 구조가 아니라 추천 설계를 쌓는다(10/14 PL · 민범진 제안 1)
   const differ = Math.max(best.scan_count, best.part_count) - best.matched;
   // 안내 한 줄(막지 않음). 많이 다르면 새 모양으로 단정하지 않는다 — 스캔 실수일 수 있어 [다시 스캔]도 같이 알린다

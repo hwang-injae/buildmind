@@ -11,6 +11,7 @@ import { NO_WEB, WAKE_WORD, checkReasonKo, designName } from '@/lib/names';
 import type { GenCandidate, GenJob, Intent, Rules } from '@/lib/types';
 import type { Robot } from '@/lib/ws';
 import { roleItems } from './DesignView';
+import CountUp from './CountUp';
 import Preview3D from './Preview3D';
 
 const POLL_MS = 1000; // /ws 알림이 끊겼을 때를 위한 다시 받기 간격(만드는 동안만)
@@ -160,9 +161,9 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
 function JobView({ job, rules, dark, canPick, onPick }: { job: GenJob; rules: Rules | null; dark: boolean; canPick: boolean; onPick: (i: number) => void }) {
   const again = (job.attempt ?? 1) > 1 ? ` (더 만드는 중 ${job.attempt}/${MAX_TRIES})` : '';
   const code = job.code ?? '';
-  let status: string;
+  let status: React.ReactNode;
   if (job.state === 'running') {
-    if (job.count) status = `후보 검사 중… 통과 ${job.passed ?? 0}/${MAX_CANDS}` + again;
+    if (job.count) status = <>후보 검사 중… 통과 <CountUp value={job.passed ?? 0} />/{MAX_CANDS}{again}</>;
     else status = (job.reading?.length ? '참고 설계를 읽고 ' : '') + '후보 만드는 중…' + again;
   } else if (job.state === 'ready') {
     const n = job.candidates.length;

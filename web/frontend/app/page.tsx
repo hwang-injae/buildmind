@@ -1,8 +1,8 @@
 'use client';
-// 메인 페이지 — 위 띠(제목 · 연결 점 · 진행도 가운데 · 다크 모드) · 끊김 배너 · 왼쪽(로봇 패널 · 손목 카메라) ·
-// 오른쪽(설계 3D — 목록에서 고르고 [조립] · 그 아래 고른 설계를 바탕으로 AI 설계 만들기, 10/13 PL) · 스캔 칸(스캔 중 실시간 → 결과 확인 — W112 · E-82) ·
-// 기록(접어 둠 — 마지막 한 줄만).
-// 정지 버튼이 있는 로봇 패널은 왼쪽 맨 위에 둔다(늘 보임).
+// 메인 페이지 — 위 띠(제목 · 연결 점 · 진행도 가운데 · 다크 모드) · 끊김 배너 · 로봇 패널(가로 한 줄 — 상태 · 버튼 · [정지]) ·
+// 그 아래 반반: 왼쪽 손목 카메라 | 오른쪽 설계 3D(목록에서 고르고 [조립]) (10/14 저녁 PL) · AI 설계 만들기(가로 전체 — 고른 설계를 바탕으로) ·
+// 스캔 칸(스캔 중 실시간 → 결과 확인 — W112 · E-82) · 기록(접어 둠 — 마지막 한 줄만).
+// 정지 버튼이 있는 로봇 패널은 본문 맨 위에 둔다(늘 보임).
 import { useEffect, useState } from 'react';
 import { ConnectionBanners, ConnectionDots } from '@/components/ConnectionBadge';
 import DesignView from '@/components/DesignView';
@@ -56,18 +56,15 @@ export default function Home() {
       <main>
         <ConnectionBanners robot={robot} />
 
+        <RobotPanel robot={robot} onLog={addLog} />
+
+        {/* 손목 카메라(블록 고르는 순서 — 핵심이라 크게, 10/14 PL) | 설계 3D 를 나란히 */}
         <div className="layout">
-          <div className="col">
-            <RobotPanel robot={robot} onLog={addLog} />
-          </div>
-          <div className="col">
-            {/* 손목 카메라는 넓은 칸 맨 위 — 블록 고르는 순서(우선순위)가 핵심이라 크게(10/14 PL). 그림이 없으면 한 줄로 접힘 */}
-            <WristCamera robot={robot} />
-            <DesignView robot={robot} viewId={picked ?? robotDesign} rules={rules} dark={dark} onPick={setPicked} onLog={addLog}
-              onRenamed={() => setNameVer((v) => v + 1)} />
-            <GeneratePanel robot={robot} baseId={picked ?? robotDesign} rules={rules} dark={dark} onSaved={setPicked} onLog={addLog} />
-          </div>
+          <WristCamera robot={robot} />
+          <DesignView robot={robot} viewId={picked ?? robotDesign} rules={rules} dark={dark} onPick={setPicked} onLog={addLog}
+            onRenamed={() => setNameVer((v) => v + 1)} />
         </div>
+        <GeneratePanel robot={robot} baseId={picked ?? robotDesign} rules={rules} dark={dark} onSaved={setPicked} onLog={addLog} />
 
         {SCAN_STATES.includes(robot.state?.state ?? '') && (
           <>

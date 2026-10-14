@@ -12,6 +12,7 @@ import { NO_WEB, designName, readable, stateName } from '@/lib/names';
 import type { Cmd, Rules, ScanPreview, ScanSaveJob } from '@/lib/types';
 import type { Robot } from '@/lib/ws';
 import CloudView from './CloudView';
+import CountUp from './CountUp';
 import Preview3D, { type Item3D } from './Preview3D';
 
 const POLL_MS = 1000; // /ws 알림이 끊겼을 때를 위한 다시 받기 간격(저장하는 동안만)
@@ -125,7 +126,6 @@ export default function ScanReview({ robot, rules, dark, onSaved, onLog }: Props
   const can = (a: 'cancel' | 'rescan') => !failed || (job?.actions ?? ['rescan', 'cancel']).includes(a);
 
   const poseText = preview?.pose_id ? `자세 ${preview.pose_id}` : '';
-  const pointsText = preview?.points ? `점 ${preview.points.toLocaleString()}개` : '';
   return (
     <section className="panel scan-panel" ref={panel}>
       <div className="panel-head">
@@ -136,9 +136,11 @@ export default function ScanReview({ robot, rules, dark, onSaved, onLog }: Props
           ))}
         </ol>
         <span className="muted small">
-          {scan
-            ? `블록 ${scan.blocks.blocks.length}개 · 가려져 추정 ${scan.inferred_count}개${scan.nearest_base ? ` · 가장 비슷한 기본 설계 ${designName(scan.nearest_base)}` : ''}`
-            : [poseText, pointsText].filter(Boolean).join(' · ')}
+          {scan ? (
+            <>블록 <CountUp value={scan.blocks.blocks.length} />개 · 가려져 추정 {scan.inferred_count}개{scan.nearest_base ? ` · 가장 비슷한 기본 설계 ${designName(scan.nearest_base)}` : ''}</>
+          ) : (
+            <>{poseText}{poseText && preview?.points ? ' · ' : ''}{preview?.points ? <>점 <CountUp value={preview.points} />개</> : null}</>
+          )}
         </span>
       </div>
       <div className="scan-grid">

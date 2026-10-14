@@ -1,7 +1,8 @@
 'use client';
 // 손목 카메라 블록 검출 화면(web/README 1장 — E-67). 손목 비전(YOLO-seg)이 블록을 찾을 때마다 윤곽 · 글자까지 그려 보낸 JPEG 를
 // 그대로 보여 준다(화면은 덧그리지 않음). 그림이 오면 /ws 로 번호만 오고, 그림은 /api/robot/wrist.jpg 로 받는다.
-// 10/14 PL: 블록 고르기 순서(우선순위)가 핵심이라 크게 — 오른쪽 넓은 칸 맨 위 · 확대(×1 ~ ×3, 그림을 누른 곳 중심) · 전체 화면.
+// 10/14 PL: 블록 고르기 순서(우선순위)가 핵심이라 크게 — 설계 3D 왼쪽 반 칸(10/14 저녁) · 확대(×1 ~ ×3, 그림을 누른 곳 중심) · 전체 화면.
+// 그림 아래 글자 뜻 풀이(10/14 저녁 PL): 손목 비전 block_finder.draw_found 가 쓰는 '번호 자세 첫 글자 각도 [T]'와 윤곽 색 — 그쪽 글자가 바뀌면 같이 고친다.
 // 관측 자세가 높아 블록이 작게 보여서 확대한다. 배율 · 중심은 이 브라우저에만 기억(localStorage — 못 쓰면 기억 없이 그대로 동작).
 import { useEffect, useState, type MouseEvent } from 'react';
 import { wristUrl } from '@/lib/api';
@@ -59,12 +60,11 @@ export default function WristCamera({ robot }: { robot: Robot }) {
 
   const age = w ? Math.max(0, Math.round((now - w.at) / 1000)) : 0;
   return (
-    <section className={`panel wrist-panel${full ? ' wrist-full' : ''}${w ? '' : ' wrist-idle'}`}>
+    <section className={`panel wrist-panel${full ? ' wrist-full' : ''}`}>
       <div className="panel-head">
         <h2>손목 카메라</h2>
-        {/* 그림이 없으면 제목 줄 한 줄로 끝낸다 — 빈 카드가 3D 를 밀어내지 않게 */}
         <span className="muted head-sub" title={w ? new Date(w.at).toTimeString().slice(0, 8) : undefined}>
-          {w ? `블록 검출 · 고르는 순서 — ${age}초 전` : '블록을 찾을 때 그림이 와요'}
+          {w ? `블록 검출 — ${age}초 전` : ''}
         </span>
         {w && (
           <div className="zoom-row" role="group" aria-label="확대">
@@ -80,10 +80,22 @@ export default function WristCamera({ robot }: { robot: Robot }) {
           </div>
         )}
       </div>
-      {w && (
+      {w ? (
         <div className="cam" onClick={aim} title="누른 곳을 중심으로 확대해요(×1 이면 ×2 로)">
           <img src={wristUrl(w.seq)} alt="손목 카메라 블록 검출 그림"
             style={{ transform: `scale(${view.z})`, transformOrigin: `${view.ox}% ${view.oy}%` }} />
+        </div>
+      ) : (
+        <div className="cam cam-idle">블록을 찾을 때 그림이 와요</div>
+      )}
+      {w && (
+        <div className="cam-legend">
+          <span><i style={{ borderColor: '#00c800' }} />집을 수 있음</span>
+          <span><i style={{ borderColor: '#ffc800' }} />다른 블록 위</span>
+          <span><i style={{ borderColor: '#ff0000' }} />덮여 있음</span>
+          <span title="손목 비전이 매긴 높이 순번이에요. 실제로 집는 블록은 로봇이 이 중에서 골라요(높은 층 눕힌 블록 → 세운 블록)">
+            글자 <b>1 T +12</b> = 높은 순번 · 자세(<b>T</b> 눕힘 · <b>W</b> 옆으로 섬 · <b>L</b> 세움) · 돌아간 각도, 끝에 <b>T</b> 하나 더 = 기울어짐
+          </span>
         </div>
       )}
     </section>

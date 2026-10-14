@@ -1,8 +1,9 @@
 'use client';
 // 위쪽 가운데 진행도 — 놓은 블록 / 전체 = %, DONE 이면 100 %(web/README 1장 ⑧). 진행표가 다른 설계 것이면 보이지 않는다.
-// 이름은 사람이 읽는 말로(lib/names — '벤치 V001' · '다리 1-3').
+// 이름은 사람이 읽는 말로(lib/names — '벤치 V001' · '다리 1-3'). 숫자 · 막대는 자연스럽게 올라간다(CountUp · .fill transition, 10/14 저녁 PL).
 import { partName, designName } from '@/lib/names';
 import type { Robot } from '@/lib/ws';
+import CountUp from './CountUp';
 
 export default function ProgressTop({ robot }: { robot: Robot }) {
   const st = robot.state;
@@ -15,7 +16,7 @@ export default function ProgressTop({ robot }: { robot: Robot }) {
     <div className="top-progress" aria-label="진행도">
       <div className="top-progress-head">
         <span className="muted">{st?.design_id ? designName(st.design_id) : '설계 없음'}</span>
-        <strong>{total ? `${present} / ${total} · ${pct}%` : ''}</strong>
+        <strong>{total ? <><CountUp value={present} /> / {total} · <CountUp value={pct} />%</> : ''}</strong>
       </div>
       <div className="bar">
         <div className="fill" style={{ width: `${pct}%` }} />
