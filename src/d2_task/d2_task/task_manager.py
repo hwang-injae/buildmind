@@ -272,6 +272,9 @@ class TaskManager:
         self._a4_last = None                      # W144 A4: 마지막 측정 (token, 기록 row, 부른 시각, 답 받은 시각)
         self._a4_place = {}                       # W144 A4: 블록마다 놓을 때 실제로 보낸 place_pose(흩뿌림은 1 mm 띄운 자리) — 다시 놓을 자리
         self._spread = None                       # 같은 층 1 mm 띄운 놓는 중심(part_id → [x, y, z] m) — 설계가 정해질 때 한 번 계산
+        # 손목 그림 집기 순위(state/2 pick, 10/14 22시 PL) — 공급 find_blocks 결과를 적용할 때만 바뀌고(받침 · 조립 자리 재기는 공급 그림이
+        # 아니라 그대로) 그 사이 모든 state/2 에 실린다. 조립 끝(DONE) · 취소 · IDLE · 새 출발이면 비운다(None = 키를 뺌)
+        self._pick = None
         if self._scatter is not None:             # 흩뿌림 실패 뒤 재시도 설정(robot.yaml scatter.*) — 없거나 이상하면 만들 때 거절한다
             sc = cfg['scatter']
             self.max_attempts = sc['max_attempts']
@@ -768,7 +771,7 @@ class TaskManager:
             self._set('PICK_PLACE', None, f'{r["part_id"]} 를 집으러 갑니다')
         elif status == 'DONE':
             with self._lock:               # DONE 방송과 요약 확정 사이에 새 설계 선택 · 출발이 끼어들지 못하게 한 잠금 안에서. 요약 CSV 는 쓰기 스레드가 쓰지만, w144_record 가 켜져 있으면 w144_finish(녹화 종료 · ZIP)가 이 잠금 안에서 돈다(점검 ② 3번 — 박진용)
-                self.part_id = None
+                self.part_id = self._pick = None      # 조립이 끝났다 — 손목 그림 집기 순위도 DONE 알림부터 뺀다(10/14 22시 PL)
                 self._set('DONE', 'done', '조립이 끝났어요')
                 self._finish_run('DONE')
         elif status == 'UNKNOWN_BLOCK' and not self._reobserved:
@@ -815,6 +818,7 @@ class TaskManager:
         적용(commit)과 그 결과(목표 적용 · PICK_PLACE 또는 WAIT_SUPPLY 전환)는 **한 잠금 안에서** 한다 — 정지 신호(on_safety)는 같은 잠금을 얻어야
         반영되므로 commit 확인 뒤 전환 전에 정지가 끼지 못한다. commit 은 요청 번호 · 상태 변화 · 정지 횟수 · 정지 중 여부를 그 안에서 다시 확인한다
         (정지가 끼었거나, 정지 뒤 [다시 시작]까지 끝났어도 그 전 요청의 늦은 답은 적용하지 않는다). 로봇은 move_to 외에 움직이지 않는다.
+        공급 관측 결과를 적용하면 state/2 pick(손목 그림 집기 순위)도 그 결과의 것으로 바꾼다(받침 위 재기는 그대로 — 10/14 22시 PL).
         """
         if not self._scatter.configured:
             self._to_error('흩뿌린 공급 설정(열림 폭)이 없어 집을 수 없어요. 로봇 담당자에게 설정 확인을 부탁하세요')
@@ -853,6 +857,10 @@ class TaskManager:
         with self._lock:
             applied = self._scatter.commit(ticket, lambda: ((self._epoch, self._stop_count), self.halted()), result)
             if applied:
+                if not from_spare:
+                    # 공급 그림의 새 결과가 손목 그림 집기 순위를 바꾼다 — 순위로 고른 결과(SPARE)만 pick 이 있고, 못 고른 결과면 비운다.
+                    # 받침 위 재기는 공급 그림이 아니라 그대로 둔다(10/14 22시 PL). 상태 전환 전에 바꿔야 그 state/2 부터 실린다
+                    self._pick = copy.deepcopy(result.get('pick'))
                 self._apply_scatter_result(target, result, pick_message)
                 return
         if self._stop_count != stops_before:       # 조회 중에 정지가 있었다(이미 [다시 시작]까지 끝났어도) → 다른 정지 때처럼 STOPPED 절차로
@@ -1067,12 +1075,14 @@ class TaskManager:
 
     def _next_spare_candidate(self):
         """받침 경유: 움직이기 전에 길이 안 나온 뒤 다시 찍지 않고 마지막 공급 관측(_spare_seen)에서 다음 후보를 골라 적용한다(one_pick — 장면이 그대로).
-        안 된 후보는 _spare_failed 에 이미 있다. 바깥 영향: 다음 PickPlace 목표 · 상태(로봇은 아직 안 움직임)."""
+        안 된 후보는 _spare_failed 에 이미 있다. 바깥 영향: 다음 PickPlace 목표 · 상태(로봇은 아직 안 움직임) · state/2 pick(같은 그림의 새 순위 ·
+        남은 후보가 없으면 뺌)."""
         target, body = self._spare_seen
         result = self._scatter.prepare_spare(target, body, self._spare_failed)
         with self._lock:
             ticket = self._scatter.begin((self._epoch, self._stop_count))
             if self._scatter.commit(ticket, lambda: ((self._epoch, self._stop_count), self.halted()), result):
+                self._pick = copy.deepcopy(result.get('pick'))     # 같은 공급 그림에서 다시 고른 순위(안 된 후보 빠짐, 10/14 22시 PL)
                 if result['status'] == 'SPARE':
                     self._apply_scatter_result(target, result, '')
                     return None
@@ -1853,7 +1863,7 @@ class TaskManager:
         self._spare_empty = self._no_match = self._bad_blocks = self._spare_centers = 0
         self._fresh, self._hold_then, self._tally = True, None, {'sent': 0, 'ok': 0}
         self._a4_tries, self._a4_last, self._a4_place = {}, None, {}
-        self.placed = self.part_id = None
+        self.placed = self.part_id = self._pick = None     # 새 출발 — 앞 조립의 손목 그림 집기 순위를 싣지 않는다(10/14 22시 PL)
         self.run_id = self.logger.start_run(self.design_id, len(self.planner.parts))   # 실제 출발 때만 새 run_id
         self._w144_open, self._w144_last, self._w144_legs = {}, {}, {}    # W144 시도: 부품 → 열린 action_id · 마지막 실패 action_id, action → 단계 기록
         # W144 기록(촬영 폴더 · 설정 복사 · 필수 토픽 확인 · rosbag)은 CHECK 첫 단계에서(잠금 밖) 연다 — 첫 이동 · find_blocks 보다 먼저
@@ -1952,11 +1962,11 @@ class TaskManager:
                     self._build_ready.add(run_id)
 
     def _clear_run(self):
-        """run_id 를 비운다(새 설계 · IDLE). 닫히지 않은 기록이 있으면 STOPPED 로 닫는다."""
+        """run_id 를 비운다(새 설계 · IDLE · 취소 · 정리 확인 · 스캔 시작). 닫히지 않은 기록이 있으면 STOPPED 로 닫는다. state/2 pick 도 비운다."""
         if self.logger.active:
             self._finish_run('STOPPED')
         self.logger.clear()
-        self.run_id = None
+        self.run_id = self._pick = None              # 조립이 끝났으니 손목 그림 집기 순위도 뺀다(10/14 22시 PL)
         if self._scatter is not None:
             self._scatter.invalidate()
         self._recover_slow = False
@@ -1993,11 +2003,15 @@ class TaskManager:
         [다시 시작]을 막으므로 중간 알림 하나로 풀리면 안 된다(10/14 PL E-117). stopped 확인(_enter_stopped)이 대기를 풀면 붙지 않는다.
         그리퍼 열기 대기(STOPPED 에서만 시작)와 정지 확인 대기(ERROR 에서만, STOPPED 진입 때 풀림)는 시험한 상태 · 명령 경로에서 같이 성립하지 않았다
         (test_task_timeouts — 모든 비동기 순서를 증명한 것은 아니다). 둘 다면 기존 gripper_opening 이 먼저다.
+        pick(손목 그림 집기 순위 {image_seq, index, ranks, reason})은 있을 때만 싣고, 없으면 키를 뺀다(null 아님 — 10/14 22시 PL).
         """
         if self._gripper_busy and message_id != 'gripper_done':
             message_id = 'gripper_opening'          # 그리퍼 열기 답 전에는 어떤 알림이든 대기 표시를 유지한다 — 화면은 이것으로 팔 이동 버튼을 끈다(10/13 PL)
         elif self.state == 'ERROR' and self._timeout_pending:
             message_id = 'stop_pending'
-        self.io.publish_state({'schema': 'state/2', 'stamp': time.time(), 'mode': 'auto', 'state': self.state,
-                               'run_id': self.run_id, 'design_id': self.design_id, 'part_id': self.part_id,
-                               'message_id': message_id, 'message': message})
+        msg = {'schema': 'state/2', 'stamp': time.time(), 'mode': 'auto', 'state': self.state,
+               'run_id': self.run_id, 'design_id': self.design_id, 'part_id': self.part_id,
+               'message_id': message_id, 'message': message}
+        if self._pick is not None:
+            msg['pick'] = copy.deepcopy(self._pick)     # 받는 쪽(다리 · 비전 노드)이 바꿔도 다음 알림에 섞이지 않게 복사
+        self.io.publish_state(msg)

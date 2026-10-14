@@ -44,6 +44,11 @@ def first(blocks):
     return c[0]
 
 
+def tier_of(tag):
+    """꼬리표의 칸 이름(세 번째 칸 — '묶음 · 높이 N층 · 칸 이름 · …', 10/14 22시 PL)."""
+    return tag.split(' · ')[2]
+
+
 def tilted_flat(x, y, **kw):
     """다른 블록에 걸친 기울어진 눕힌 블록(윗면 가운데 · 손끝 높이를 잰 값이 붙은 꼴)."""
     return blk(x, y, top=0.035, tilted=True, center_top_z_m=0.025, tilt_tip_z_m=0.018, **kw)
@@ -76,7 +81,7 @@ def test_목록이_아니면_오류():
 # ---------------- 규칙 ----------------
 def test_혼자_선_블록보다_눕힌_블록_곧게_먼저():
     f = first([blk(0.45, 0.20, 'LENGTH'), blk(0.45, 0.35)])
-    assert f[0] == 1 and f[4].startswith('2칸')
+    assert f[0] == 1 and tier_of(f[4]) == '눕힘 곧게'
 
 
 def test_높이가_높은_기울어진_블록이_1층_눕힌_블록_곧게보다_먼저():
@@ -96,13 +101,13 @@ def test_높은_층_선_블록보다_낮은_층_눕힌_블록이_먼저_큰_옮�
 def test_남을_덮은_기울어진_블록은_1칸_치우면_열리는_수_2_이상():
     B = [tilted_flat(0.45, 0.20), blk(0.47, 0.20, ov='under'), blk(0.45, 0.35)]
     f = first(B)
-    assert f[0] == 0 and f[1] == 'TILT' and f[4].startswith('1칸')
+    assert f[0] == 0 and f[1] == 'TILT' and tier_of(f[4]) == '덮은 블록 치우기'
     assert RANK.freed(B, 0) >= PickRanker.COVER_MIN_FREE
 
 
 def test_기울여_집기_4칸이_옆으로_선_블록_5칸보다_먼저():
     f = first([blk(0.45, 0.20, 'WIDTH'), blk(0.30, 0.20, top=0.035, tilted=True, center_top_z_m=0.025, tilt_tip_z_m=0.018)])
-    assert f[1] == 'TILT' and f[4].startswith('4칸')
+    assert f[1] == 'TILT' and tier_of(f[4]) == '기울여 집기'
 
 
 def test_기울어진_옆으로_선_블록과_높이를_안_잰_기울어진_블록은_후보_아님():
@@ -112,9 +117,9 @@ def test_기울어진_옆으로_선_블록과_높이를_안_잰_기울어진_블
 
 def test_넓은_폭_2점4mm_옮김은_2칸_좁은_폭_20도_틀기는_3칸이고_곧게_넓은_폭이_먼저():
     c, _ = rank([blk(0.45, 0.2)])
-    tier = {(g, d, round(s * 1000, 1)): t[:2] for _, g, d, s, t in c}
+    tier = {(g, d, round(s * 1000, 1)): tier_of(t) for _, g, d, s, t in c}
     order = {(g, d, round(s * 1000, 1)): n for n, (_, g, d, s, _) in enumerate(c)}
-    assert tier[('FLAT_LONG', 0, 2.4)] == '2칸' and tier[('FLAT_SHORT', 20, 0.0)] == '3칸'
+    assert tier[('FLAT_LONG', 0, 2.4)] == '눕힘 곧게' and tier[('FLAT_SHORT', 20, 0.0)] == '눕힘 틀기'
     assert order[('FLAT_LONG', 0, 0.0)] < order[('FLAT_SHORT', 20, 0.0)]
 
 
@@ -127,7 +132,16 @@ def test_큰_옮김은_덮은_블록이라도_6칸():
     c, _ = rank(B)
     short0 = [(s, t) for i, g, d, s, t in c if i == 0 and g == 'FLAT_SHORT']
     assert short0 and all(abs(s) >= 0.005 for s, _ in short0)          # 좁은 폭은 옮겨 잡기만 남는다
-    assert all(t.startswith('6칸') for _, t in short0)
+    assert all(tier_of(t) == '큰 옮김' for _, t in short0)
+
+
+def test_꼬리표는_줄_세우는_열쇠_순서대로_묶음_높이_칸_열림_잡기_방법_틈():
+    """10/14 22시 PL(박진용 ③): 꼬리표 글자만 열쇠 순서(묶음 → 높이 → 칸 → 열림 → 잡기 → 방법 → 틈)로 — 고르는 결과는 그대로(실기 장면 시험)."""
+    assert first([blk(0.45, 0.2, top=2 * T)])[4] == '눕힌 블록 · 높이 2층 · 눕힘 곧게 · 열림 0 · FLAT_SHORT · 곧게 · 틈 50 mm'
+    assert first([tilted_flat(0.45, 0.20), blk(0.45, 0.35)])[4] == '눕힌 블록 · 높이 2층 · 기울여 집기 · 열림 0 · TILT · 기울여 집기 · 틈 50 mm'
+    assert first([blk(0.45, 0.20, 'WIDTH')])[4] == '선 블록 · 높이 1층 · 옆으로 선·선 · 열림 0 · EDGE_SHORT · 곧게 · 틈 50 mm'
+    c, _ = rank([blk(0.45, 0.2)])
+    assert c[-1][4].startswith('큰 옮김 · 높이 1층 · 큰 옮김 · 열림 0 · FLAT_SHORT · 옮기기 · 틈 ')     # 큰 옮김 묶음은 맨 뒤
 
 
 def test_같은_칸_같은_층에서_치우면_열리는_블록_먼저():
