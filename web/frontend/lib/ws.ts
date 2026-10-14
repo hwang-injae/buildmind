@@ -43,6 +43,12 @@ const EMPTY: Robot = {
  *  오면 풀린다(완료 알림을 놓쳐도). message_id 로만 가르고 문구는 비교하지 않는다. 열렸는지는 gripper/state(잡힘 · 폭)로 따로 본다 */
 export const gripperOpening = (r: Robot) => r.state?.message_id === 'gripper_opening';
 
+/** 조립 · 스캔을 시작할 상태(대기 · 출발 대기 · 완성 · 오류 · 스캔 확인)인데 그리퍼가 블록을 쥐고 있나(gripper/state grasped).
+ *  작업 관리자 시작 점검이 설계 고르기 · 출발 · 스캔을 거절하므로 화면이 미리 막고 푸는 길을 안내한다(10/14 HMI 점검).
+ *  집고 놓는 중에 쥐는 것은 정상이라 그 상태들은 보지 않는다. 잠김(정지)이면 [그리퍼 열기]가 따로 보여서 빼고 본다 */
+export const holdingBlock = (r: Robot) =>
+  !!r.gripper?.grasped && !r.safety?.locked && ['IDLE', 'READY', 'DONE', 'ERROR', 'SCAN_REVIEW'].includes(r.state?.state ?? '');
+
 function wsUrl(): string {
   const base = BASE || window.location.origin;
   return base.replace(/^http/, 'ws') + '/ws';

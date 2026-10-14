@@ -11,9 +11,9 @@
 // retained 로 그대로). 여는 중 · 끝(gripper_done) 문구는 작업 관리자 message 그대로 보인다 — 실패 까닭이 거기 있다(10/13 20시 PL).
 import { useState } from 'react';
 import * as api from '@/lib/api';
-import { STOP_PENDING, designName, rejectText, stateName, stopReasonKo } from '@/lib/names';
+import { GRIP_HELD, STOP_PENDING, designName, rejectText, stateName, stopReasonKo } from '@/lib/names';
 import type { CmdResult } from '@/lib/types';
-import { gripperOpening, type Robot } from '@/lib/ws';
+import { gripperOpening, holdingBlock, type Robot } from '@/lib/ws';
 
 const has = (list: string[], s?: string) => !!s && list.includes(s);
 
@@ -46,10 +46,11 @@ export default function RobotPanel({ robot, onLog }: Props) {
   // 상태표(web/README 3장, SDD 5.1). 로봇 PC 가 끊기면 계속 · 스캔은 막는다(IRD 10.3)
   const bridge = robot.bridge;
   const opening = gripperOpening(robot); // 그리퍼 여는 중 — 조립 · 스캔 · 다시 열기를 막는다(10/13 18시 PL)
+  const held = holdingBlock(robot); // 정지 아닌데 블록을 쥠 — 작업 관리자가 스캔을 거절하므로 막고 푸는 길 안내
   const waiting = has(['WAIT_SUPPLY', 'WAIT_HMI'], st);
   const can = {
     cont: !busy && !locked && bridge && waiting,
-    scan: !busy && !locked && !opening && bridge && has(['IDLE', 'DONE', 'SCAN_REVIEW'], st),
+    scan: !busy && !locked && !opening && !held && bridge && has(['IDLE', 'DONE', 'SCAN_REVIEW'], st),
     cancel: !busy && !locked && has(['READY', 'ERROR', 'SCAN_REVIEW'], st),
   };
   const showResume = locked || has(['STOPPED', 'ERROR'], st);
@@ -158,6 +159,7 @@ export default function RobotPanel({ robot, onLog }: Props) {
       </div>
 
       {stopPending && <p className="result warn">{STOP_PENDING}</p>}
+      {held && <p className="result warn">{GRIP_HELD}</p>}
 
       {gripperButton && !clearNotice && <div className="btn-row">{gripperButton}</div>}
 
@@ -194,6 +196,9 @@ export default function RobotPanel({ robot, onLog }: Props) {
                 </p>
                 <p className="muted">이번 조립은 버렸고 로봇은 정지(잠금) 상태 그대로예요. [정리 끝]을 누르면 잠금이 풀리고 대기로 가요.</p>
                 {gripMsg && <p className="result">{gripMsg}</p>}
+                {grasped && !opening && (
+                  <p className="result warn">그리퍼가 아직 블록을 쥐고 있어요 → 그대로 [정리 끝]을 누르면 다음 조립 · 스캔이 거절돼요 → 블록을 받치고 [그리퍼 열기]로 먼저 빼세요</p>
+                )}
                 {noticeErr && <p className="result bad">{noticeErr}</p>}
                 <div className="btn-row">
                   {gripperButton}
