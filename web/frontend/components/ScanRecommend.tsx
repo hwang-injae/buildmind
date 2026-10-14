@@ -1,7 +1,7 @@
 'use client';
 // 스캔 '추천 설계'(10/13 플랜 B 1단계) — 스캔 확인(SCAN_REVIEW) 때 저장된 설계 중 스캔과 가장 비슷한 것을 보여 주고,
 // 사람이 [조립]을 누르면 그 설계 ID 로 select_design(SCAN_REVIEW 에서 받음) → 이어서 start(10/13 PL — 한 번 누름 = 출발 확인, SR-09).
-// 이미 그 설계로 출발 대기(READY)면 start 만(lib/api assemble — 설계 3D 의 [조립]과 같음). 이미 검사를 통과한 저장 설계라
+// 이 칸은 SCAN_REVIEW 때만 그려진다(page.tsx) — 늘 select_design 부터(lib/api assemble — 설계 3D 의 [조립]과 같음). 이미 검사를 통과한 저장 설계라
 // AI · 새 검사 · 새 저장이 필요 없다 — AI 가 막혀도 스캔 복제가 이어진다. 일치율 계산은 backend(비전 match_rate 와 같은 식).
 // 다른 블록은 3D 로 비교해 사람이 확인한다(추천 설계 그대로 쌓으므로 스캔과 다른 블록은 설계대로 놓인다).
 import { useEffect, useState } from 'react';
@@ -42,14 +42,13 @@ export default function ScanRecommend({ robot, onView, onLog }: Props) {
 
   const best = list[0];
   const st = robot.state;
-  const ready = st?.state === 'READY' && st.design_id === best.design_id; // 앞에서 설계 선택만 되고 출발이 거절된 경우
-  const canSend = !sending && !robot.safety?.locked && !gripperOpening(robot) && robot.bridge && (st?.state === 'SCAN_REVIEW' || ready);
+  const canSend = !sending && !robot.safety?.locked && !gripperOpening(robot) && robot.bridge && st?.state === 'SCAN_REVIEW';
   const line = (m: ScanMatch) => `부품 ${m.matched}/${Math.max(m.scan_count, m.part_count)} 같음 (${Math.round(m.rate * 100)} %)`;
 
   async function assemble() {
     setSending(true);
     onView(best.design_id); // 조립하는 설계를 오른쪽 3D 에 — 진행 색을 보며 따라가게
-    const { step, r } = await api.assemble(best.design_id, ready);
+    const { step, r } = await api.assemble(best.design_id, false);
     setSending(false);
     setSent(r);
     // 출발하면 스캔 칸은 닫힌다(SCAN_REVIEW 를 벗어남) — 진행 색이 보이는 설계 3D 로 화면을 옮겨 '사라졌다'고 느끼지 않게(10/13 황인재)

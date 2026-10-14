@@ -74,6 +74,7 @@ class MqttClient:
         self._stop = threading.Event()
         self.client = client or make_mqtt_client(CLIENT_ID)
         self.client.on_connect = self._on_connect
+        self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
         self.client.will_set(WEB_ALIVE_TOPIC, alive_payload(False), qos=1, retain=True)
 
@@ -131,6 +132,11 @@ class MqttClient:
             [res_topic(n) for n in WEB_CALLS] + [req_topic(n) for n in ROBOT_CALLS]
         client.subscribe([(t, 1) for t in topics] + [(t, qos) for t, (_kind, qos) in BLOB_TOPICS.items()])
         self._emit('broker', {'connected': True})
+
+    def _on_disconnect(self, _client, _userdata, _rc):
+        """(paho 스레드) 브로커가 끊기면 바로 화면에 알린다 — 없으면 '브로커'가 초록인 채 3초 뒤 '로봇 PC 끊김'만 떴다(10/14 PM 점검).
+        다시 붙기는 paho 가 한다(start 의 reconnect_delay_set), 붙으면 _on_connect 가 connected true 를 다시 보낸다."""
+        self._emit('broker', {'connected': False})
 
     def _alive_loop(self):
         """웹 연결 신호를 alive_s 마다 보내고, 다리 연결 신호가 끊겼는지 본다(끊기면 화면에 bridge_alive false)."""

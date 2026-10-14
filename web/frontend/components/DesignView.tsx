@@ -75,7 +75,8 @@ export default function DesignView({ robot, viewId, rules, dark, onPick, onLog }
     setSent(r);
     onLog('button', `조립(${design.design_id}) → ${r.success ? '출발' : `${step} 거절`}${r.reason ? ' ' + r.reason : ''}${r.message ? ' — ' + r.message : ''}`);
   }
-  const running = onRobot && !!st?.run_id && !st.state.startsWith('SCAN');
+  // 조립 진행을 칠할 때 — 스캔 · 완성(DONE)은 빼야 [조립] 줄이 보인다(DONE 에도 run_id 가 남아 같은 설계를 다시 조립 못 하던 것, 10/14 PM 점검)
+  const running = onRobot && !!st?.run_id && !st.state.startsWith('SCAN') && st.state !== 'DONE';
 
   const items: Item3D[] = useMemo(() => {
     if (!design) return [];

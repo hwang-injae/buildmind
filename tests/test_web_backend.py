@@ -74,6 +74,14 @@ def test_subscribes_states_alive_intent_responses_and_robot_requests(mc):
             'd2/task/check_design/res', 'd2/hmi/get_design/req', 'd2/hmi/save_build/req'} <= subs
 
 
+def test_broker_disconnect_is_sent_to_screen_at_once(mc):
+    """브로커가 끊기면 바로 broker connected false(화면 '브로커' 점 · 배너), 다시 붙으면 true(10/14 PM 점검 — 전엔 끊겨도 초록)."""
+    mc._on_connect(mc.client, None, None, 0)
+    mc.client.on_disconnect(mc.client, None, 1)
+    mc._on_connect(mc.client, None, None, 0)
+    assert [e['data'] for e in mc.events if e['type'] == 'broker'] == [{'connected': True}, {'connected': False}, {'connected': True}]
+
+
 def test_request_pairs_by_req_id(mc):
     """요청 = …/req + req_id. 같은 req_id 의 …/res 가 오면 그 칸을 돌려준다(req_id 는 뺌)."""
     def robot_answers(topic, body):
@@ -458,8 +466,8 @@ def test_ws_sends_snapshot_first(store):
 
 
 # ---------- 저장소(DesignStore, W111 최소형) ----------
-def test_store_registers_four_bases_as_design_2(store):
-    """기본 설계 4개 = 레시피 두 파일 → 변환기 ② → design/4.0(v1.0 · made_by cad · 부모 없음 · recipe · placements · parts/4.0)."""
+def test_store_registers_four_bases_as_design_4(store):
+    """기본 설계 4개 = 레시피 두 파일 → 변환기 ② → design/4.0(V000 · made_by cad · 부모 없음 · recipe · placements · parts/4.0)."""
     assert store.registered == BASES
     d = store.get_design('001_CHAIR_BENCH_V000')
     assert d['schema'] == 'design/4.0' and d['family'] == 'chair' and d['version'] == 'V000'

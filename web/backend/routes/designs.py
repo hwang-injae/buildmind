@@ -31,7 +31,7 @@ class GenJobs:
     """AI 생성 작업 — 후보 3개를 backend 메모리에 들고 사람이 고를 때까지 기다린다(새로고침 · 재시작하면 사라져도 된다, E-84 ⑥).
 
     한 번에 하나만 돈다: 두 요청이 같은 새 ID(Template 다음 V)로 검사 · 저장하지 않게. 진행은 publish({type: gen, data}) 로 화면에 민다.
-    바깥 영향: OpenAI 호출 · check_design 요청(뒤 스레드), 고르면 저장. 로봇은 움직이지 않는다.
+    바깥 영향: 설계 AI 호출(Claude 중계 — E-99) · check_design 요청(뒤 스레드), 고르면 저장. 로봇은 움직이지 않는다.
     """
 
     def __init__(self, gen, publish):

@@ -94,7 +94,7 @@ def fake_scan_media(blocks, origin, size_mm):
 
 
 class MockRobot:
-    """로봇 PC 흉내. 상태 하나(state/1)와 잠금 하나(safety_state/1)를 들고, 명령에 따라 바꾸고 MQTT 로 방송한다.
+    """로봇 PC 흉내. 상태 하나(state/2)와 잠금 하나(safety_state/1)를 들고, 명령에 따라 바꾸고 MQTT 로 방송한다.
 
     입력: 화면 요청(…/req). 출력: 응답(…/res) · retained 상태 토픽. 실패: 모르는 설계 select · 모르는 명령은 success false · 빈 reason(진짜와 같게).
     """
@@ -220,15 +220,16 @@ class MockRobot:
         self.pub('d2/task/progress', planner.progress_message(run_id, time.time()))
 
     def _scan(self, run_id):
-        """SCAN_MOVE · CAPTURE 를 자세 3곳 → SCAN_INFER → scan_result/2.0(벤치 blocks/2, 추정 2개) + 사진 · 점군 → SCAN_REVIEW.
+        """SCAN_MOVE · CAPTURE 를 robot.yaml scan.poses 자세마다(W186 — 진짜와 같은 순서) → SCAN_INFER → scan_result/2.0(벤치 blocks/2,
+        추정 2개) + 사진 · 점군 → SCAN_REVIEW.
 
         스캔 중 화면 실시간 창(E-82)을 시험하려고 자세마다: 이동 중 live 미리보기 2번(지금 보이는 블록만) · 촬영 때 capture 미리보기
-        (지금까지 모은 누적본, index 1 · 2 · 3) — 다리가 보내는 것과 같은 토픽 · 순서(JSON 바로 뒤 PLY). 손목 RGB 는 화면에 안 씀(10/13 PL).
+        (지금까지 모은 누적본, index 1 · 2 · …) — 다리가 보내는 것과 같은 토픽 · 순서(JSON 바로 뒤 PLY). 손목 RGB 는 화면에 안 씀(10/13 PL).
         """
         _, design = self.local_design(BENCH)
         items = [{'scan_num': b['sequence'], 'x': b['x'], 'y': b['y'], 'z': b['z'], 'ori': b['ori'], 'inferred': i < 2}
                  for i, b in enumerate(design['parts'])]     # 가려져 추측한 블록 2개를 흉내(화면 반투명 표시 시험용)
-        poses = ('observe', 'observe_front', 'observe_side')
+        poses = tuple(self.cfg['scan']['poses'])
         live = 0
         for i, pose in enumerate(poses, 1):
             seen = {'schema': 'blocks/2', 'blocks': items[:max(1, len(items) * i // len(poses))]}   # 자세마다 더 많이 보임(누적)
@@ -245,11 +246,11 @@ class MockRobot:
         self.set_state('SCAN_INFER', '스캔 결과 계산 중', 'scan_running')
         if self.abort.wait(self.step_s * 2):
             return
-        scan = {'schema': 'blocks/2', 'design_id': 'scan_chair_01', 'family': 'chair', 'blocks': items}
+        scan = {'schema': 'blocks/2', 'design_id': 'scan', 'family': 'unknown', 'blocks': items}   # 스캐너 임시 이름 그대로(E-111 B7 — 저장 때 버림)
         jpeg, ply = fake_scan_media(scan, self.origin, self.block_mm)
         result = {'schema': 'scan_result/2.0', 'run_id': run_id, 'inferred_count': 2, 'blocks': scan,
                   'image_path': f'/mock/scan/{run_id}/color.png' if jpeg else '',   # 로봇 PC 경로 흉내 — 웹은 열지 않는다
-                  'poses_used': ['observe', 'observe_front', 'observe_side'], 'nearest_base': BENCH}   # E-79 힌트
+                  'poses_used': list(poses), 'nearest_base': BENCH}   # E-79 힌트
         if ply:
             result['cloud_path'] = f'/mock/scan/{run_id}/cloud.ply'   # 선택 칸 — 점군이 없으면 뺀다(진짜와 같음)
         self.pub('d2/task/scan_result', result)
@@ -282,8 +283,10 @@ class MockRobot:
     def command(self, b):
         """hmi/command 처리 → (success, reason). 실제 작업 관리자 규칙을 간단히 흉내(잠금 · 상태 · 설계)."""
         cmd, design_id, state = b.get('cmd'), b.get('design_id') or '', self.st['state']
-        if self.opening:
-            # 그리퍼가 열리는 동안은 어떤 명령이든 BUSY — 진짜 작업 관리자(#157 W183)가 정본(10/14 PL A2 ①, 옛 흉내는 STOPPED · cancel 받음)
+        if self.opening and cmd != 'cancel':
+            # 그리퍼가 열리는 동안 select_design · start · scan · gripper_open 은 BUSY, cancel([초기화])은 받는다 — 진짜 작업 관리자
+            # (#157 W183)가 정본(10/14 10시 PL — E-101 예외 유지). 정지 · resume 은 따로 오는 요청이라 여기 안 옴. 받아도 알림은 끝날 때까지
+            # gripper_opening 그대로(set_state — E-101 ①)
             return False, 'BUSY'
         if cmd == 'gripper_open':
             # [그리퍼 열기](W183 · 10/13 PL): 작업 관리자가 STOPPED(잠김)일 때만 /d2/gripper/command(0.0865 m · 10 N) — 그 밖엔 거절
