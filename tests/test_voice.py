@@ -233,3 +233,87 @@ def test_env_파일은_빈_값과_이미_있는_값을_덮지_않는다(tmp_path
     import os
     assert os.environ['D2_T1'] == 'a' and 'D2_T2' not in os.environ and os.environ['D2_T3'] == 'keep'
     load_env_file(tmp_path / 'none')                                       # 없는 파일은 그냥 지나감
+
+
+class PermissionDeniedError(Exception):
+    """openai.PermissionDeniedError 와 같은 이름 · code 칸을 가진 가짜(실제 API 호출 없이)."""
+
+    def __init__(self, msg, code=None):
+        super().__init__(msg)
+        self.code = code
+
+
+def fake_client(script):
+    """script[모델] = 돌려줄 글 또는 던질 예외. 부른 모델 순서를 calls 에 남긴다."""
+    calls = []
+
+    def create(**kw):
+        calls.append(kw['model'])
+        out = script[kw['model']]
+        if isinstance(out, Exception):
+            raise out
+        return SimpleNamespace(text=out)
+    return SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(create=create))), calls
+
+
+def test_모델_권한_없음_403_model_not_found_는_whisper_1_로_넘긴다():
+    client, calls = fake_client({'gpt-4o-mini-transcribe': PermissionDeniedError('no access to model', code='model_not_found'),
+                                 'whisper-1': '다리를 한 층 더 높여줘'})
+    text, conf, model = Transcriber(client=client)(to_wav([np.zeros(FRAME, np.int16)]))
+    assert (text, conf, model) == ('다리를 한 층 더 높여줘', None, 'whisper-1')
+    assert calls == ['gpt-4o-mini-transcribe', 'whisper-1']
+
+
+def test_code_가_body_에만_있어도_모델_권한_없음으로_본다():
+    e = PermissionDeniedError('no access')
+    e.body = {'code': 'model_not_found'}
+    client, calls = fake_client({'gpt-4o-mini-transcribe': e, 'whisper-1': '책상'})
+    assert Transcriber(client=client)(to_wav([np.zeros(FRAME, np.int16)]))[2] == 'whisper-1'
+
+
+def test_일반_권한_오류는_다른_모델로_넘기지_않는다():
+    client, calls = fake_client({'gpt-4o-mini-transcribe': PermissionDeniedError('project is disabled', code='permission_denied'),
+                                 'whisper-1': '안 불려야 함'})
+    with pytest.raises(PermissionDeniedError):
+        Transcriber(client=client)(to_wav([np.zeros(FRAME, np.int16)]))
+    assert calls == ['gpt-4o-mini-transcribe']
+
+
+def test_두_모델_다_실패하면_마지막_오류에_앞_모델_까닭이_붙고_로그에_둘_다_남는다():
+    first = PermissionDeniedError('no access to model', code='model_not_found')
+    client, calls = fake_client({'gpt-4o-mini-transcribe': first, 'whisper-1': ConnectionError('인터넷 끊김')})
+    tr = Transcriber(client=client)
+    with pytest.raises(ConnectionError) as info:
+        tr(to_wav([np.zeros(FRAME, np.int16)]))
+    assert info.value.__cause__ is first and calls == ['gpt-4o-mini-transcribe', 'whisper-1']
+    vl, rec = make(stt=tr)                                       # 듣기 흐름에서도: 아무것도 안 보내고 두 까닭을 로그로
+    out = vl.listen_once()
+    assert out['kind'] == 'none' and rec.published == []
+    assert 'ConnectionError: 인터넷 끊김' in out['why'] and '앞 모델: PermissionDeniedError: no access to model' in out['why']
+
+
+def test_모델_권한_없음_뒤_whisper_1_이_키_오류면_그_오류를_올리고_앞_까닭을_붙인다():
+    class AuthenticationError(Exception):
+        pass
+    first = PermissionDeniedError('no access to model', code='model_not_found')
+    client, calls = fake_client({'gpt-4o-mini-transcribe': first, 'whisper-1': AuthenticationError('invalid key')})
+    with pytest.raises(AuthenticationError) as info:
+        Transcriber(client=client)(to_wav([np.zeros(FRAME, np.int16)]))
+    assert info.value.__cause__ is first
+
+
+@pytest.mark.parametrize('body', [{'error': 'model_not_found'}, {'error': None}, 'model_not_found', None, {'code': 3}])
+def test_body_형식이_예상_밖이면_code_없음으로_넘기지_않는다(body):
+    e = PermissionDeniedError('no access')
+    e.body = body
+    assert voice.error_code(e) is None
+    client, calls = fake_client({'gpt-4o-mini-transcribe': e, 'whisper-1': '안 불려야 함'})
+    with pytest.raises(PermissionDeniedError):
+        Transcriber(client=client)(to_wav([np.zeros(FRAME, np.int16)]))
+    assert calls == ['gpt-4o-mini-transcribe']
+
+
+def test_body_error_dict_의_code_를_읽는다():
+    e = PermissionDeniedError('no access')
+    e.body = {'error': {'code': 'model_not_found'}}
+    assert voice.error_code(e) == 'model_not_found'

@@ -54,6 +54,8 @@ BEEP_HIGH_HZ, BEEP_LOW_HZ, BEEP_S = 1320, 660, 0.15
 STT_MODELS = ('gpt-4o-mini-transcribe', 'whisper-1')   # 앞이 실패하면 뒤 한 번
 STT_TIMEOUT_S = 8.0          # 받아 적기 한 번 상한(OpenAI 기본 600초면 인터넷이 막힐 때 몇 분 멈춘다)
 NO_FALLBACK = ('AuthenticationError', 'PermissionDeniedError', 'RateLimitError')   # 키 · 권한 · 크레딧 — 다른 모델도 똑같이 실패
+# 단 '이 모델만 못 씀'(프로젝트에 모델 권한 없음 — 403 model_not_found, 10/14 웹 PC 확인)은 다른 모델로는 될 수 있어 넘긴다
+MODEL_UNAVAILABLE = ('model_not_found',)
 HINT = ('젠가 블록으로 만드는 가구 설계 요청이다. 나올 수 있는 낱말: 의자, 책상, 벤치, 등받이, 다리, 좌판, 상판, 기둥, 받침, 블록, '
         '높게, 낮게, 넓게, 좁게, 길게, 짧게, 한 층, 두 층.')   # 정지 낱말은 넣지 않는다 — STT 가 힌트 끝을 그대로 내면 잘못된 정지가 된다
 # 정지 말 = 정지 낱말(+ 요 · 줘 · 라 · 주세요)만으로 된 글(반복 가능). '그만큼 높게' · '정지해 있는 의자' 같은 요청은 정지가 아니다
@@ -149,7 +151,9 @@ class VoiceListener:
         try:
             text, conf, model = self.stt(to_wav(audio))
         except Exception as e:                       # 키 · 크레딧 · 인터넷 — 화면은 20초 뒤 '못 받았어요'
-            return self._none(f'받아 적기 실패: {type(e).__name__}: {e}', t0)
+            cause = e.__cause__
+            why = f'받아 적기 실패: {type(e).__name__}: {e}' + (f' (앞 모델: {type(cause).__name__}: {cause})' if cause is not None else '')
+            return self._none(why, t0)
         text = (text or '').strip()
         times = {'wake_s': round(t_wake - t0, 2), 'speech_s': round(speech_s, 2), 'total_s': round(time.monotonic() - t0, 2)}
         if not text or is_hallucination(text):
@@ -224,7 +228,8 @@ def to_wav(frames):
 # ---------------- 실제 장치 · 서비스(시험에서는 가짜를 넣는다) ----------------
 class Transcriber:
     """OpenAI 받아 적기 — STT_MODELS 순서로 해 보고 처음 된 것. 입력 WAV 바이트, 출력 (text, confidence, model).
-    실패: 모든 모델이 실패하면 마지막 예외를 그대로 올린다(VoiceListener 가 로그 · 아무것도 안 보냄)."""
+    실패: 모든 모델이 실패하면 마지막 예외를 올리고, 앞 모델의 실패는 __cause__ 로 붙인다(VoiceListener 가 둘 다 로그 · 아무것도 안 보냄).
+    키 · 권한 · 크레딧 오류(NO_FALLBACK)는 바로 올린다 — 단 오류 code 가 MODEL_UNAVAILABLE(그 모델만 못 씀)이면 다음 모델로 넘긴다."""
 
     def __init__(self, models=STT_MODELS, client=None):
         """client 는 시험 때 가짜. 비우면 첫 받아 적기 때 OpenAI()(OPENAI_API_KEY) — 키가 없어도 시동어 · 녹음 시험은 되게."""
@@ -244,10 +249,27 @@ class Transcriber:
                 r = self.client.audio.transcriptions.create(**kw)
                 return r.text, confidence_from_logprobs(getattr(r, 'logprobs', None)), model
             except Exception as e:
-                if type(e).__name__ in NO_FALLBACK:      # 키 · 권한 · 크레딧 문제는 다른 모델로도 안 된다
+                if type(e).__name__ in NO_FALLBACK and error_code(e) not in MODEL_UNAVAILABLE:   # 키 · 권한 · 크레딧은 다른 모델로도 안 된다
+                    if last is not None:
+                        raise e from last
                     raise
+                if last is not None and e.__cause__ is None:
+                    e.__cause__ = last              # 앞 모델이 왜 실패했는지도 남긴다(넘긴 까닭)
                 last = e
         raise last
+
+
+def error_code(e):
+    """OpenAI 오류의 code(예 'model_not_found'). openai 라이브러리는 e.code, 아니면 e.body 의 code · error.code(error 가 dict 일 때만).
+    없거나 형식이 예상 밖(글자 아님)이면 None — 그러면 NO_FALLBACK 처리는 예전 그대로다."""
+    code = getattr(e, 'code', None)
+    body = getattr(e, 'body', None)
+    if code is None and isinstance(body, dict):
+        code = body.get('code')
+        inner = body.get('error')
+        if code is None and isinstance(inner, dict):   # error 가 글자 · None 등이면 code 없음으로 — 기존 오류 처리 그대로
+            code = inner.get('code')
+    return code if isinstance(code, str) else None
 
 
 class Mic:
