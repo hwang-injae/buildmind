@@ -616,7 +616,7 @@ def test_relay_reason_is_shown(store):
     gen, _ = make(store, [RelayError(502, 'claude 가 정해진 형식으로 답하지 않았다: 블록 3개')])
     with pytest.raises(GenError) as e:
         gen.generate('벤치', BENCH)
-    assert e.value.message == '설계 AI 실패 — claude 가 정해진 형식으로 답하지 않았다: 블록 3개' and not e.value.final
+    assert e.value.message.startswith('설계 AI 실패(claude 가 정해진 형식으로 답하지 않았다: 블록 3개) →') and not e.value.final   # 거절 글 형식(10/14 PL)
 
 
 def test_where_reads_only_part_numbers(good):

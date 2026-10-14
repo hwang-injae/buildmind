@@ -37,6 +37,8 @@ ROBOT_CALLS = ('/d2/hmi/get_design', '/d2/hmi/save_build')   # 로봇이 부르�
 CLIENT_ID = 'd2_web'        # 웹 backend 는 하나 — 같은 이름으로 다시 붙으면 브로커가 옛 연결을 끊는다
 MQTT_KEEPALIVE_S = 5        # 웹 PC 가 갑자기 꺼지면 약 1.5배 뒤 브로커가 LWT(alive false)를 남긴다. 작업 관리자는 그 전에 3초로 먼저 안다
 CLOSE_WAIT_S = 1.0          # 끝낼 때 'alive false' 가 나갈 때까지 기다리는 한도
+NO_BROKER = ('브로커(mosquitto)에 연결이 안 돼 보내지 못했어요 → 웹 PC 브로커가 켜져 있는지 → 화면 연결 표시의 브로커 점, '
+             '웹 PC 에서 docker compose ps · logs mosquitto')   # 거절 글 형식(10/14 PL — 문제 → 확인할 것 → 확인 방법)
 
 
 def make_mqtt_client(client_id):
@@ -161,13 +163,14 @@ class MqttClient:
         브로커가 없으면 바로 {success False, reason ERROR}, 시간이 지나면 {success False, reason TIMEOUT}. 자동 재전송 없음(IRD 10.1).
         """
         if not self.client.is_connected():
-            return {'success': False, 'reason': 'ERROR', 'message': '브로커 연결 없음'}
+            return {'success': False, 'reason': 'ERROR', 'message': NO_BROKER}
         req_id = str(uuid.uuid4())
         self.pending.open(req_id)
         self.client.publish(req_topic(ros_name), json.dumps({**fields, 'req_id': req_id}, ensure_ascii=False), qos=1)
         body = self.pending.wait(req_id, self.req_timeout_s)
         if body is None:
-            return {'success': False, 'reason': 'TIMEOUT', 'message': f'{self.req_timeout_s:g}초 안에 답이 없다 — 실제 상태는 화면 상태 줄로'}
+            return {'success': False, 'reason': 'TIMEOUT', 'message': f'{self.req_timeout_s:g}초 안에 로봇 PC 답이 없어요 → 명령이 늦게 먹었는지 · '
+                    '로봇 PC 가 살아 있는지 → 화면 상태 칸이 바뀌었는지 먼저, 연결 표시의 로봇 PC 점 · 로봇 PC 작업 관리자 터미널'}
         return {k: v for k, v in body.items() if k != 'req_id'}
 
     def listen(self):
@@ -175,7 +178,7 @@ class MqttClient:
         retained 로 두지 않는다 — 늦게 붙은 voice.py 가 옛 누름으로 녹음하지 않게. voice.py 는 녹음 · Whisper 뒤 d2/hmi/intent
         {intent: request_design, text} 를 낸다(backend 가 /ws 로 넘김). 반환: {success, reason[, message]} — 브로커가 없으면 success false."""
         if not self.client.is_connected():
-            return {'success': False, 'reason': 'ERROR', 'message': '브로커 연결 없음'}
+            return {'success': False, 'reason': 'ERROR', 'message': NO_BROKER}
         self.client.publish(VOICE_LISTEN_TOPIC, json.dumps({'schema': 'voice_listen/1', 'stamp': round(time.time(), 3)}), qos=1)
         return {'success': True, 'reason': ''}
 

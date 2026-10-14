@@ -6,7 +6,7 @@
 // 다른 블록은 3D 로 비교해 사람이 확인한다(추천 설계 그대로 쌓으므로 스캔과 다른 블록은 설계대로 놓인다).
 import { useEffect, useState } from 'react';
 import * as api from '@/lib/api';
-import { designName } from '@/lib/names';
+import { designName, rejectText } from '@/lib/names';
 import type { CmdResult, ScanMatch } from '@/lib/types';
 import { gripperOpening, type Robot } from '@/lib/ws';
 
@@ -38,7 +38,8 @@ export default function ScanRecommend({ robot, onView, onLog }: Props) {
 
   if (!runId) return null;
   if (list === null) return <p className="hint">비슷한 저장 설계를 찾는 중…</p>;
-  if (list === 'fail' || list.length === 0) return <p className="hint">추천할 저장 설계를 못 찾았어요 — [다시 스캔]이나 [취소]를 누르세요</p>;
+  if (list === 'fail' || list.length === 0)
+    return <p className="hint">추천할 저장 설계를 못 찾았어요 → 스캔이 제대로 됐는지 → 위 점군 · 블록 수를 보고 [다시 스캔] 또는 [취소]</p>;
 
   const best = list[0];
   const st = robot.state;
@@ -77,7 +78,7 @@ export default function ScanRecommend({ robot, onView, onLog }: Props) {
         </button>
       </div>
       <small className={canSend ? 'warn-text' : 'muted'}>누르면 로봇이 움직여요 — 작업 영역에 사람이 없는지 확인하세요</small>
-      {sent && !sent.success && <div className="result bad">조립 안 됨{sent.message ? ` — ${sent.message}` : ''}</div>}
+      {sent && !sent.success && <div className="result bad">{rejectText('조립', sent)}</div>}
       {list.length > 1 && (
         <p className="hint">
           다음 후보:{' '}
