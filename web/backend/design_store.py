@@ -74,6 +74,7 @@ class DesignStore:
     바깥 영향: data_dir 아래 파일 쓰기(임시 파일에 쓴 뒤 이름 바꾸기 — 쓰다 꺼져도 반쪽 파일이 남지 않게).
     실패: 없는 설계는 KeyError, 형식 · 규칙이 틀리면 ValueError — 부르는 쪽(REST · MQTT)이 success false 로 바꾼다.
     """
+    KIND = 'json'          # 화면 연결 표시 줄 '저장소' 글(10/14 PL — 어느 저장소에 쓰는지 사람이 보게)
 
     def __init__(self, data_dir, recipe_dir, block_mm):
         """폴더를 만들고(있으면 그대로) 방향 코드 표를 준비한다. 기본 설계 등록은 register_bases() 를 따로 부른다."""
@@ -530,6 +531,7 @@ class PgDesignStore(DesignStore):
           값 꼴 틀림은 ValueError(저장 안 함 — REST 409 · save_build 영구 거절), 없는 설계는 KeyError. 표가 없으면 켜지지 않는다.
     생성 칸(template_id · family · version · template_changed)은 넣지 않는다 — DB 가 design_id · ai_template 에서 계산한다(설계_DB 6절).
     """
+    KIND = 'postgres'
 
     def __init__(self, url, recipe_dir, block_mm):
         """DB 에 한 번 붙어 표가 있는지 본다. 실패: 못 붙으면 OSError, 표가 없으면(001_schema.sql 안 돔) ValueError — 웹이 켜지지 않는다."""

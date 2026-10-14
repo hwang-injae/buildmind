@@ -666,7 +666,7 @@ def test_designs_rest_and_robot_handlers(store):
     client, fake = make_client(store)
     assert [r['design_id'] for r in client.get('/api/designs').json()] == BASES
     assert [r['design_id'] for r in client.get('/api/designs?family=').json()] == BASES      # 빈 값 = 거르지 않음
-    assert client.get('/api/designs/rules').json() == {'block_size_mm': [75.0, 25.0, 15.0], 'assembly_area_half_mm': 150.0}
+    assert client.get('/api/designs/rules').json() == {'block_size_mm': [75.0, 25.0, 15.0], 'assembly_area_half_mm': 150.0, 'store': 'json'}
     assert client.get('/api/designs/002_CHAIR_BACK_V000').json()['design_id'] == '002_CHAIR_BACK_V000'
     assert client.get('/api/designs/nope').status_code == 404
     assert set(fake.handlers) == {'/d2/hmi/get_design', '/d2/hmi/save_build'}

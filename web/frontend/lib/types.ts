@@ -169,6 +169,7 @@ export interface DesignSummary {
 export interface Rules {
   block_size_mm: [number, number, number];
   assembly_area_half_mm: number;
+  store: 'json' | 'postgres'; // 웹이 쓰는 저장소(W088 — .env DATABASE_URL 로 고름)
 }
 
 /** AI 생성 — 후보 하나의 검사 결과(check_result/3.0 중 화면이 쓰는 칸, 레시피는 backend 에만) */

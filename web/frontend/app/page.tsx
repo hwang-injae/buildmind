@@ -45,7 +45,7 @@ export default function Home() {
       <header className="topbar">
         <div className="top-left">
           <h1>D2 젠가 가구</h1>
-          <ConnectionDots robot={robot} />
+          <ConnectionDots robot={robot} store={rules?.store} />
         </div>
         <ProgressTop robot={robot} />
         <ThemeToggle dark={dark} onChange={setDark} />

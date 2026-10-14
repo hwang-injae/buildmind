@@ -230,6 +230,7 @@ D2_WEB_IPV4=172.24.2.213 WEB_UID=$(id -u) WEB_GID=$(id -g) docker compose -f web
 
 **DB(W088 — PostgreSQL `db` 컨테이너) 켜기 · 끄기.** 저장소 함수 이름 · 반환 모양은 JSON 폴더와 같다(`design_store.PgDesignStore`, 표 = `web/db/init/001_schema.sql` — 정본 PM 설계_DB 부록 A + 형식 4.0 + `gen_logs.extra`).
 - 켜기: `web/.env`에 `COMPOSE_PROFILES=db` · `POSTGRES_PASSWORD=<비밀번호>` · `DATABASE_URL=postgresql://d2:<비밀번호>@db:5432/d2` → 위 `docker compose … up -d --build`(이미지에 psycopg — 처음 한 번 `--build`). 첫 시작 때 빈 `web/db/data/`에 표를 만들고, web 이 기본 설계 4개를 다시 등록한다. web 은 DB 를 최대 30초 기다린다(`DB_TRIES`).
+- 어느 저장소인지는 화면 위 연결 표시 줄 '저장소: DB(PostgreSQL) / JSON 폴더'(`GET /api/designs/rules` 의 `store`, 10/14 PL)와 backend 로그 '[웹] 저장소 = …'. `DATABASE_URL` 이 있는데 DB 에 못 붙으면 JSON 으로 자동으로 돌아가지 않고 web 이 서서 다시 켜진다(기록이 두 곳으로 갈라지지 않게).
 - 끄기(JSON 폴더로 되돌리기 — 시연 중 DB 가 말썽일 때): `DATABASE_URL=` 비우고 `docker compose … up -d web`. DB 데이터(`web/db/data/` — gitignore, 웹 PC 로컬 폴더)는 그대로 남는다. JSON 폴더와 DB 사이에 설계를 옮기지 않는다(옛 3.0 설계는 E-111 로 버림).
 - `recipe` 칸만 `json` 형(넣은 글자 그대로 — `-0.0` 이 남아 `recipe_sha256` 이 맞음, 설계_DB 8절 A). DB 끊김 = `OSError`(save_build 일시 실패 → 로봇이 다시 보냄), 키 겹침 · 제약 · 외래 키 = `ValueError`(409 · save_build 영구 거절).
 - 시험: `D2_TEST_DATABASE_URL=<빈 시험 DB> python3 -m pytest tests/test_design_store_pg.py`(표를 비운다 — 시연 DB 에 쓰지 않는다). 없으면 건너뜀(CI).
