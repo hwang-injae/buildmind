@@ -170,7 +170,7 @@ class MockRobot:
         time.sleep(1.5)
         self.set_gripper(False, 0.0865)
         self.opening = False
-        self.set_state(self.st['state'], '그리퍼 열기를 마쳤어요', 'gripper_done')
+        self.set_state(self.st['state'], '그리퍼를 열었어요', 'gripper_done')        # 문구는 작업 관리자(#157 W183)와 같게
 
     def set_safety(self, locked, reason=''):
         """정지 상태를 바꾸고 safety_state/1 을 보낸다."""
@@ -290,7 +290,7 @@ class MockRobot:
             if state != 'STOPPED':
                 return False, 'BUSY'
             self.opening = True
-            self.set_state(state, '그리퍼를 여는 중이에요', 'gripper_opening')
+            self.set_state(state, '그리퍼를 여는 중이에요. 완료 안내까지 기다리세요', 'gripper_opening')
             threading.Thread(target=self._open_gripper, daemon=True).start()   # 답은 바로, 열림 완료는 state/2 로(진짜와 같게)
             return True, ''
         if cmd == 'cancel' and state == 'STOPPED':

@@ -29,7 +29,7 @@ for _pkg in ('d2_bridge', 'd2_task'):          # 웹 PC 에 ROS 는 없고, 이 
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from design_gen import LLM_URL, MODEL, DesignGenerator  # noqa: E402 — 위에서 d2_task 경로를 넣은 뒤
+from design_gen import LLM_URL, MODEL, DesignGenerator, load_grasp_options  # noqa: E402 — 위에서 d2_task 경로를 넣은 뒤
 from design_store import DesignStore   # noqa: E402
 from mqtt_client import MqttClient     # noqa: E402 — 위에서 d2_bridge 경로를 넣은 뒤
 from routes import designs, robot, voice, ws  # noqa: E402
@@ -93,7 +93,8 @@ def create_app(mqtt=None, rules=None, store=None, gen=None):
     mqtt.serve('/d2/hmi/save_build', store.answer_save_build)
     hub = ws.WsHub()
     mqtt.on_event = hub.publish
-    gen = gen or DesignGenerator(store, partial(mqtt.request, '/d2/task/check_design'), rules)   # 키는 처음 생성 때 읽음(없어도 웹은 켜짐)
+    gen = gen or DesignGenerator(store, partial(mqtt.request, '/d2/task/check_design'), rules,   # 키는 처음 생성 때 읽음(없어도 웹은 켜짐)
+                                 grasp_options=load_grasp_options(ROBOT_YAML))   # 연짝 FLAT_LONG — 검사 묶음 손가락 규칙(E-104)
 
     @asynccontextmanager
     async def lifespan(_app):

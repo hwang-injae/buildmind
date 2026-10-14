@@ -68,7 +68,7 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 | 출발 · [계속] | 같음 `{cmd: start, design_id, mode: auto}` | 같음 | 같음(`WAIT_SUPPLY` · `WAIT_HMI`에서 start = 계속) |
 | 스캔 · 다시 스캔 | 같음 `{cmd: scan}` | 같음 | 같음 |
 | 취소 | 같음 `{cmd: cancel}` | 같음 | 같음(`READY` · `ERROR` · `SCAN_REVIEW`) |
-| 초기화(정지 뒤) · 그리퍼 열기 | `STOPPED` · 잠김에서 [정지] 자리가 [초기화] → 한 번 더 확인 → `{cmd: cancel}` → 받으면 '블록을 치워 주세요'(잠금 유지) → [정리 끝] → `POST /api/robot/resume`. 잠김 + 그리퍼가 쥐고 있으면 [그리퍼 열기] → '블록을 손으로 받쳤나요?' → `{cmd: gripper_open}`(W183 · W184, 10/13 16시 PL) | 같음 | 작업 관리자가 STOPPED(잠김)에서 cancel 을 받아 기록만 STOPPED 로 닫고 잠금 유지(W183 한석형) → [정리 끝]의 resume 뒤 RECOVER → IDLE. gripper_open 은 STOPPED 일 때만 /d2/gripper/command(0.0865 m · 10 N). cancel 이 거절되면 잠금을 풀지 않음 |
+| 초기화(정지 뒤) · 그리퍼 열기 | `STOPPED` · 잠김에서 [정지] 자리가 [초기화] → 한 번 더 확인 → `{cmd: cancel}` → 받으면 '블록을 모두 치워 주세요'(그리퍼 · 조립 자리 · 받침 위 — 10/13 20시 PL 문구, 잠금 유지) → [정리 끝] → `POST /api/robot/resume`. 잠김 + 그리퍼가 쥐고 있으면 [그리퍼 열기] → '블록을 손으로 받쳤나요?' → `{cmd: gripper_open}`(W183 · W184, 10/13 16시 PL) — 여는 중 · 끝(`gripper_opening` · `gripper_done`, 실패 까닭 포함) 문구는 작업 관리자 message 그대로 상태 칸 · 알림에 | 같음 | 작업 관리자가 STOPPED(잠김)에서 cancel 을 받아 기록만 STOPPED 로 닫고 잠금 유지(W183 한석형) → [정리 끝]의 resume 뒤 RECOVER → IDLE. gripper_open 은 STOPPED 일 때만 /d2/gripper/command(0.0865 m · 10 N). cancel 이 거절되면 잠금을 풀지 않음 |
 | 정지 | `POST /api/robot/stop` | `d2/safety/stop/req` (`source: web`, **reason 빈 값** → 정지 노드가 `STOP_WEB`) | `/d2/safety/stop` |
 | 다시 시작 | `POST /api/robot/resume` | `d2/safety/resume/req` | `/d2/safety/resume` |
 | 상태 · 진행도 · 정지 · 그리퍼 · 스캔 결과 | `GET /api/robot/state`(지금 값) + `/ws` | `d2/task/state` · `progress` · `scan_result` · `d2/safety/state` · `d2/gripper/state`(retained) | 토픽 |
@@ -82,7 +82,7 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 | 후보 고르기 → 저장 | `POST /api/designs/generate/{job_id}/pick {index, made_by}` → `{design_id, version, parent_id, index}`(떨어진 후보 · 이미 저장 409) ✅ | — (검사 결과를 이미 받아 둠) | — |
 | 설계 목록(트리) · 1개 | `GET /api/designs`(요약 — 트리는 화면이 `parent_id`로 만듦, `/tree`는 두지 않음) · `GET /api/designs/{id}`(`design/4.0`, 없으면 404) ✅ | — | — |
 | 조립 기록 | `GET /api/designs/{id}/builds`(build/2 전부, 최근 것 먼저 · 설계가 없으면 404) ✅(10/10) — 목록 요약에도 `last_build` 한 줄 | — | — |
-| 스캔 [그대로 저장] | `POST /api/designs/from_scan {run_id}` → 4-C → check_design → 저장(`made_by scan`) → `select_design` | `check_design/req` · `hmi/command/req` | 같음 |
+| 스캔 [그대로 저장] | `POST /api/designs/from_scan {run_id}` → 4-C → check_design(요청에 `made_by: "scan"` — 21번 Template 모양만 건너뜀, E-106 · 생성 요청엔 안 붙음) → 저장(`made_by scan`) → `select_design` | `check_design/req` · `hmi/command/req` | 같음 |
 | 스캔 [AI로 고치기](10/14 이후 — 10/10 PL 보류, 지금 안 만듦) | `POST /api/designs/generate {text, parent_id: <스캔 설계>}` — 4-B | 검사만 | 같음 |
 | 사진 · 점군 | `/ws` `{type: scan_image · scan_cloud, seq, stamp, bytes, run_id}` → `GET /api/robot/scan.jpg` · `/api/robot/scan_cloud.ply`(마지막 스캔 것만 메모리에, 없으면 404) ✅(10/10). `run_id` = 직전 `scan_result`의 것 — 화면은 `scan_result.run_id`와 같을 때만 보여 줌. 새 스캔이 오면 앞 것은 지움(점군 없는 스캔에 옛 점군이 안 남게) | `d2/vision/scan_image`(JPEG ≤ 500 KB) · `scan_cloud`(PLY ≤ 2 MB), QoS 1 | 다리가 `scan_result`의 `image_path`(PNG → JPEG로 줄임) · `cloud_path` 파일을 읽어 `scan_result` 바로 뒤에 보냄 ✅ |
 | 스캔 중 점군 미리보기 | `/ws` `{type: scan_preview, seq, stamp, bytes, run_id, index, kind, pose_id, points}` → `GET /api/robot/scan_preview.ply?kind=capture\|live`(kind 별 마지막 하나, 없으면 404). 화면 스캔 칸이 스캔 중 실시간으로 바꿔 그림(live 가 3초 안이면 live, 아니면 capture 누적본) — 결과 확인이 되면 같은 칸에 최종 점군 · 추론 설계(10/13). 손목 실물 RGB · 스캔 사진은 화면에 안 씀(10/13 16시 PL — 화질 · 각도) | `d2/vision/scan_preview`(JSON, QoS 1) + 바로 뒤 `scan_preview_cloud`(PLY — capture ≤ 2 MB QoS 1 · live ≤ 500 KB QoS 0), retained ✗. backend 는 바로 앞 JSON 과 짝짓고 옛 index · 새 run_id 를 거름 | 다리가 `/d2/vision/scan_preview`의 `cloud_path` 파일을 읽어 JSON 바로 뒤에 보냄(E-82, 한 쌍은 잠금 안에서) |
@@ -122,7 +122,7 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 ②  바탕(10/13 PL): 고른 설계 = 새 설계의 parent_id, Template = 그 앞부분. 요청 글에 고른 설계의 블록 목록을 넣고,
     같은 Template 의 다른 설계는 store.list_designs 요약 + 도구 get_design(최대 2번, 읽기는 골라서 — tool_choice auto)으로 참고만(E-72)
     → 화면 "바탕 … · 참고한 설계 …". 도구 단계가 실패하면 examples_for(template)(바탕 설계는 뺌). 다른 설계가 없으면 도구 없이 바로
-③  Claude 1번 호출 → 후보 3개(parts/4.0 — 부품마다 order · x · y · z · ori + role · group · stage · grasp, 구조화 출력 candidates[3])
+③  Claude 1번 호출 → 후보 3개(parts/4.0 — 부품마다 sequence · x · y · z · ori + role · group · stage · grasp, 구조화 출력 candidates[3])
     프롬프트: 역할 · 옵션 목록(src/d2_task/d2_task/roles.json) · 잡기 규칙(SDD 6.6) · 설계 규칙 숫자(robot.yaml — 10/9 ①) · RAG 예시
     칸이 빠지거나 틀리면 check_design이 CHECK_FAILED — 코드가 대신 채우지 않음(E-69 ②). OUT_OF_SCOPE → 안내, 끝
 ④  화면에 3개 3D + "디자인을 고르세요" — 동시에 check_design × 3(차례로, 각 3초 목표) → 오는 대로 합격 · min_margin / 불합격 회색 + detail
@@ -135,6 +135,7 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 - 시간: LLM(Claude, 10/13 — 고르기 · 읽기 각 3초쯤 + 후보 작성 1 ~ 2분 반, 호출당 제한 260초 — 중계는 240초에 먼저 끊음) + 검사 3번(≈ 10초). 후보는 backend 메모리(`job_id`)에만 — 새로고침하면 사라져도 된다(저장 전).
 - `design_id` = `<Template ID>_V<3자리>`(10/10 E-84 · IRD 2장): Template = 기본 설계 4개 이름(`001_CHAIR_BENCH` …), 기본 = `_V000`, AI · 음성 · 스캔 = 같은 Template의 다음 번호(그 Template의 가장 큰 V + 1 — 부모와 상관없이 만든 차례). 부모 · 만든 방법은 `parent_id` · `made_by`에만, `version` = V 번호(`V001`). 저장 설계는 바뀌지 않는다(E-55 — 고치면 다음 번호). `gen_path` 칸 없음(E-71).
 - **ID는 검사 전에 정한다**(10/10, W111): 변환기 ①이 그 ID로 레시피 `design_id` · `part_id`를 만들기 때문. ③ 전에 `store.new_design_id(template, parent_id)`(AI = 고른 설계의 Template, 스캔 = 부모의 Template) → 후보 3개를 같은 ID로 `check_design` → 고른 1개만 `save_design`. 저장 때 다른 요청이 먼저 같은 ID를 쓰면 거절 → ID부터 다시 · 검사도 다시.
+- **연짝 잡기 = FLAT_LONG**(E-104, 10/13 PL — 설계 자체를 고침): `check_design`에 보내기 직전 `design_gen._check`가 연짝(같은 층에 긴 면을 맞댄 눕힌 블록 — `d2_task.row_grasp.row_orders`)을 찾아, 놓는 순간 손가락이 들어가는 블록(검사 묶음 `grasp_options`)만 `grasp`를 FLAT_LONG으로 바꾼다(생성 · 스캔 [저장] 둘 다). 검사 · 변환기 ①이 바뀐 잡기로 보고 placements `grasp_axis`도 LENGTH로 나온다. 안 되는 블록은 그대로(생성 기록 `row_grasp.kept`), AI가 처음 쓴 답은 생성 기록 원문에 그대로.
 - **참고 설계는 그 Template 안에서만**(E-84 ③): GPT 목록 요약 · 도구 `get_design` 허용 목록 = `store.list_designs(template=…)`, 자동 전환 = `store.examples_for(template)`(그 V000 + 최근 파생 3). 다른 Template 설계를 읽고 만든 후보는 저장에서 거절되기 때문.
 - `save_design`이 거절하는 것(저장하지 않음, 마지막 방어선): 검사 불합격(SR-09) · `made_by`가 web · voice · scan 아님 · ID가 E-84 꼴이 아님 · V000(기본 설계 몫) · 모르는 Template · 레시피 짝(`model_id` · `recipe_sha256` — 로봇 작업 판단과 같은 `RecipeDocument` 확인) · 부모 없음 · 부모가 다른 Template. 저장 칸 = `design/4.0` + `prompt` · `check`(ok · min_margin_mm · errors) · `created`(FR-D02).
 - 검사 요청 · 응답은 IRD 그대로(`parts/4.0`만 → `check_result/3.0`). **형식 버전 규칙(IRD 6장):** 앞자리 같으면 받고 모르는 칸 무시, 다르면 거절(이유에 받은 schema). 형식 이름 상수는 `design_store.py` 한 곳. 옛 `cad_structure/1.0` · `cad_recipe/1.0` · `blocks/2` 설계는 거절(변환 안 함, E-69 ⑧).

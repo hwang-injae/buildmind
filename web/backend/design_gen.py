@@ -25,8 +25,12 @@ import string
 import time
 from pathlib import Path
 
+import yaml
+
+from d2_task.design_checker import DesignChecker
 from d2_task.recipe_document import GRASPS
 from d2_task.recipe_to_parts import ORIS, ori_extents   # 방향 코드 · 표 정본(10/14 PL C2)
+from d2_task.row_grasp import row_orders                # 연짝 찾기 정본(E-104 — 박진용 #156)
 from design_store import AI_NONE, SCHEMA_PARTS, build_summary, family_of, split_design_id
 
 LLM_URL = os.environ.get('D2_LLM_URL') or 'http://127.0.0.1:8790/v1'   # 중계 claude_bridge(컨테이너에서는 compose 가 호스트 주소로 줌)
@@ -55,6 +59,7 @@ FIX_HINTS = (
 )
 PROMPTS = Path(__file__).parent / 'prompts'
 ROLES = Path(__file__).resolve().parents[2] / 'src' / 'd2_task' / 'd2_task' / 'roles.json'   # 변환기 ①과 같은 목록 파일
+ROBOT_YAML = Path(__file__).resolve().parents[2] / 'src' / 'd2_robot' / 'd2_bringup' / 'config' / 'robot.yaml'
 MADE_KO = {'cad': '도면', 'web': '웹 글', 'voice': '음성', 'scan': '스캔'}
 
 
@@ -74,25 +79,38 @@ def scan_actions(errors):
     return ['cancel'] if any(isinstance(e, dict) and e.get('kind') == 'scope' for e in errors or []) else ['rescan', 'cancel']
 
 
+def load_grasp_options(path):
+    """설계 잡기 후보 함수 = 검사 묶음 DesignChecker.grasp_options — 연짝 FLAT_LONG 바꾸기(E-104)가 검사와 같은 손가락 규칙을 쓰게.
+
+    입력: robot.yaml 경로. 출력: parts 목록 → {sequence: [잡기 이름…]}. DesignChecker 는 robot.yaml 통째로 만들지만 grasp_options 는
+    블록 크기 · 손가락 · 집는 깊이만 쓴다(원점 · 작업대 값은 안 씀 — E-78). 실패: 파일 · 키가 없으면 예외(웹이 켜지지 않음 — 검사와 다른 규칙으로 돌지 않게).
+    """
+    return DesignChecker(yaml.safe_load(Path(path).read_text(encoding='utf-8'))).grasp_options
+
+
 class DesignGenerator:
     """요청 문장 + 고른 설계 → 후보 3개 · 검사 · 저장, 스캔 [저장]. 상태 없음(요청마다 새 대화) — 후보는 부르는 쪽(작업 job)이 들고 있다.
 
     입력: store(DesignStore), check(parts/4.0 dict → check_design 응답 dict — MqttClient.request 로 만든 함수),
-          rules(app.load_rules — robot.yaml 설계 규칙 E-78), client(OpenAI 클라이언트 — 시험 때 가짜, 비우면 처음 부를 때 만듦).
+          rules(app.load_rules — robot.yaml 설계 규칙 E-78), client(OpenAI 클라이언트 — 시험 때 가짜, 비우면 처음 부를 때 만듦),
+          grasp_options(parts 목록 → {sequence: [잡기…]} — 연짝 FLAT_LONG 바꾸기용, 비우면 저장소 robot.yaml 로 load_grasp_options).
     바깥 영향: LLM 호출(중계 → Claude — 구독 사용량 · 시간), check_design 요청(로봇은 안 움직임), store 에 기록 · 저장. 로봇을 움직이지 않는다.
     실패: GenError(code, message) — 부르는 쪽이 화면에 그대로 알린다.
     """
 
-    def __init__(self, store, check, rules, client=None, clock=time.monotonic, roles_path=ROLES, prompts_dir=PROMPTS):
+    def __init__(self, store, check, rules, client=None, clock=time.monotonic, roles_path=ROLES, prompts_dir=PROMPTS,
+                 grasp_options=None):
         """역할 목록을 읽고 프롬프트에 robot.yaml 숫자를 넣어 둔다(프롬프트 파일은 시작 때 한 번 읽음)."""
         self.store, self.check, self.clock = store, check, clock
         self._client = client
+        self.grasp_options = grasp_options or load_grasp_options(ROBOT_YAML)
         roles = json.loads(Path(roles_path).read_text(encoding='utf-8'))
         self.role_names = sorted(roles['roles']) + sorted(f'{r}_{o}' for r in roles['roles'] for o in roles.get('options', {}))
         role_lines = [f'- {k}: {v}' for k, v in roles['roles'].items()]
         role_lines += [f'- (옵션) {k}: {v} — 역할 뒤에 붙임(예 LEG_{k})' for k, v in roles.get('options', {}).items()]
         L, W, T = (round(v * 1000) for v in rules['block_size_m'])
         self.extent = ori_extents((L, W, T))   # IRD 2장 ori 표 — 피드백 설명용(정본 d2_task, 10/14 PL C2)
+        self.block_mm = [L, W, T]              # 연짝 찾기(row_orders) 입력
         self.design_prompt = string.Template((Path(prompts_dir) / 'design_system.txt').read_text(encoding='utf-8')).substitute(
             L=L, W=W, T=T, area_half=round(rules['assembly_area_half_m'] * 1000), margin=rules['margin_mm'],
             edge=f"{L / 2 - rules['margin_mm']:g}", half_L=f'{L / 2:g}', two_L=2 * L,     # 받침 예시 숫자(다리 끝 안쪽 · 이어 붙이기)
@@ -212,7 +230,8 @@ class DesignGenerator:
                     progress('checked', {'attempt': attempt, 'index': i, 'check': c['check'],
                                          'passed': len(passed) + sum(x['check']['ok'] for x in cands[:i + 1])})
                 log['attempts'].append([{'idea': c['idea'], 'block_count': len(c['parts']['parts']),
-                                         'check': {k: c['check'][k] for k in ('ok', 'reason', 'min_margin_mm', 'errors')}} for c in cands])
+                                         'check': {k: c['check'][k] for k in ('ok', 'reason', 'min_margin_mm', 'errors', 'row_grasp')}}
+                                        for c in cands])
                 if cands and all(c['check']['service_failed'] for c in cands):
                     first = cands[0]['check']
                     raise GenError(first['reason'] or 'ERROR', '설계 검사를 못 했어요 — 로봇 PC · 다리 연결을 확인하세요',
@@ -571,13 +590,16 @@ class DesignGenerator:
         return data
 
     def _check(self, parts, made_by=None):
-        """check_design 한 번 → {ok, service_failed, reason, message, min_margin_mm, errors, recipe, placements}.
+        """check_design 한 번 → {ok, service_failed, reason, message, min_margin_mm, errors, recipe, placements, row_grasp}.
 
+        보내기 전에 연짝 잡기를 FLAT_LONG 으로 맞춘다(_row_grasp — parts 를 그 자리에서 고침, E-104). 그래서 검사 · 변환기 ①이 바뀐 잡기로
+        다시 보고, 저장하는 설계(parts · placements 의 grasp · grasp_axis)도 바뀐 값이다. AI 가 처음 쓴 답은 gen_logs 대화 원문에 그대로 남는다.
         요청 = parts/4.0 + base_recipe(설계 ID 앞부분 Template 의 V000 레시피 통째 — 10/13 PL, IRD 4.2). parts 자체에는 붙이지 않는다
         (저장하는 설계에 섞이지 않게). made_by 를 주면 요청 선택 칸 made_by 로 싣는다 — 스캔 [저장]만 "scan"(검사기가 21번만 건너뜀,
         E-106 · 10/14 PL A1), AI 생성은 넘기지 않는다. ok = 서비스 성공 + 합격 + recipe · placements 둘 다(IRD 4.2). 서비스 실패(ERROR ·
         TIMEOUT — 로봇 PC · 다리 · 변환기 고장)는 AI 탓이 아니라 service_failed 로 나눠 다시 만들지 않는다. 부르는 함수가 예외를 내도 ERROR 로 바꾼다.
         """
+        row = self._row_grasp(parts['parts'])
         try:
             template = split_design_id(parts['design_id'])[0]
             request = {**parts, 'base_recipe': self.store.base_recipe(template)}
@@ -590,7 +612,30 @@ class DesignGenerator:
         ok = served and res.get('ok') is True and isinstance(res.get('recipe'), dict) and isinstance(res.get('placements'), dict)
         return {'ok': ok, 'service_failed': not served, 'reason': res.get('reason') or '', 'message': res.get('message'),
                 'min_margin_mm': res.get('min_margin_mm'), 'errors': res.get('errors') or [],
-                'recipe': res.get('recipe') if ok else None, 'placements': res.get('placements') if ok else None}
+                'recipe': res.get('recipe') if ok else None, 'placements': res.get('placements') if ok else None, 'row_grasp': row}
+
+    def _row_grasp(self, items):
+        """연짝(같은 층에 긴 면을 맞댄 눕힌 블록) 잡기를 FLAT_LONG 으로 바꾼다(E-104 — 10/13 PL, 설계 자체를 고침).
+
+        연짝 찾기 = d2_task row_grasp.row_orders(공용 하나), 손가락이 들어가는지 = 검사 묶음 grasp_options(놓는 순간 기준). 들어가는
+        블록만 바꾸고 안 되는 블록은 그대로 둔다(검사가 원래 잡기로 본다). 입력: parts/4.0 의 parts 목록 — 그 자리에서 grasp 를 고친다.
+        출력: {changed: [sequence], kept: [sequence](연짝인데 FLAT_LONG 손가락 자리가 없음)} — 생성 기록용.
+        형식이 틀린 답(칸 빠짐 · 숫자 아님 등)은 건드리지 않는다 — 검사의 형식 확인이 떨어뜨리고 AI 가 다시 만든다.
+        """
+        try:          # 바꿀 목록을 먼저 다 정한 뒤 고친다 — 중간에 예외가 나도 반쯤 바뀐 설계가 남지 않게
+            rows = row_orders(items, self.block_mm)
+            options = self.grasp_options(items) if rows else {}
+            todo = sorted((p for p in items if p['sequence'] in rows and p['grasp'] != 'FLAT_LONG'), key=lambda p: p['sequence'])
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return {'changed': [], 'kept': []}
+        changed, kept = [], []
+        for p in todo:
+            if 'FLAT_LONG' in options.get(p['sequence'], ()):
+                p['grasp'] = 'FLAT_LONG'
+                changed.append(p['sequence'])
+            else:
+                kept.append(p['sequence'])
+        return {'changed': changed, 'kept': kept}
 
     @staticmethod
     def _no_pass_error(errors):
