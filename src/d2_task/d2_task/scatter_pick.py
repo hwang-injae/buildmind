@@ -322,7 +322,7 @@ class ScatterFlow:
         옆으로 섬은 긴 축이 받침 방향(spot yaw_deg), 섬은 넘어지는 쪽(yaw + 90°)이 받침 긴 변(support_long_yaw)이 되게 — 짧은 변으로 넘기면
         넘기기 전 세운 자리가 받침 밖(가운데에서 44.6 mm).
         반환 status: SPARE(request — 받침에 놓는 PickPlace 칸 + 내부 표시 'via_spare': True, attempt = failed 에 넣을 꼴, tag = 고른 이유)
-        · EMPTY · NO_MATCH(counts · message) · NOT_CONFIGURED · LOOKUP_FAILED · BLOCKED. 바깥 영향 없음.
+        · EMPTY · NO_MATCH(counts · message) · NOT_CONFIGURED · LOOKUP_FAILED · BLOCKED(값이 틀린 블록이 하나라도 있음 · 받침 자리 설정 틀림). 바깥 영향 없음.
         """
         if not self.configured:
             return {'status': 'NOT_CONFIGURED'}
@@ -335,6 +335,12 @@ class ScatterFlow:
         blocks = [self._with_tilt(b) for b in response['blocks']]
         if not blocks:
             return {'status': 'EMPTY', 'guide': 'REFILL'}
+        bad = next((k for k, b in enumerate(response['blocks']) if not self.picker.is_valid(b)), None)
+        if bad is not None:
+            # 값이 틀린 블록(up 모름 등)은 손가락 자리 · 장애물 계산에 못 쓴다 — 고르기 전에 막고 다시 찍는다(_obstacles 와 같은 규칙).
+            # 예전엔 순위 계산(rank)이 이웃 블록 상자를 만들다 예외로 멈췄다(#152 리뷰 6, 재현됨)
+            return {'status': 'BLOCKED', 'reason': 'INVALID_OBSTACLE', 'index': bad, 'guide': 'CHECK_BLOCKS',
+                    'message': f'블록 {bad}번의 값이 잘못돼 집기를 시작하지 않는다'}
         if not self.can_stand(grasp_target(target['grasp'], self.cfg)[0]):
             return {'status': 'STAND_NOT_READY'}           # 받침에서 세우는 동작(robot.yaml standup_taught)이 없다 — 공급에서 옮기기 전에 막는다
         pts = height_points(response.get('height_map'))
@@ -408,9 +414,10 @@ class ScatterFlow:
 
         ⓪ 옆으로 선 · 선 블록이 레시피와 같은 자세면(세우기 뒤) PICK — 눕히지 않고 레시피 잡기로 바로 집어 조립한다.
         ① 그 밖의 옆으로 선 · 선 블록이면 SPARE_TIP — 잡기 TIP 으로 받침 가운데에 눕힌다(누울 자리 yaw: 옆으로 섬 = spot yaw_deg, 섬 = 받침 긴 변).
-           눕힌 뒤 받침을 다시 잰다. ② 레시피 잡기가 FLAT_SHORT · FLAT_LONG 이고 centered 가 거짓이면 SPARE_CENTER — 반대 폭으로 물었다 놓아
-           (CENTER_<반대 잡기>) 레시피 잡기가 맞춰 주지 않는 축을 잰 중심으로 맞춘 뒤, 다시 재지 않고 같은 잰 값으로 집는다(request['then']).
-        ②' 세움 · 옆세움 레시피(STAND_* · EDGE_*)면 받침 가운데로 맞추고(SPARE_CENTER) 이어서 세우기 교시 동작(then — STANDUP_HIGH ·
+           눕힌 뒤 받침을 다시 잰다. ② 레시피 잡기가 FLAT_SHORT · FLAT_LONG 이고 centered 가 거짓이면 SPARE_CENTER — 잰 중심 · 방향에서 반대 폭
+           (<반대 잡기>)으로 집어 받침 가운데(spot · yaw_deg)에 옮겨 놓아(10/14 — 받침에 밀려 · 틀어져 놓인 것을 없앰) 레시피 잡기가 맞춰 주지 않는
+           축도 그 폭으로 맞춘 뒤, 다시 재지 않고 받침 가운데에서 집는다(request['then']). 움직이기 전에 길이 안 나오면 잰 값 그대로 집는다(request['skip']).
+        ②' 세움 · 옆세움 레시피(STAND_* · EDGE_*)면 같은 방법으로 받침 가운데에 옮겨 놓고(SPARE_CENTER) 이어서 세우기 교시 동작(then — STANDUP_HIGH ·
            STANDUP_SIDE, 10/13 W131)으로 세운다 — 세운 뒤 다시 재면 ⓪ 으로 집는다(_stand_request). 교시가 없으면 STAND_NOT_READY(사람).
         ③ 그 밖은 PICK — 잰 중심 · 방향에서 레시피 잡기로 곧게 다시 집어 조립 자리(target place_pose)에 놓는다.
         반환 status: SPARE_TIP · SPARE_CENTER · PICK(request · candidate) · SPARE_EMPTY(받침에 블록이 안 보임) · STAND_NOT_READY
@@ -449,7 +456,7 @@ class ScatterFlow:
         if b.get('up') != 'THICKNESS':
             return {'status': 'SPARE_NOT_FLAT', 'block': copy.deepcopy(b)}
         if want != 'THICKNESS':
-            return self._stand_request(target, spot, base, want)
+            return self._stand_request(target, b, spot, base, want)
         # 윗면 = 받침 윗면 + 두께(잰 높이는 1 ~ 2 mm 흔들려 그대로 물면 손 안에서 매달려 놓을 때 받침을 누른다 — 10/11 실기)
         pick_pose = block_pose(self.cfg, 'THICKNESS', b['yaw_deg'], b['x_m'], b['y_m'], base + thick)
         request = {'part_id': target['part_id'], 'supply_slot': '', 'grasp': target['grasp'], 'pick_pose': pick_pose,
@@ -464,17 +471,21 @@ class ScatterFlow:
             if hit:
                 return {'status': 'SPARE_BLOCKED', 'message': ', '.join(f'{k}번 손가락 {f * 100:.0f} %' for k, f in hit)}
         if not centered and target['grasp'] in ('FLAT_SHORT', 'FLAT_LONG'):
+            # 받침 맞추기(10/14): 잰 자리에서 반대 폭으로 집어 받침 가운데에 옮겨 놓는다 — 그 자리에서 물기만 하면 밀려 놓인 블록이 그대로 남았다
             other = 'FLAT_LONG' if target['grasp'] == 'FLAT_SHORT' else 'FLAT_SHORT'
-            center = dict(request, grasp='CENTER_' + other, place_pose=pick_pose, spare_center=True, then=copy.deepcopy(request))
+            spot_pose = block_pose(self.cfg, 'THICKNESS', spot['yaw_deg'], spot['x_m'], spot['y_m'], base + thick)
+            center = dict(request, grasp=other, place_pose=spot_pose, spare_center=True,
+                          then=dict(copy.deepcopy(request), pick_pose=spot_pose), skip=copy.deepcopy(request))
             return {'status': 'SPARE_CENTER', 'request': copy.deepcopy(center), 'candidate': copy.deepcopy(b), 'gap_mm': None}
         return {'status': 'PICK', 'request': copy.deepcopy(request), 'candidate': copy.deepcopy(b), 'gap_mm': None}
 
-    def _stand_request(self, target, spot, base, up):
-        """받침 위 눕힌 블록을 세우는 요청(세움 · 옆세움 레시피, W131 교시 동작) — 먼저 받침 가운데로 맞추고(SPARE_CENTER) 이어서 세운다.
+    def _stand_request(self, target, b, spot, base, up):
+        """받침 위 눕힌 블록 b(잰 값)를 세우는 요청(세움 · 옆세움 레시피, W131 교시 동작) — 먼저 받침 가운데에 옮겨 놓고(SPARE_CENTER) 이어서 세운다.
 
-        교시 동작은 받침 자리 한 곳의 좌표라, 맞추기는 잰 중심이 아니라 받침 자리(spare_spots 첫 자리) · 받침 방향(yaw_deg)에서 문다 —
-        세우기 잡기가 맞춰 주지 않는 축을 반대 폭(CENTER_<반대 잡기>)으로 물어 블록을 받침 가운데로 민다. 세우기 요청(then)은 그 자리의
-        눕힌 블록 → 세운 블록(위 축 up)이고, 끝나면 다음 SELECT 가 받침을 다시 재서 레시피 잡기로 집는다(spare_stand).
+        교시 동작은 받침 자리 한 곳(spare_spots 첫 자리 · yaw_deg)의 좌표라 블록이 꼭 그 자리에 있어야 한다. 맞추기는 잰 중심 · 방향에서
+        세우기 잡기의 반대 폭(<반대 잡기>)으로 집어 받침 가운데에 놓는다(10/14 — 예전엔 받침 가운데에서 물기만 해서 11 mm 밀린 블록을
+        손가락이 찍었다, 10/13 실기). 세우기 요청(then)은 그 자리의 눕힌 블록 → 세운 블록(위 축 up)이고, 끝나면 다음 SELECT 가 받침을 다시 재서
+        레시피 잡기로 집는다(spare_stand). 맞추기를 건너뛸 길(skip)은 없다 — 가운데가 아니면 못 세운다.
         반환: SPARE_CENTER(request · then) 또는 STAND_NOT_READY(교시 없음). 바깥 영향 없음.
         """
         if not self.can_stand(up):
@@ -482,12 +493,13 @@ class ScatterFlow:
         grasp, case, yaw = STANDUP[up]
         size = dict(zip(SIZE_KEYS, self.cfg['block_actual_m']))
         lying = block_pose(self.cfg, 'THICKNESS', spot['yaw_deg'], spot['x_m'], spot['y_m'], base + size['THICKNESS'])
+        seen = block_pose(self.cfg, 'THICKNESS', b['yaw_deg'], b['x_m'], b['y_m'], base + size['THICKNESS'])
         stood = block_pose(self.cfg, up, yaw, spot['x_m'], spot['y_m'], base + size[up])
         stand = {'part_id': target['part_id'], 'supply_slot': '', 'grasp': grasp, 'pick_pose': lying, 'place_pose': stood,
                  'open_width_m': self.open_width_m, 'obstacles': [], 'spare_stand': True}
         under = self.cfg['standup_taught'][case]['grasp']
         other = 'FLAT_LONG' if under == 'FLAT_SHORT' else 'FLAT_SHORT'
-        center = dict(stand, grasp='CENTER_' + other, pick_pose=lying, place_pose=lying, spare_center=True, then=copy.deepcopy(stand))
+        center = dict(stand, grasp=other, pick_pose=seen, place_pose=lying, spare_center=True, then=copy.deepcopy(stand))
         center.pop('spare_stand')
         return {'status': 'SPARE_CENTER', 'request': copy.deepcopy(center), 'candidate': None, 'gap_mm': None}
 
