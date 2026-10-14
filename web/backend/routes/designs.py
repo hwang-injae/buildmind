@@ -5,6 +5,7 @@
 읽기와 저장은 DesignStore 한 곳, AI 는 DesignGenerator 한 곳. 생성은 오래 걸려(≤ 60초) 뒤 스레드로 돌리고 진행은 /ws {type: gen} 으로 민다.
 트리는 화면이 목록의 parent_id 로 만든다(따로 /tree 를 두지 않는다 — 같은 내용을 두 번 내보내지 않게).
 """
+import logging
 import threading
 import uuid
 from collections import OrderedDict
@@ -285,7 +286,8 @@ def rename(design_id: str, body: NameBody, request: Request):
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     except OSError as e:
-        raise HTTPException(503, '저장소에 못 썼어요 — 잠시 뒤 다시') from None   # 까닭(e)은 화면 대신 backend 로그
+        logging.getLogger('web.store').warning('[이름] %s 표시 이름 저장 실패: %s', design_id, e)   # 화면 글은 짧게, 까닭은 backend 로그에
+        raise HTTPException(503, '저장소에 못 썼어요 — 잠시 뒤 다시') from None
     return {'design_id': design_id, 'display_name': name}
 
 
