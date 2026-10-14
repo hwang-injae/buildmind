@@ -1,11 +1,15 @@
 # -*- coding: utf-8 -*-
 """DesignStore — 설계 · 조립 기록을 저장하는 한 곳 (SDD 6.8, W111 1단계 = JSON 파일 폴더 → W088 PostgreSQL). ROS 없음.
 
+저장 방식 두 개, 함수 이름 · 반환 모양은 같다(설계_DB 6절): DesignStore = JSON 파일 폴더, PgDesignStore = 웹 PC db 컨테이너(PostgreSQL —
+표는 web/db/init/001_schema.sql). app.py 가 .env DATABASE_URL 이 있으면 PgDesignStore, 비면 JSON 폴더 — 비우기만 하면 되돌아간다.
+DB 접근은 이 파일 한 곳(10/6 E-22).
+
 하는 일:
 - 기본 설계 등록: 레시피 폴더의 <모델ID>_recipe.json + _placements.csv → 변환기 ②(d2_task, E-59) → design/4.0 → designs/<id>.json
 - 읽기: list_designs(트리 · RAG 목록 요약 + 최근 조립 결과, E-72 — Template 으로 거름) · children · get_design(design/4.0) · builds_for ·
         examples_for(RAG 자동 전환)
-- 쓰기: new_design_id(검사 전에 ID 만 정함) → save_design(검사 합격한 고른 후보 1개) · save_build(build/1, 같은 run_id 는 한 번만) ·
+- 쓰기: new_design_id(검사 전에 ID 만 정함) → save_design(검사 합격한 고른 후보 1개) · save_build(build/2, 같은 run_id 는 한 번만) ·
         save_gen_log(AI 호출 기록 — NFR-17)
 설계 이름(10/10 E-84 · IRD 2장): 모두 <Template ID>_V<3자리>. Template = 기본 설계 4개 이름(001_CHAIR_BENCH …), 기본 = _V000,
 그 밖(AI · 음성 · 스캔)은 같은 Template 의 다음 번호. 고르기 전 후보 · 저장 전 스캔은 웹 메모리에만(E-84 ⑥ — rejected 기록 없음).
@@ -17,6 +21,7 @@ import os
 import re
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from d2_task.recipe_document import RecipeDocument, same_major  # 형식 앞자리 비교 정본(10/14 PL C4)
@@ -107,18 +112,20 @@ class DesignStore:
         design.update(schema=SCHEMA_DESIGN, family=family, version='V000', parent_id=None, made_by='cad',
                       parts=RecipeToParts(design_id, family, self.block_mm).convert(doc.recipe, doc.placements),
                       created=round(time.time(), 3))
-        self._write(self._design_path(design_id), design)
+        self._put_base(design)
         return design
 
     # ---------- 읽기 ----------
     def get_design(self, design_id):
-        """design/4.0 하나. 없으면 KeyError, 저장된 형식이 design/2 가 아니면 ValueError(옛 형식은 변환하지 않고 거절, E-69)."""
-        path = self._design_path(design_id)
-        if not path.is_file():
-            raise KeyError(design_id)
-        design = json.loads(path.read_text(encoding='utf-8'))
-        if not same_major(design.get('schema'), SCHEMA_DESIGN):
-            raise ValueError(f'{design_id}: 저장된 형식 {design.get("schema")!r} 은 {SCHEMA_DESIGN} 이 아니다')
+        """design/4.0 하나. 없으면 KeyError, 저장된 형식이 design/4 가 아니면 ValueError(옛 형식은 변환하지 않고 거절, E-69)."""
+        return self._checked(self._load(design_id))
+
+    @staticmethod
+    def _checked(design):
+        """저장된 설계의 형식 앞자리가 design/4 인지 본다. 아니면 ValueError(옛 형식은 변환하지 않고 거절, E-69 · E-111)."""
+        if not isinstance(design, dict) or not same_major(design.get('schema'), SCHEMA_DESIGN):
+            got = design.get('schema') if isinstance(design, dict) else None
+            raise ValueError(f'{design.get("design_id") if isinstance(design, dict) else design!r}: 저장된 형식 {got!r} 은 {SCHEMA_DESIGN} 이 아니다')
         return design
 
     def list_designs(self, family=None, template=None):
@@ -237,15 +244,15 @@ class DesignStore:
             if b.get('design_id') and b['run_id'] > last.get(b['design_id'], {}).get('run_id', ''):
                 last[b['design_id']] = b
         out = []
-        for path in sorted(self.designs_dir.glob('*.json')):
+        for name, d in self._designs():
             try:
-                d = self.get_design(path.stem)
+                d = self._checked(d)
                 parts = d['parts']['parts']
                 row = {k: d.get(k) for k in ('design_id', 'family', 'version', 'parent_id', 'made_by')}
                 row.update(block_count=len(parts), size_mm=self._size_mm(parts),
                            last_build=build_summary(last[d['design_id']]) if d.get('design_id') in last else None)
-            except (OSError, ValueError, KeyError, TypeError) as e:
-                log.warning('[저장소] %s 건너뜀: %s', path.name, e)
+            except (ValueError, KeyError, TypeError) as e:
+                log.warning('[저장소] %s 건너뜀: %s', name, e)
                 continue
             if (family is None or row['family'] == family) and \
                     (template is None or self._template_or_none(row['design_id']) == template):
@@ -290,7 +297,7 @@ class DesignStore:
             self.get_design(parent_id)                 # 없으면 KeyError
             if self._template_or_none(parent_id) != template:
                 raise ValueError(f'부모 {parent_id} 는 Template {template} 이 아니다 — 같은 Template 만 부모로 둔다(E-84)')
-        used = [self._template_number(path.stem, template) for path in self.designs_dir.glob(f'{template}_V*.json')]
+        used = [self._template_number(name, template) for name in self._ids(template)]
         n = max((u for u in used if u is not None), default=0) + 1
         if n > 999:
             raise ValueError(f'{template} 의 번호가 V999 를 넘는다')
@@ -331,7 +338,7 @@ class DesignStore:
         if recipe.get('design_id') != design_id:
             raise ValueError(f'레시피 design_id {recipe.get("design_id")!r} 가 {design_id} 가 아니다 — 이 ID 로 다시 검사')
         if parent_id is not None:
-            if not self._design_path(parent_id).is_file():
+            if not self._has(parent_id):
                 raise ValueError(f'부모 {parent_id} 가 없다')
             if self._template_or_none(parent_id) != template:
                 raise ValueError(f'부모 {parent_id} 는 Template {template} 이 아니다 — 같은 Template 만 부모로 둔다(E-84)')
@@ -341,11 +348,7 @@ class DesignStore:
                   'ai_template': ai_template, 'ai_reason': ai_reason,
                   'template_changed': None if ai_template is None else ai_template != template,   # DB 에서는 생성 칸
                   'created': round(time.time(), 3)}
-        path = self._design_path(design_id)
-        with self._lock:
-            if path.exists():
-                raise ValueError(f'{design_id} 가 이미 있다 — 저장한 설계는 고치지 않는다(new_design_id 부터 다시)')
-            self._write(path, record)
+        self._insert_design(record)
         log.info('[저장소] 새 설계 %s (부모 %s, %s)', design_id, parent_id, made_by)
         if gen_log:
             self._mark_gen_log(gen_log, design_id)
@@ -368,7 +371,7 @@ class DesignStore:
     def _check_template(self, template):
         """Template 확인 — 기본 설계 4개 이름 꼴이고 그 _V000 이 등록돼 있어야 한다(E-84 ② Template 은 기본 4개로 고정). 아니면 ValueError."""
         if not isinstance(template, str) or not DESIGN_ID.fullmatch(f'{template}_V000') \
-                or not self._design_path(f'{template}_V000').is_file():
+                or not self._has(f'{template}_V000'):
             raise ValueError(f'모르는 Template: {template!r}(기본 설계 _V000 이 등록된 4개만)')
 
     @staticmethod
@@ -398,17 +401,9 @@ class DesignStore:
         """
         if not isinstance(build, dict) or not same_major(build.get('schema'), SCHEMA_BUILD):
             raise ValueError(f'형식이 {SCHEMA_BUILD} 가 아니다(받은 schema: {build.get("schema") if isinstance(build, dict) else None!r})')
-        try:
-            known = self._design_path(build.get('design_id')).is_file()
-        except KeyError:
-            known = False
-        if not known:
+        if not self._has(build.get('design_id')):
             raise ValueError(f'저장소에 없는 설계의 조립 기록이다: {build.get("design_id")!r}')
-        path = self.builds_dir / f'{self._safe(build.get("run_id"))}.json'
-        if path.exists():
-            return False
-        self._write(path, build)
-        return True
+        return self._insert_build(build)
 
     # ---------- AI 호출 기록(NFR-17) ----------
     def save_gen_log(self, log):
@@ -448,7 +443,55 @@ class DesignStore:
         log.info('[저장소] save_build %s %s', build.get('run_id'), '저장' if fresh else '이미 있음')
         return {'success': True, 'reason': '', 'ok': True}
 
-    # ---------- 파일 ----------
+    # ---------- 파일(JSON 폴더) — PgDesignStore 가 아래 함수만 SQL 로 바꾼다 ----------
+    def _load(self, design_id):
+        """저장된 설계 하나(형식 확인 전 dict). 없거나 파일 이름으로 못 쓰는 ID 면 KeyError."""
+        path = self._design_path(design_id)
+        if not path.is_file():
+            raise KeyError(design_id)
+        return json.loads(path.read_text(encoding='utf-8'))
+
+    def _has(self, design_id):
+        """그 ID 의 설계가 저장돼 있나(형식은 안 봄). 글자가 아니거나 못 쓰는 ID 면 False."""
+        try:
+            return self._design_path(design_id).is_file()
+        except KeyError:
+            return False
+
+    def _ids(self, template):
+        """이름이 <template>_V 로 시작하는 저장 설계 ID 목록(번호 매기기용 — 꼴이 틀린 이름은 부르는 쪽이 거름)."""
+        return [path.stem for path in self.designs_dir.glob(f'{template}_V*.json')]
+
+    def _designs(self):
+        """(이름, 저장된 dict) 전부 — 이름 순. 읽을 수 없는 파일은 로그만 남기고 건너뛴다(형식 확인은 부르는 쪽)."""
+        out = []
+        for path in sorted(self.designs_dir.glob('*.json')):
+            try:
+                out.append((path.stem, json.loads(path.read_text(encoding='utf-8'))))
+            except (OSError, ValueError) as e:
+                log.warning('[저장소] %s 건너뜀: %s', path.name, e)
+        return out
+
+    def _put_base(self, design):
+        """기본 설계를 같은 ID 에 덮어쓴다(레시피 파일을 다시 읽은 것 — E-55 ①)."""
+        self._write(self._design_path(design['design_id']), design)
+
+    def _insert_design(self, record):
+        """새 설계 한 줄. 같은 ID 가 이미 있으면 ValueError(저장한 설계는 고치지 않는다 — 409 '다시 생성해 주세요')."""
+        path = self._design_path(record['design_id'])
+        with self._lock:
+            if path.exists():
+                raise ValueError(f'{record["design_id"]} 가 이미 있다 — 저장한 설계는 고치지 않는다(new_design_id 부터 다시)')
+            self._write(path, record)
+
+    def _insert_build(self, build):
+        """조립 기록 한 줄. 반환: 새로 썼으면 True, 같은 run_id 가 있으면 False. run_id 가 파일 이름으로 못 쓰는 글자면 ValueError."""
+        path = self.builds_dir / f'{self._safe(build.get("run_id"))}.json'
+        if path.exists():
+            return False
+        self._write(path, build)
+        return True
+
     def _design_path(self, design_id):
         """design_id → 파일 경로. 파일 이름으로 못 쓰는 ID 는 KeyError(없는 설계와 같게 — 경로 밖으로 못 나가게)."""
         try:
@@ -469,3 +512,152 @@ class DesignStore:
         tmp = path.with_suffix('.tmp')
         tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding='utf-8')
         os.replace(tmp, path)
+
+
+GEN_LOG_COLS = ('kind', 'text', 'template', 'base_id', 'model', 'prompt_sha', 'messages', 'calls', 'attempts', 'result',
+                'fallback', 'error', 'elapsed_s', 'design_id')       # gen_logs 칸 = 기록 키(설계_DB 3절). started 는 시각으로 바꿔 넣음
+GEN_LOG_JSON = ('messages', 'calls', 'attempts', 'result', 'error')
+DESIGN_SELECT = ('SELECT design_id, family, version, parent_id, made_by, prompt, check_result, parts, recipe, placements, '
+                 'ai_template, ai_reason, template_changed, schema, extract(epoch FROM created)::float8 FROM designs')
+
+
+class PgDesignStore(DesignStore):
+    """DesignStore 의 PostgreSQL 판(W088) — 위 '파일(JSON 폴더)' 함수 · save_gen_log · _mark_gen_log 만 SQL 로 바꾼다(규칙 · 검사는 그대로).
+
+    입력: url(DATABASE_URL — postgresql://사용자:비밀번호@호스트:5432/이름, .env 에만), recipe_dir · block_mm(DesignStore 와 같음).
+    바깥 영향: DB 읽기 · 쓰기 — 요청마다 짧게 연결한다(웹 PC 안이라 수 ms, 끊긴 연결을 들고 있지 않게).
+    실패: DB 에 못 붙으면 OSError(일시 실패 — save_build 는 retry 없이 ok false 라 로봇이 다시 보냄), 키 겹침 · 제약 · 외래 키 위반 ·
+          값 꼴 틀림은 ValueError(저장 안 함 — REST 409 · save_build 영구 거절), 없는 설계는 KeyError. 표가 없으면 켜지지 않는다.
+    생성 칸(template_id · family · version · template_changed)은 넣지 않는다 — DB 가 design_id · ai_template 에서 계산한다(설계_DB 6절).
+    """
+
+    def __init__(self, url, recipe_dir, block_mm):
+        """DB 에 한 번 붙어 표가 있는지 본다. 실패: 못 붙으면 OSError, 표가 없으면(001_schema.sql 안 돔) ValueError — 웹이 켜지지 않는다."""
+        import psycopg                                  # 웹 PC 이미지에만 있다 — JSON 폴더로 돌 때(시험 · CI)는 필요 없게 여기서
+        from psycopg.types.json import Json
+        self._pg, self._json = psycopg, Json
+        self.url = url
+        self.recipe_dir = Path(recipe_dir)
+        self.block_mm = list(block_mm)
+        self.extent = ori_extents(self.block_mm)
+        self._lock = threading.Lock()
+        try:
+            with self._db() as cur:
+                cur.execute('SELECT 1 FROM designs LIMIT 1')
+        except psycopg.errors.UndefinedTable as e:
+            raise ValueError('DB 에 designs 표가 없다 — web/db/init/001_schema.sql 을 먼저 적용') from e
+
+    @contextmanager
+    def _db(self):
+        """연결 하나를 열어 커서를 주고 끝나면 커밋(예외면 되돌림) · 닫는다. 연결 실패 → OSError, 제약 위반 · 값 꼴 틀림 → ValueError."""
+        pg = self._pg
+        try:
+            with pg.connect(self.url, connect_timeout=5) as conn, conn.cursor() as cur:
+                yield cur
+        except (pg.IntegrityError, pg.DataError) as e:
+            raise ValueError(f'DB 가 거절({type(e).__name__}): {e.diag.message_primary or e}') from e
+        except pg.OperationalError as e:
+            raise OSError(f'DB 연결 실패: {e}') from e
+
+    @staticmethod
+    def _row(r):
+        """designs 한 줄 → design/4.0 dict(JSON 폴더 기록과 같은 모양 — 칸 check_result → 키 check, 시각 → epoch 초)."""
+        (design_id, family, version, parent_id, made_by, prompt, check, parts, recipe, placements,
+         ai_template, ai_reason, changed, schema, created) = r
+        d = {'schema': schema, 'design_id': design_id, 'family': family, 'version': version, 'parent_id': parent_id,
+             'made_by': made_by, 'recipe': recipe, 'placements': placements, 'parts': parts, 'created': round(created, 3)}
+        if made_by != 'cad':                            # 기본 설계는 등록 때 이 칸들이 없다(register_base 모양 그대로)
+            d.update(prompt=prompt, check=check, ai_template=ai_template, ai_reason=ai_reason, template_changed=changed)
+        return d
+
+    def _load(self, design_id):
+        """설계 한 줄. 없으면 KeyError."""
+        if not isinstance(design_id, str):
+            raise KeyError(design_id)
+        with self._db() as cur:
+            cur.execute(DESIGN_SELECT + ' WHERE design_id = %s', (design_id,))
+            r = cur.fetchone()
+        if r is None:
+            raise KeyError(design_id)
+        return self._row(r)
+
+    def _has(self, design_id):
+        """그 ID 의 설계가 있나. 글자가 아니면 False."""
+        if not isinstance(design_id, str):
+            return False
+        with self._db() as cur:
+            cur.execute('SELECT 1 FROM designs WHERE design_id = %s', (design_id,))
+            return cur.fetchone() is not None
+
+    def _ids(self, template):
+        """그 Template 의 설계 ID 목록(생성 칸 template_id 로 거름)."""
+        with self._db() as cur:
+            cur.execute('SELECT design_id FROM designs WHERE template_id = %s', (template,))
+            return [r[0] for r in cur.fetchall()]
+
+    def _designs(self):
+        """(design_id, 설계) 전부 — design_id 순, 한 번에 읽음."""
+        with self._db() as cur:
+            cur.execute(DESIGN_SELECT + ' ORDER BY design_id')
+            rows = cur.fetchall()
+        return [(r[0], self._row(r)) for r in rows]
+
+    def _put_base(self, design):
+        """기본 설계를 같은 ID 에 덮어쓴다(INSERT … ON CONFLICT DO UPDATE — 기본 설계 줄만, E-55 ①). recipe 는 json 칸이라 글자 그대로."""
+        J = self._json
+        with self._db() as cur:
+            cur.execute('INSERT INTO designs (design_id, made_by, parts, recipe, placements, schema, created) '
+                        'VALUES (%s, %s, %s, %s, %s, %s, to_timestamp(%s)) '
+                        'ON CONFLICT (design_id) DO UPDATE SET parts = EXCLUDED.parts, recipe = EXCLUDED.recipe, '
+                        "placements = EXCLUDED.placements, schema = EXCLUDED.schema, created = EXCLUDED.created WHERE designs.made_by = 'cad'",
+                        (design['design_id'], design['made_by'], J(design['parts']), J(design['recipe']), J(design['placements']),
+                         design['schema'], design['created']))
+
+    def _insert_design(self, record):
+        """새 설계 한 줄(덮어쓰기 없음). 같은 ID · 제약 위반이면 ValueError — 409 '다시 생성해 주세요'(설계_DB 8절 C 가)."""
+        J = self._json
+        with self._db() as cur:
+            cur.execute('INSERT INTO designs (design_id, parent_id, made_by, prompt, check_result, parts, recipe, placements, '
+                        'ai_template, ai_reason, schema, created) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, to_timestamp(%s))',
+                        (record['design_id'], record['parent_id'], record['made_by'], record['prompt'], J(record['check']),
+                         J(record['parts']), J(record['recipe']), J(record['placements']), record['ai_template'],
+                         record['ai_reason'], record['schema'], record['created']))
+
+    def _builds(self):
+        """조립 기록 전부 → build/2 dict(칸 part_errors → 키 parts, 설계_DB 2절)."""
+        with self._db() as cur:
+            cur.execute('SELECT schema, run_id, design_id, result, placed, total, duration_s, stop_count, part_errors FROM builds')
+            rows = cur.fetchall()
+        return [{'schema': schema, 'run_id': run_id, 'design_id': design_id, 'result': result, 'placed': placed, 'total': total,
+                 'duration_s': None if dur is None else round(dur, 3),        # real(4바이트) 끝자리 흔들림을 기록 값(ms)으로
+                 'stop_count': stops, 'parts': parts}
+                for schema, run_id, design_id, result, placed, total, dur, stops, parts in rows]
+
+    def _insert_build(self, build):
+        """조립 기록 한 줄(INSERT … ON CONFLICT (run_id) DO NOTHING). 반환: 새로 넣었으면 True. 꼴 · 제약 · 외래 키 위반은 ValueError."""
+        with self._db() as cur:
+            cur.execute('INSERT INTO builds (run_id, design_id, result, placed, total, duration_s, stop_count, part_errors, schema) '
+                        'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (run_id) DO NOTHING RETURNING run_id',
+                        (build.get('run_id'), build.get('design_id'), build.get('result'), build.get('placed'), build.get('total'),
+                         build.get('duration_s'), build.get('stop_count'), self._json(build.get('parts') or []), build['schema']))
+            return cur.fetchone() is not None
+
+    def save_gen_log(self, log):
+        """AI 호출 기록 한 줄(설계_DB 3절). 반환: 기록 번호(글자 — design_gen 이 저장 때 돌려줌). 칸에 없는 키는 extra 에 그대로."""
+        J = self._json
+        cols = list(GEN_LOG_COLS)
+        vals = [J(log.get(k)) if k in GEN_LOG_JSON and log.get(k) is not None else log.get(k) for k in cols]
+        extra = {k: v for k, v in log.items() if k not in GEN_LOG_COLS and k not in ('started', 'file')}
+        with self._db() as cur:
+            cur.execute(f'INSERT INTO gen_logs ({", ".join(cols)}, started, extra) '
+                        f'VALUES ({", ".join(["%s"] * len(cols))}, to_timestamp(%s), %s) RETURNING id',
+                        (*vals, log.get('started') or time.time(), J(extra) if extra else None))
+            return str(cur.fetchone()[0])
+
+    def _mark_gen_log(self, name, design_id):
+        """AI 호출 기록 번호 name 의 줄에 실제로 저장된 design_id 를 적는다(#14). 못 쓰면 로그만(설계 저장은 이미 끝남)."""
+        try:
+            with self._db() as cur:
+                cur.execute('UPDATE gen_logs SET design_id = %s WHERE id = %s', (design_id, int(name)))
+        except (OSError, ValueError, TypeError) as e:
+            log.warning('[저장소] AI 기록 %s 에 %s 를 못 적음: %s', name, design_id, e)
