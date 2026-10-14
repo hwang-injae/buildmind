@@ -236,6 +236,12 @@ button.reset:hover:not(:disabled) { filter: brightness(1.08); border-color: var(
 .btn-row.safety { padding-top: 4px; }
 .head-btn { margin-left: auto; min-height: 36px; padding: 6px 14px; font-size: 14px; }
 .head-btn.list-btn { border-color: var(--primary); color: var(--primary); }
+.name-btn ~ .list-btn { margin-left: 0; } /* [이름 고치기]가 오른쪽 묶음을 시작 — 목록 버튼은 그 옆에 붙음 */
+.name-edit { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.name-edit input { flex: 1; min-width: 0; min-height: 40px; padding: 8px 12px; font: inherit; font-size: 15px; color: var(--text);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.name-edit input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.name-edit .result { flex-basis: 100%; margin: 0; }
 .send-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .send-row button { min-width: 220px; }
 .send-row small { font-size: 13px; }

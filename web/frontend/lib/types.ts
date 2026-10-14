@@ -150,6 +150,7 @@ export interface Design {
   version: string;
   parent_id: string | null;
   made_by: string;
+  display_name?: string | null; // 사람이 붙인 표시 이름(W197 — 없으면 '벤치 V001'만)
   parts: { schema: string; parts: DesignPart[] };
   placements: { steps: { part_id: string; sequence: number }[] };
 }
@@ -161,6 +162,7 @@ export interface DesignSummary {
   version: string;
   parent_id: string | null;
   made_by: string;
+  display_name?: string | null;
   block_count: number;
   size_mm: [number, number, number];
 }

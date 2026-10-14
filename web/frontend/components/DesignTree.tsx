@@ -4,7 +4,7 @@
 // 누르면 3D 로 보기만 한다. 로봇에 보내는 것은 3D 아래 [조립] 하나(DesignView — 10/13 PL) — 보는 것과 보내는 것을 나눈다.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '@/lib/api';
-import { MADE_KO, designName } from '@/lib/names';
+import { MADE_KO, designName, setDisplayNames } from '@/lib/names';
 import type { DesignSummary } from '@/lib/types';
 
 const FAMILY_KO: Record<string, string> = { chair: '의자', desk: '책상' };
@@ -20,7 +20,10 @@ export default function DesignTree({ picked, onRobot, onPick }: { picked: string
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    api.listDesigns().then(setRows); // 열 때마다 새로 받는다 — 방금 저장한 설계도 보이게
+    api.listDesigns().then((r) => {
+      if (r) setDisplayNames(r); // 표시 이름(W197)도 최신으로 — 다른 화면에서 고친 이름
+      setRows(r);
+    }); // 열 때마다 새로 받는다 — 방금 저장한 설계도 보이게
   }, []);
 
   // 부모 → 자식 표. 부모가 목록에 없으면(지워졌거나 아직 안 옴) 그 가구의 맨 앞 열에 둔다 — 설계가 사라지지 않게

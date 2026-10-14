@@ -145,3 +145,16 @@ def test_get_design_answer_is_json(pg):
     assert res['success'] is True and isinstance(res['created'], float)
     json.dumps(res)
     assert pg.answer_get_design({'design_id': '001_CHAIR_BENCH_V077'})['success'] is False
+
+
+def test_display_name_on_db(pg):
+    """표시 이름(W197) — DB 칸 display_name 만 바뀌고(레시피 · 지문 그대로), 기본 설계를 다시 등록해도 남고, 지우면 칸이 빠진다(JSON 폴더와 같은 모양)."""
+    recipe = json.dumps(pg.get_design(BENCH)['recipe'])
+    assert pg.set_display_name(BENCH, '젠가 탑 4층') == '젠가 탑 4층'
+    pg.register_bases()
+    got = pg.get_design(BENCH)
+    assert got['display_name'] == '젠가 탑 4층' and json.dumps(got['recipe']) == recipe
+    assert next(r for r in pg.list_designs() if r['design_id'] == BENCH)['display_name'] == '젠가 탑 4층'
+    with pytest.raises(KeyError):
+        pg.set_display_name('001_CHAIR_BENCH_V077', '없음')
+    assert pg.set_display_name(BENCH, None) is None and 'display_name' not in pg.get_design(BENCH)

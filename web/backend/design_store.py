@@ -32,6 +32,7 @@ SCHEMA_PARTS = 'parts/4.0'
 SCHEMA_BUILD = 'build/2'
 RECIPE_SUFFIX = '_recipe.json'
 MADE_BY_NEW = ('web', 'voice', 'scan')       # save_design 으로 들어오는 made_by(IRD 2장) — cad 는 register_base 만
+DISPLAY_NAME_MAX = 40        # 표시 이름 글자 수 상한(W197) — 화면 제목 · 목록 한 줄에 들어가게
 AI_NONE = 'NONE'    # AI 판단 기록 ai_template — AI 가 Template 을 못 고름(맞는 모양 없음 · 호출 실패, 설계_DB 1절 · 10/13 PL 8절 B 나)
 SAFE_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.\-]*')   # 파일 이름으로 쓰는 ID — 경로 글자(/ \ ..)를 막는다
 DESIGN_ID = re.compile(r'([0-9]{3}(?:_[A-Z]+)+)_V([0-9]{3})')   # <Template ID>_V<3자리>(E-84) — 예 001_CHAIR_BENCH_V001
@@ -110,6 +111,12 @@ class DesignStore:
         family = family_of(design_id)
         doc = RecipeDocument.load(self.recipe_dir, design_id)
         design = doc.design(design_id)
+        try:                        # 사람이 붙인 표시 이름(W197)은 레시피에 없다 — 다시 등록해도 지우지 않는다
+            name = self._load(design_id).get('display_name')
+        except (KeyError, ValueError, OSError, AttributeError):
+            name = None
+        if name:
+            design['display_name'] = name
         design.update(schema=SCHEMA_DESIGN, family=family, version='V000', parent_id=None, made_by='cad',
                       parts=RecipeToParts(design_id, family, self.block_mm).convert(doc.recipe, doc.placements),
                       created=round(time.time(), 3))
@@ -249,7 +256,7 @@ class DesignStore:
             try:
                 d = self._checked(d)
                 parts = d['parts']['parts']
-                row = {k: d.get(k) for k in ('design_id', 'family', 'version', 'parent_id', 'made_by')}
+                row = {k: d.get(k) for k in ('design_id', 'family', 'version', 'parent_id', 'made_by', 'display_name')}
                 row.update(block_count=len(parts), size_mm=self._size_mm(parts),
                            last_build=build_summary(last[d['design_id']]) if d.get('design_id') in last else None)
             except (ValueError, KeyError, TypeError) as e:
@@ -392,6 +399,26 @@ class DesignStore:
             return None
         return n if t == template else None
 
+    # ---------- 표시 이름(W197) ----------
+    def set_display_name(self, design_id, name):
+        """사람이 보는 설계 이름을 붙이거나(글자) 지운다(None · 빈 글자) — 10/14 PL W197(민범진 제안 2).
+
+        design_id · 레시피 · 부품 이름 · 기록은 그대로다(로봇 쪽 영향 없음). 저장한 설계에서 이 칸만 고칠 수 있다(E-55 예외 — 결정 기록은 PM).
+        입력: name = 앞뒤 빈칸을 뗀 DISPLAY_NAME_MAX 글자 이하, 줄바꿈 · 제어 글자 없음. 출력: 저장한 이름(지웠으면 None).
+        실패: 없는 설계 KeyError, 이름 꼴이 틀리면 ValueError(저장 안 함).
+        """
+        if name is not None and not isinstance(name, str):
+            raise ValueError('표시 이름은 글자여야 한다')
+        name = (name or '').strip() or None
+        if name is not None:
+            if len(name) > DISPLAY_NAME_MAX:
+                raise ValueError(f'표시 이름은 {DISPLAY_NAME_MAX}자 이하다({len(name)}자)')
+            if any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+                raise ValueError('표시 이름에 줄바꿈 · 제어 글자를 쓸 수 없다')
+        self._set_display(design_id, name)
+        log.info('[저장소] 표시 이름 %s = %r', design_id, name)
+        return name
+
     # ---------- 조립 기록 ----------
     def save_build(self, build):
         """build/2 하나를 builds/<run_id>.json 으로 저장한다. 반환: 새로 저장했으면 True, 같은 run_id 가 이미 있으면 False.
@@ -485,6 +512,16 @@ class DesignStore:
                 raise ValueError(f'{record["design_id"]} 가 이미 있다 — 저장한 설계는 고치지 않는다(new_design_id 부터 다시)')
             self._write(path, record)
 
+    def _set_display(self, design_id, name):
+        """저장된 설계 파일의 display_name 칸만 바꾼다(None 이면 칸을 뺌). 없으면 KeyError."""
+        with self._lock:
+            design = self._load(design_id)
+            if name is None:
+                design.pop('display_name', None)
+            else:
+                design['display_name'] = name
+            self._write(self._design_path(design_id), design)
+
     def _insert_build(self, build):
         """조립 기록 한 줄. 반환: 새로 썼으면 True, 같은 run_id 가 있으면 False. run_id 가 파일 이름으로 못 쓰는 글자면 ValueError."""
         path = self.builds_dir / f'{self._safe(build.get("run_id"))}.json'
@@ -519,7 +556,7 @@ GEN_LOG_COLS = ('kind', 'text', 'template', 'base_id', 'model', 'prompt_sha', 'm
                 'fallback', 'error', 'elapsed_s', 'design_id')       # gen_logs 칸 = 기록 키(설계_DB 3절). started 는 시각으로 바꿔 넣음
 GEN_LOG_JSON = ('messages', 'calls', 'attempts', 'result', 'error')
 DESIGN_SELECT = ('SELECT design_id, family, version, parent_id, made_by, prompt, check_result, parts, recipe, placements, '
-                 'ai_template, ai_reason, template_changed, schema, extract(epoch FROM created)::float8 FROM designs')
+                 'ai_template, ai_reason, template_changed, schema, extract(epoch FROM created)::float8, display_name FROM designs')
 
 
 class PgDesignStore(DesignStore):
@@ -565,11 +602,13 @@ class PgDesignStore(DesignStore):
     def _row(r):
         """designs 한 줄 → design/4.0 dict(JSON 폴더 기록과 같은 모양 — 칸 check_result → 키 check, 시각 → epoch 초)."""
         (design_id, family, version, parent_id, made_by, prompt, check, parts, recipe, placements,
-         ai_template, ai_reason, changed, schema, created) = r
+         ai_template, ai_reason, changed, schema, created, display_name) = r
         d = {'schema': schema, 'design_id': design_id, 'family': family, 'version': version, 'parent_id': parent_id,
              'made_by': made_by, 'recipe': recipe, 'placements': placements, 'parts': parts, 'created': round(created, 3)}
         if made_by != 'cad':                            # 기본 설계는 등록 때 이 칸들이 없다(register_base 모양 그대로)
             d.update(prompt=prompt, check=check, ai_template=ai_template, ai_reason=ai_reason, template_changed=changed)
+        if display_name is not None:                    # JSON 폴더와 같게 — 붙였을 때만 칸이 있다(W197)
+            d['display_name'] = display_name
         return d
 
     def _load(self, design_id):
@@ -620,10 +659,20 @@ class PgDesignStore(DesignStore):
         J = self._json
         with self._db() as cur:
             cur.execute('INSERT INTO designs (design_id, parent_id, made_by, prompt, check_result, parts, recipe, placements, '
-                        'ai_template, ai_reason, schema, created) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, to_timestamp(%s))',
+                        'ai_template, ai_reason, schema, created, display_name) '
+                        'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, to_timestamp(%s), %s)',
                         (record['design_id'], record['parent_id'], record['made_by'], record['prompt'], J(record['check']),
                          J(record['parts']), J(record['recipe']), J(record['placements']), record['ai_template'],
-                         record['ai_reason'], record['schema'], record['created']))
+                         record['ai_reason'], record['schema'], record['created'], record.get('display_name')))
+
+    def _set_display(self, design_id, name):
+        """display_name 칸만 바꾼다(UPDATE — 다른 칸은 그대로). 없으면 KeyError."""
+        if not isinstance(design_id, str):
+            raise KeyError(design_id)
+        with self._db() as cur:
+            cur.execute('UPDATE designs SET display_name = %s WHERE design_id = %s RETURNING design_id', (name, design_id))
+            if cur.fetchone() is None:
+                raise KeyError(design_id)
 
     def _builds(self):
         """조립 기록 전부 → build/2 dict(칸 part_errors → 키 parts, 설계_DB 2절)."""

@@ -698,3 +698,30 @@ def test_frontend_pages_are_not_reused_from_cache(store, tmp_path, monkeypatch):
     page = client.get('/')
     assert page.status_code == 200 and '새 화면' in page.text and page.headers['cache-control'] == 'no-cache'
     assert 'cache-control' not in client.get('/_next/static/chunks/a1b2.js').headers
+
+
+def test_display_name_set_clear_and_kept_on_reregister(store):
+    """표시 이름(W197): 붙이기(앞뒤 빈칸 뗌) · 목록 칸 · 기본 설계를 다시 등록해도 남음 · 빈 글자로 지움 · 꼴이 틀리면 저장 안 함.
+    design_id · 레시피는 그대로(로봇 쪽 영향 없음)."""
+    recipe = store.get_design(BENCH)['recipe']
+    assert store.set_display_name(BENCH, '  젠가 탑 4층 ') == '젠가 탑 4층'
+    assert store.get_design(BENCH)['display_name'] == '젠가 탑 4층' and store.get_design(BENCH)['recipe'] == recipe
+    assert next(r for r in store.list_designs() if r['design_id'] == BENCH)['display_name'] == '젠가 탑 4층'
+    store.register_bases()
+    assert store.get_design(BENCH)['display_name'] == '젠가 탑 4층'
+    for bad in ('가' * 41, '두 줄\n이름', 3):
+        with pytest.raises(ValueError):
+            store.set_display_name(BENCH, bad)
+    with pytest.raises(KeyError):
+        store.set_display_name('001_CHAIR_BENCH_V077', '없는 설계')
+    assert store.set_display_name(BENCH, '') is None and 'display_name' not in store.get_design(BENCH)
+
+
+def test_rename_route(store):
+    """PUT /api/designs/{id}/name — 붙이기 · 지우기(null) · 없는 설계 404 · 꼴 틀림 400."""
+    client, _ = make_client(store)
+    assert client.put(f'/api/designs/{BENCH}/name', json={'name': '젠가 탑'}).json() == {'design_id': BENCH, 'display_name': '젠가 탑'}
+    assert client.get(f'/api/designs/{BENCH}').json()['display_name'] == '젠가 탑'
+    assert client.put(f'/api/designs/{BENCH}/name', json={'name': None}).json() == {'design_id': BENCH, 'display_name': None}
+    assert client.put('/api/designs/001_CHAIR_BENCH_V077/name', json={'name': '이름'}).status_code == 404
+    assert client.put(f'/api/designs/{BENCH}/name', json={'name': '가' * 41}).status_code == 400

@@ -8,7 +8,7 @@
 import threading
 import uuid
 from collections import OrderedDict
-from typing import Literal
+from typing import Literal, Optional
 
 from design_gen import GenError, scan_actions
 from design_store import split_design_id
@@ -262,6 +262,26 @@ def get_design(design_id: str, request: Request):
         raise HTTPException(404, f'{design_id} 설계가 없다') from None
     except ValueError as e:
         raise HTTPException(409, str(e)) from None
+
+
+class NameBody(BaseModel):
+    """표시 이름(W197) — 글자면 붙이고, 빈 글자 · null 이면 지운다."""
+    name: Optional[str] = None
+
+
+@router.put('/{design_id}/name')
+def rename(design_id: str, body: NameBody, request: Request):
+    """설계의 표시 이름을 붙이거나 지운다(W197 — design_id · 레시피는 그대로) → {design_id, display_name}.
+    없는 설계 404, 이름 꼴이 틀리면 400(글자 수 · 줄바꿈), 저장소 끊김 503. 바깥 영향: 저장소 한 칸 쓰기."""
+    try:
+        name = request.app.state.store.set_display_name(design_id, body.name)
+    except KeyError:
+        raise HTTPException(404, f'{design_id} 설계가 없다') from None
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    except OSError as e:
+        raise HTTPException(503, f'저장소에 못 썼어요 → DB · 데이터 폴더 → backend 로그({e})') from None
+    return {'design_id': design_id, 'display_name': name}
 
 
 @router.get('/{design_id}/builds')
