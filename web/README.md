@@ -182,7 +182,7 @@ web/backend/
 │                     new_design_id · save_design(E-84 이름) · save_build(같은 run_id 한 번) + 로봇 get_design · save_build 답.
 │                     기본 설계는 도면에서 온 것이라 등록 때 check_design 을 부르지 않는다(로봇 PC 없이도 목록이 떠야 함)
 ├── prompts/          design_system.txt(설계 직접 작성 + 역할 목록 + 잡기 규칙 · 스캔 채우기 절). 후보 3개 JSON Schema 는 design_gen._candidates_format(코드)
-├── voice.py          VoiceListener — 호스트(마이크 버튼 → 시동어 → STT → d2/hmi/intent · '멈춰'면 d2/safety/stop/req, 점검 --check)
+├── voice.py          VoiceListener — 호스트(마이크 버튼 → 시동어 → STT → d2/hmi/intent · '정지'(대표 — '멈춰' 등도)면 d2/safety/stop/req, 점검 --check)
 ├── mock_robot.py     가짜 로봇 PC(W126 ✅, MQTT 만): 다리 연결 신호 · 처음 상태 · 가짜 조립(블록마다 progress) · 정지 · 스캔(→ SCAN_REVIEW +
 │                     scan_result, 추정 2개) · check_design = 진짜 검사 묶음(DesignChecker + 변환기 ①). 실행 python3 web/backend/mock_robot.py --step 1.0
 ├── requirements.txt  fastapi · uvicorn[standard] · paho-mqtt · pyyaml (W108 openai · W088 psycopg 더함)
