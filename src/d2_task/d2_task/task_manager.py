@@ -526,7 +526,7 @@ class TaskManager:
             handler()
         except Exception as e:        # noqa: BLE001 — 어떤 오류든 멈추고 사람을 부른다
             LOG.exception('상태 %s 에서 예상 못 한 오류', self.state)
-            self._to_error(f'예상 못 한 오류({e!r})')
+            self._to_error(f'예상 못 한 오류로 작업을 멈췄어요({type(e).__name__}). 로봇 담당자에게 알려 주세요')
         finally:
             with self._lock:
                 self._in_handler = False
@@ -660,7 +660,7 @@ class TaskManager:
         elif status == 'WAIT_SUPPLY':
             self._enter_wait_supply(r['part_id'], r.get('alert'))
         else:                                  # NO_SUPPORT · 재관측 뒤에도 UNKNOWN_BLOCK
-            self._to_error(f'{r["part_id"]}: {status}')
+            self._to_error(f'{r["part_id"]}: 다음 블록을 정하지 못했어요({status}). 작업대를 확인하고 로봇 담당자에게 알려 주세요')
 
     def _next_goal(self, pick_message='{part} 를 집으러 갑니다'):
         """다음 집기 목표를 공급 방식에 맞게 정한다(목표 블록은 작업 판단이, 어디서 집을지는 방식이 정한다).
@@ -700,7 +700,7 @@ class TaskManager:
         (정지가 끼었거나, 정지 뒤 [다시 시작]까지 끝났어도 그 전 요청의 늦은 답은 적용하지 않는다). 로봇은 move_to 외에 움직이지 않는다.
         """
         if not self._scatter.configured:
-            self._to_error('흩뿌린 공급 설정(열림 폭)이 아직 정해지지 않았다')
+            self._to_error('흩뿌린 공급 설정(열림 폭)이 없어 집을 수 없어요. 로봇 담당자에게 설정 확인을 부탁하세요')
             return
         stops_before = self._stop_count
         ticket = self._scatter.begin((self._epoch, stops_before))
@@ -802,7 +802,7 @@ class TaskManager:
             only_tilted = counts.get('tilted', 0) > 0 and all(n == 0 for k, n in counts.items() if k not in ('tilted', 'under'))
             self._enter_wait_supply(part_id, ('tilted_block' if only_tilted else 'no_match_block', result['message'] + ' — 정리한 뒤 [계속]을 누르세요'))
         elif status == 'NOT_CONFIGURED':
-            self._to_error('흩뿌린 공급 설정(열림 폭)이 아직 정해지지 않았다')
+            self._to_error('흩뿌린 공급 설정(열림 폭)이 없어 집을 수 없어요. 로봇 담당자에게 설정 확인을 부탁하세요')
         elif status == 'BLOCKED' and self._scatter.via_spare and self._bad_blocks < PLAN_STREAK - 1:
             self._bad_blocks += 1                  # 블록 값이 잘못 나오면 다시 찍는다(one_pick — 3번째에 사람)
             self._set('SELECT', None, f'{result["message"]} — 다시 찍습니다')
@@ -810,7 +810,7 @@ class TaskManager:
             self._bad_blocks = 0
             self._to_error(result['message'])
         else:                                      # LOOKUP_FAILED — 횟수 상한 정책이 정해지기 전이라 다시 시도하지 않고 사람을 부른다
-            self._to_error(f'find_blocks 응답을 쓸 수 없다({result.get("reason", status)})')
+            self._to_error(f'손목 카메라의 블록 찾기 결과를 쓸 수 없어요({result.get("reason", status)}). 손목 카메라 기능을 확인하고 비전 담당에게 알려 주세요')
 
     def _pick_place(self):
         """PICK_PLACE: 목표 하나를 pick_place 로 보내고 결과를 SDD 7.1 표대로 처리한다.
@@ -862,7 +862,7 @@ class TaskManager:
             if self._plan_retry < 1:           # 같은 목표로 다시 계획 1번
                 self._plan_retry += 1
             else:
-                self._to_error(f'{self.goal["part_id"]}: PLAN_FAILED(다시 계획 1번도 실패)')
+                self._to_error(f'{self.goal["part_id"]}: 로봇이 갈 길을 찾지 못했어요(PLAN_FAILED, 다시 계획해도 실패). 작업대 위 물건을 확인하고 로봇 담당자에게 알려 주세요')
         elif why == 'GRASP_FAILED':
             self._grasp_failed()
         elif why == 'SLOT_EMPTY':
@@ -1123,7 +1123,7 @@ class TaskManager:
         if r is None:                          # 흩뿌림은 전환까지 끝냈다(다시 기다림 · 집기 · 오류)
             return None
         if r['status'] != 'FOUND':
-            return self._to_error(f'공급을 채웠는데 다음 블록을 못 골랐다({r["status"]})')
+            return self._to_error(f'공급을 채웠는데 다음 블록을 정하지 못했어요({r["status"]}). 로봇 담당자에게 알려 주세요')
         self._start_goal(r)
         self._set('PICK_PLACE', None, f'공급을 채웠다. {r["part_id"]} 를 이어서 집습니다')
         return None
@@ -1423,7 +1423,7 @@ class TaskManager:
         elif r['status'] == 'WAIT_SUPPLY':
             self._enter_wait_supply(r['part_id'])
         else:
-            self._to_error(f'공급 칸을 바꾸는 중 이상한 결과({r["status"]})')
+            self._to_error(f'공급 칸을 바꾸는 중 예상 못 한 결과가 나왔어요({r["status"]}). 로봇 담당자에게 알려 주세요')
 
     def _enter_wait_supply(self, part_id, alert=None):
         """WAIT_SUPPLY 상태로 들어간다. 칸 방식은 알림(supply_empty)을 아직 안 낸다 — 관측 자세에 도착한 뒤 _wait_supply 가 낸다.
@@ -1461,11 +1461,13 @@ class TaskManager:
                 ok, message = self.io.request_stop('TIMEOUT')    # 파일 기록 대기 · 상태 복구보다 먼저, 잠금 밖에서 보낸다
             except Exception as e:              # 정지 요청 자체가 실패해도 다음 이동을 막고 사람에게 알린다
                 ok, message = False, repr(e)
+            LOG.warning('TIMEOUT 정지 요청 %s: %s', '접수' if ok else '실패', message)
             with self._lock:
                 if self.safety and self.safety.get('stopped'):
                     self._enter_stopped()
                 else:
-                    self._to_error(f'{where}: TIMEOUT — 정지 상태 확인 대기(요청 {"접수" if ok else "실패"}: {message})')
+                    self._to_error(f'{where}: 시간 안에 끝나지 않아(TIMEOUT) 정지를 요청했지만(요청 {"접수" if ok else "실패"}) 아직 정지가 확인되지 않아 다시 시작할 수 없어요. '
+                                   '로봇이 멈췄는지 확인하고 화면의 [정지]를 누르세요. 정지가 확인되면 [다시 시작]을 누르세요')
             return
         if reason in STOP_REASONS:             # 정지 노드의 신호를 기다린다
             self._enter_stopped()
@@ -1492,7 +1494,7 @@ class TaskManager:
         try:
             self.planner.update_progress(rows)
         except ValueError as e:
-            self._to_error(f'진행 확인 답이 이상하다: {e}')
+            self._to_error(f'손목 카메라의 진행 확인 답을 쓸 수 없어요({e}). 비전 담당에게 알려 주세요')
             return False
         self.io.publish_progress(self.planner.progress_message(self.run_id, time.time()))
         return True
@@ -1643,7 +1645,7 @@ class TaskManager:
             names = sorted({SERVICE_LABEL.get(n, n) for n in missing})
             return False, '', f'서버가 안 떠 있다: {" · ".join(names)} 준비 안 됨 — 로봇 PC에서 해당 기능이 켜져 있는지 확인한 뒤 다시 누르세요'
         if self._timeout_pending:
-            return False, 'STOPPED', '시간 초과로 로봇을 멈추라고 요청했고, 정지 확인을 기다리는 중이라 시작할 수 없어요. 확인 후 화면의 복구 안내를 따라 주세요'
+            return False, 'STOPPED', '시간 초과 뒤 정지가 아직 확인되지 않아 시작할 수 없어요. 로봇이 멈췄는지 확인하고 화면의 [정지]를 누르세요. 정지가 확인되면 [다시 시작]을 누르세요'
         if not self._hmi_fresh():
             return False, '', '웹 연결 신호를 못 받았어요. 웹 PC의 웹 · 브로커와 로봇 PC의 다리(bridge)가 켜져 있는지 확인한 뒤 다시 누르세요'      # IRD 7장 BUSY 는 '기다렸다 다시'라 웹이 자동 재시도한다 → 맞는 코드가 없어 비움(E-62)
         st = self.safety
@@ -1752,9 +1754,17 @@ class TaskManager:
             self._publish(message_id, message)
 
     def _publish(self, message_id, message):
-        """state/2 한 건을 보낸다. run_id 는 조립 중(끝난 직후 포함)에만 값, message_id 는 IRD 2장 값 또는 null."""
+        """state/2 한 건을 보낸다. run_id 는 조립 중(끝난 직후 포함)에만 값, message_id 는 IRD 2장 값 또는 null.
+
+        시간 초과 뒤 정지 확인 대기 ERROR 에서는 어떤 재발행(거절 알림 포함)이든 'stop_pending' 으로 낸다 — 화면이 이 id 로
+        [다시 시작]을 막으므로 중간 알림 하나로 풀리면 안 된다(10/14 PL E-117). stopped 확인(_enter_stopped)이 대기를 풀면 붙지 않는다.
+        그리퍼 열기 대기(STOPPED 에서만 시작)와 정지 확인 대기(ERROR 에서만, STOPPED 진입 때 풀림)는 시험한 상태 · 명령 경로에서 같이 성립하지 않았다
+        (test_task_timeouts — 모든 비동기 순서를 증명한 것은 아니다). 둘 다면 기존 gripper_opening 이 먼저다.
+        """
         if self._gripper_busy and message_id != 'gripper_done':
             message_id = 'gripper_opening'          # 그리퍼 열기 답 전에는 어떤 알림이든 대기 표시를 유지한다 — 화면은 이것으로 팔 이동 버튼을 끈다(10/13 PL)
+        elif self.state == 'ERROR' and self._timeout_pending:
+            message_id = 'stop_pending'
         self.io.publish_state({'schema': 'state/2', 'stamp': time.time(), 'mode': 'auto', 'state': self.state,
                                'run_id': self.run_id, 'design_id': self.design_id, 'part_id': self.part_id,
                                'message_id': message_id, 'message': message})

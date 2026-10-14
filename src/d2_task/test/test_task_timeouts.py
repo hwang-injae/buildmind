@@ -384,3 +384,122 @@ def test_거절_시간초과_우리쪽_취소는_결과_수신_시각이_없다(
     threading.Thread(target=abort_soon).start()
     assert node.pick_place(goal(), lambda: flag['abort'], on_result=at.append) == (False, 'CANCELED')
     assert at == [] and h2.cancels == 1
+
+
+# ---------- 10/14 PL: 시간 초과 뒤 정지 확인 대기 ERROR 는 message_id 'stop_pending' ----------
+@pytest.mark.parametrize('stop_ok', [True, False])
+def test_시간초과_정지대기_ERROR는_stop_pending(stop_ok):
+    m, io = go(move_script=[(False, 'TIMEOUT')])
+    io.stop_script = [(True, '접수') if stop_ok else (False, '응답 없음')]
+    drive(m, 'ERROR')
+    last = io.states[-1]
+    assert last['state'] == 'ERROR' and last['message_id'] == 'stop_pending'
+    assert '[정지]' in last['message'] and '[다시 시작]' in last['message']
+
+
+def test_정지대기_중_재발행에도_stop_pending이_유지된다():
+    m, io = go(move_script=[(False, 'TIMEOUT')])
+    io.stop_script = [(True, '접수')]
+    drive(m, 'ERROR')
+    n = len(io.states)
+    assert m.command('start')[0] is False                  # 거절 알림도 state/2 재발행이다
+    m.on_safety(SAFE_OK)                                   # stopped 없는 신호로는 풀리지 않는다
+    m.run_once()
+    again = io.states[n:]
+    assert again and all(s['state'] == 'ERROR' and s['message_id'] == 'stop_pending' for s in again)
+
+
+def test_정지가_확인되면_stop_pending이_남지_않는다():
+    m, io = go(move_script=[(False, 'TIMEOUT')])
+    io.stop_script = [(True, '접수')]
+    drive(m, 'ERROR')
+    n = len(io.states)
+    m.on_safety(SAFE_STOP)
+    m.run_once()
+    assert m.state == 'STOPPED' and io.states[-1]['message_id'] == 'stopped'
+    m.on_safety(SAFE_OK)
+    drive(m, 'CHECK')
+    m.command('start')                                     # 대기가 풀린 뒤의 거절 알림에도 붙지 않는다
+    assert all(s['message_id'] != 'stop_pending' for s in io.states[n:])
+
+
+def test_일반_ERROR에는_stop_pending이_없고_기존_복구가_그대로다():
+    m, io = go(pick_script=[(False, 'PLAN_FAILED')] * 2)
+    drive(m, 'ERROR')
+    assert m.command('start') == (False, 'BUSY')
+    assert all(s['message_id'] != 'stop_pending' for s in io.states)
+    m.on_safety(SAFE_OK)
+    drive(m, 'RECOVER')
+    drive(m, 'CHECK')
+
+
+def test_정지대기_중_취소해_IDLE이어도_새출발_스캔은_막고_정지확인_뒤에_풀린다():
+    m, io = go(move_script=[(False, 'TIMEOUT')])
+    io.stop_script = [(True, '접수')]
+    drive(m, 'ERROR')
+    assert m.command('cancel') == (True, '') and m.state == 'IDLE'
+    io.services_ready = lambda scan=False: []              # 이 가짜는 스캔 서버 점검 인자를 모른다 — 서버는 다 떠 있다고 둔다
+    before = list(io.calls)
+    for cmd in ('start', 'scan'):
+        assert m.command(cmd, 'bench')[0] is False           # IDLE 이어도 정지 확인 전에는 팔을 움직이는 요청을 받지 않는다
+    assert m.command('select_design', 'bench')[0] is False
+    m.on_safety(SAFE_OK)
+    m.run_once()
+    assert m.state == 'IDLE' and m.halted() and [c for c in io.calls if c[0] in ('move_to', 'pick')] == \
+        [c for c in before if c[0] in ('move_to', 'pick')]
+    assert io.states[-1]['message_id'] is None               # IRD E-117 은 ERROR 만 — IDLE 거절 알림에는 붙지 않는다(현재 동작 기록)
+    m.on_safety(SAFE_STOP)
+    m.run_once()
+    assert m.state == 'STOPPED' and not m._timeout_pending
+    m.on_safety(SAFE_OK)
+    drive(m, 'IDLE')
+    assert m.command('select_design', 'bench') == (True, '')
+
+
+# ---------- 그리퍼 열기 대기(gripper_opening)와 정지 확인 대기(stop_pending)가 함께 성립하는가 ----------
+def _gripper_io():
+    from test_manual_cleanup import GripperIO       # W183 가짜(그리퍼 열기 답을 시험이 늦게 준다)
+    from d2_task.task_manager import TaskManager
+    io = GripperIO()
+    m = TaskManager(CFG, io)
+    io.manager = m
+    m.on_safety(SAFE_OK)
+    m.on_gripper({'grasped': False})
+    return m, io
+
+
+def test_정지대기_ERROR에서는_그리퍼_열기를_받지_않아_두_대기가_겹치지_않는다():
+    m, io = _gripper_io()
+    io.move_script = [(False, 'TIMEOUT')]
+    io.stop_script = [(True, '접수')]
+    assert m.command('select_design', 'bench')[0] and m.command('start')[0]
+    drive(m, 'ERROR')
+    assert m._timeout_pending
+    for cmd in ('gripper_open', 'select_design', 'start', 'scan', 'gripper_open'):
+        assert m.command(cmd, 'bench')[0] is False
+    assert not m._gripper_busy and not [c for c in io.calls if c[0] == 'gripper']
+    assert io.states[-1]['message_id'] == 'stop_pending'
+
+
+def test_정지확인이_먼저_풀고_그다음_그리퍼_열기_순서만_가능하다():
+    m, io = _gripper_io()
+    io.move_script = [(False, 'TIMEOUT')]
+    io.stop_script = [(True, '접수')]
+    assert m.command('select_design', 'bench')[0] and m.command('start')[0]
+    drive(m, 'ERROR')
+    m.on_safety(SAFE_STOP)                                  # [정지] → 정지 확인
+    m.run_once()
+    assert m.state == 'STOPPED' and not m._timeout_pending
+    m.on_gripper({'grasped': True})
+    assert m.command('gripper_open') == (True, '') and m._gripper_busy
+    mark = len(io.states)
+    m.on_safety(SAFE_OK)                                    # 열기 답 전 [다시 시작]
+    for _ in range(10):
+        m.run_once()
+        assert not m._timeout_pending                       # 그리퍼 대기 중에는 팔이 안 움직여 TIMEOUT 이 새로 생기지 않는다
+    assert all(s['message_id'] == 'gripper_opening' for s in io.states[mark:])
+    assert 'stop_pending' not in [s['message_id'] for s in io.states[mark:]]
+    m.on_gripper({'grasped': False})
+    io.finish(True)
+    assert io.states[-1]['message_id'] == 'gripper_done'
+    drive(m, 'CHECK')
