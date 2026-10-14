@@ -76,14 +76,18 @@ def parse_request(text, keys):
     return body
 
 
-FIND_AREAS = ('supply', 'spare')   # find_blocks 요청 area 칸 값 — 없으면 supply(흩뿌린 공급 영역, 지금까지와 같음)
+FIND_AREAS = ('supply', 'spare', 'assembly')   # find_blocks 요청 area 칸 값 — 없으면 supply(흩뿌린 공급 영역, 지금까지와 같음).
+# assembly(10/14 W144 — 한석형 · 민범진): 조립 자리에 방금 놓은 블록 하나(design_id · part_id 칸 필요, placed_measure)
+# 가짜 assembly 기본 답 — 재지 않음(거절)이라 작업 관리자는 다시 집지 않는다. find_assembly_json 파라미터로 바꾼다
+DEFAULT_ASSEMBLY = {'blocks': [], 'rejected': 'FEW_POINTS', 'detail': '가짜 손목 노드 — 놓은 블록을 재지 않음(find_assembly_json 으로 바꿈)'}
 
 
 def find_options(body):
     """find_blocks 요청 dict(parse_request 출력) → 선택 칸 (height_map bool, area 'supply' · 'spare'). wrist_block 과 가짜 노드가 같이 쓴다.
 
     height_map: 없으면 false · true 면 응답에 공급 영역 높이 지도(height_grid) 칸을 더한다.
-    area: 없으면 'supply'(지금까지와 같음) · 'spare' 면 YOLO 없이 받침 위 블록 하나를 깊이로 잰다(spare_measure).
+    area: 없으면 'supply'(지금까지와 같음) · 'spare' 면 YOLO 없이 받침 위 블록 하나를 깊이로 잰다(spare_measure) ·
+    'assembly' 면 조립 자리에 놓은 블록 하나(placed_measure — design_id · part_id 칸은 assembly_target 이 본다).
     실패: height_map 이 true · false 가 아니거나 area 가 FIND_AREAS 밖이면 ValueError(부르는 쪽이 SCAN_FAILED 로 답한다)."""
     hm = body.get('height_map', False)
     if not isinstance(hm, bool):
@@ -92,6 +96,18 @@ def find_options(body):
     if area not in FIND_AREAS:
         raise ValueError(f'area 칸은 {" · ".join(FIND_AREAS)} 중 하나여야 한다: {area!r}')
     return hm, area
+
+
+def assembly_target(body):
+    """find_blocks area assembly 요청 → (design_id, part_id). 둘 다 비지 않은 글자여야 한다. wrist_block 과 가짜 노드가 같이 쓴다.
+    실패: 칸이 없거나 글자가 아니면 ValueError(부르는 쪽이 SCAN_FAILED '요청 오류'로 답한다 — 측정 거절과 다르다)."""
+    out = []
+    for key in ('design_id', 'part_id'):
+        v = body.get(key)
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError(f'area assembly 요청에는 {key} 칸(비지 않은 글자)이 있어야 한다')
+        out.append(v)
+    return tuple(out)
 
 
 def ori_table(size_mm):
@@ -310,7 +326,7 @@ class MockScan:
         return {'schema': 'scan_preview/1.0', 'stamp': round(time.time() if stamp is None else float(stamp), 3), 'run_id': str(run_id),
                 'pose_id': str(pose_id), 'index': int(index), 'kind': 'capture', 'cloud_path': str(path), 'points': int(len(pts))}
 
-    def find(self, text, blocks_json='', spare_json=''):
+    def find(self, text, blocks_json='', spare_json='', assembly_json=''):
         """find_blocks: {"run_id"[, "height_map": true][, "area": "spare"]} → {"ok":true,"blocks":[…][, "height_map":{…}]}
         (IRD 4.2 칸, base_link m, 윗면 높이 높은 순).
 
@@ -318,13 +334,27 @@ class MockScan:
         area spare 면 spare_json(파라미터 find_spare_json)을 쓴다 — 빈 글자면 받침(spare_spots[0]) 가운데에 받침 yaw 로 눕힌 블록 하나
         (ideal_spare_block), "[]" 면 빈 받침. height_map 이 true 면 평평한 지도 — 공급은 supply_map_area 전체가 작업대 높이(table_z_m),
         받침은 spare_map_area 전체가 받침 윗면 높이(spare_spots[0] z_m).
+        area assembly 면 assembly_json(파라미터 find_assembly_json — {"blocks":[…], "rejected", "detail"}, 비면 DEFAULT_ASSEMBLY 거절 FEW_POINTS)에
+        part_id · measured_stamp(지금 시각)를 붙여 답한다 — design_id · part_id 칸이 없으면 SCAN_FAILED(요청 오류).
         clear 는 늘 gap_mm ≥ min_gap_mm 로 다시 계산한다(IRD — clear 와 gap_mm 이 어긋나지 않게).
         실패: 요청이 틀리면(선택 칸 값 포함) SCAN_FAILED, 파라미터가 블록 목록 JSON 이 아니거나 선택에 쓸 robot 설정이 없으면 ERROR
         (둘 다 success=false)."""
         try:
-            hm, area = find_options(parse_request(text, ('run_id',)))
+            req = parse_request(text, ('run_id',))
+            hm, area = find_options(req)
+            target = assembly_target(req) if area == 'assembly' else None
         except ValueError as e:
             return _fail('SCAN_FAILED', str(e))
+        if area == 'assembly':
+            try:
+                ans = json.loads(assembly_json) if assembly_json.strip() else DEFAULT_ASSEMBLY
+                if not isinstance(ans, dict) or not isinstance(ans.get('blocks', []), list):
+                    raise ValueError('{"blocks":[…], "rejected", "detail"} 꼴이 아니다')
+            except ValueError as e:
+                return _fail('ERROR', f'find_assembly_json 파라미터가 잘못됐다: {e!r}')
+            blocks = [dict(b, part_id=target[1]) for b in ans.get('blocks', [])]
+            return True, '', {'ok': True, 'part_id': target[1], 'blocks': blocks, 'rejected': None if blocks else ans.get('rejected', 'NO_PART'),
+                              'detail': ans.get('detail', ''), 'measured_stamp': round(time.time(), 3)}
         try:
             if area == 'spare':
                 rows = (json.loads(spare_json) if spare_json.strip()

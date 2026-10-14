@@ -176,6 +176,7 @@ class Harness:
                                                                     'B': recipe['structure']['parts'][0]['tag']})
             cls = load_methods(PKG / 'mock_wrist_block.py', 'MockWristBlock', {'tops_for', '_local_tops', '_remote_tops', 'on_check'}, scope)
         n = self.node = cls()
+        n.design_lock = threading.Lock()                     # wrist_block 은 설계 캐시를 이 잠금으로 감싼다(10/14 find_blocks assembly 와 같이 써서)
         n.designs, n.cli_design, n.service_s, n.cfg = RunDesignCache(), self.client, 0.05, {}
         n.get_parameter = lambda name: SimpleNamespace(value=params[name])
         n.get_logger = lambda: logging.getLogger('test_design_cache')
