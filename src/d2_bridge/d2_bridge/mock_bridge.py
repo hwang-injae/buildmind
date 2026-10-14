@@ -87,7 +87,7 @@ class MockBridge(Node):
         doc = RecipeDocument.load(self.recipe_dir, design_id)
         out = doc.design(design_id)
         out.update(family=family, version='V000', parent_id=None, made_by='cad',
-                   parts=RecipeToParts(design_id, family, self.block_mm).convert(doc.recipe, doc.placements))
+                   parts=RecipeToParts(design_id, self.block_mm).convert(doc.recipe, doc.placements))
         return out
 
     def _on_get_design(self, req, res):
