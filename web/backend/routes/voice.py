@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """/api/voice — 화면 마이크 버튼(10/13 PL 결정 5 · 6).
 
-버튼 → backend → MQTT d2/hmi/voice/listen(웹 PC 안 — 다리 안 거침) → voice.py 녹음 · Whisper → d2/hmi/intent {intent: request_design, text}
-→ backend → /ws {type: intent} → 화면이 글 창에 넣고 고른 설계로 바로 생성. 웨이크워드 없음. 음성은 요청 글 넣기만 —
-음성으로 설계 고르기 · 출발은 화면 흐름에서 쓰지 않는다.
+버튼 → backend → MQTT d2/hmi/voice/listen(웹 PC 안 — 다리 안 거침) → voice.py 듣기 대기 → 시동어 'hello rokey' → 녹음 · 받아 적기
+→ d2/hmi/intent {intent: request_design, text} → backend → /ws {type: intent} → 화면이 글 창에 넣고 고른 설계로 바로 생성(E-105).
+시동어 뒤 '멈춰'는 voice.py 가 정지 요청(d2/safety/stop/req, source voice — 보조 정지). 음성으로 설계 고르기 · 출발은 쓰지 않는다.
 """
 from fastapi import APIRouter, Request
 
