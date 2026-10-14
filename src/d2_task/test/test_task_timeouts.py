@@ -213,7 +213,8 @@ def test_복구_이동_BUSY이면_재시도도_저속이다():
     io.move_script = [(False, 'BUSY'), (True, '')]
     m.run_once()
     m.run_once()
-    assert io.move_speeds == [0.5, 0.5]
+    slow = CFG['recover']['speed_ratio']                     # robot.yaml recover.speed_ratio(정지 뒤 첫 이동 비율)
+    assert io.move_speeds == [slow, slow]
 
 
 @pytest.mark.parametrize('script', ['move_script', 'check_script', 'pick_script'])
@@ -233,7 +234,7 @@ def test_시간초과는_정지접수만으로_복구하지_않는다(script):
     m.on_safety(SAFE_OK)
     drive(m, 'CHECK')
     m.run_once()
-    assert io.move_speeds[-1] == 0.5
+    assert io.move_speeds[-1] == CFG['recover']['speed_ratio']
 
 
 def test_정지_요청이_실패해도_새출발을_막는다():
