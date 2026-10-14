@@ -133,9 +133,11 @@ class PickPlaceNode(Node):
         structure = 스캔 이동의 구조물 상자(motion_math.scan_structure_box) — 사람이 쌓아 장면에 없는 구조물을 피한다(W186).
         start = 출발 상태(start_q · finger · held — executor.plan). 없으면 지금 자세에서.
         """
-        # 놓인 블록에서 transit_clearance_m 띄운 길을 먼저 찾고, 없으면 절반 여유로 한 번 더 (그래도 없으면 안 움직인다)
+        # 놓인 블록에서 transit_clearance_m 띄운 길을 먼저 찾고, 없으면 절반 여유로 한 번 더, 그래도 없으면 여유 0(실제 블록 크기)으로
+        # 마지막 한 번 (그래도 없으면 안 움직인다). 여유 0: 틈 0 으로 붙여 세우는 다리는 놓을 자리 위 목표에서 쥔 블록 아랫면이
+        # 옆 다리 윗면보다 약 5 mm 위라(approach_m 0.08 − 세운 높이) 부풀린 상자와 늘 겹쳤다(10/14 실기 V005 LEG_001_02 Invalid goal state)
         clear = self.cfg['motion']['transit_clearance_m']
-        for pad in (clear, clear / 2):
+        for pad in (clear, clear / 2, 0.0):
             for planner in PLANNERS:
                 jt, err = self.exe.plan(goal, keep_down, planner, pad_m=pad, skip_slot=skip_slot, scale=scale,
                                         obstacles=obstacles, structure=structure, **start)
