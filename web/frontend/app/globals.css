@@ -322,10 +322,17 @@ button.mitem.selected .tag.ok { color: #fff; border-color: #fff; }
 .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 .legend i.ghost { opacity: 0.35; }
 
-/* ---------- 손목 카메라 — 640×480 그림을 그대로(4:3) ---------- */
+/* ---------- 손목 카메라 — 640×480 그림을 그대로(4:3). 넓은 칸 맨 위에 크게, 화면 높이 60 % 까지(10/14 PL) ---------- */
 .cam { aspect-ratio: 4 / 3; border-radius: 12px; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; }
-.cam img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.cam img { width: 100%; height: 100%; object-fit: contain; display: block; transition: transform 0.2s; }
 .cam-empty { color: #9aa3ae; padding: 16px; text-align: center; font-size: 14px; }
+.wrist-panel .cam { width: min(100%, calc(60vh * 4 / 3)); margin: 0 auto; cursor: zoom-in; }
+.wrist-idle .cam-empty { padding: 4px 0; text-align: left; }   /* 그림 없으면 한 줄로 — 3D 를 밀어내지 않게 */
+.zoom-row { display: flex; gap: 6px; margin-left: auto; }
+.zoom-row .head-btn { margin-left: 0; padding: 6px 10px; }
+.zoom-row .head-btn.on { border-color: var(--primary); color: var(--primary); font-weight: 700; }
+.wrist-full { position: fixed; inset: 12px; z-index: 60; overflow: auto; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45); }
+.wrist-full .cam { width: min(100%, calc((100vh - 110px) * 4 / 3)); }
 
 /* ---------- 기록(접어 둠) ---------- */
 .log-panel { gap: 10px; padding-top: 14px; padding-bottom: 14px; }
