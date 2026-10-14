@@ -36,21 +36,13 @@ class RecipeToParts:
     두 값은 **허용 오차 없이 같아야** 길이_i 가 표 6개 중 정확히 하나와 맞아 방향이 정해진다(지금 둘 다 설계 기준값 75 · 25 · 15 mm — 젠가 하나로 고정).
     """
 
-    def __init__(self, design_id, *args):
-        """새 호출 RecipeToParts(design_id, block_mm) · 옛 호출 RecipeToParts(design_id, family, block_mm) 둘 다 받는다(10/14 PL — 전환 1단계).
+    def __init__(self, design_id, block_mm):
+        """RecipeToParts(design_id, block_mm) — design_id 는 레시피에 없으므로 부르는 쪽이 넣는다(10/14 PL: 옛 family 인자 없앰).
 
-        design_id 는 레시피에 없으므로 부르는 쪽이 넣는다. family 는 쓰지 않는다(결과 parts/4.0 에 family 칸이 없다) — 옛 호출의 family 는
-        빈 값이어도 거절하지 않고 버린다. HMI · 비전 호출부가 새 호출로 바뀐 뒤 옛 호출 지원은 따로 지운다.
         block_mm: 블록 크기 [길이, 폭, 두께] mm — robot.yaml block_size_m × 1000. 방향 코드 표를 만드는 데 쓴다.
         레시피 stocks[].size_mm 와 허용 오차 없이 같아야 한다(다르면 convert 가 방향을 못 골라 ValueError).
-        실패: design_id 가 비었거나 인자 수가 1 · 2개가 아니면 ValueError · TypeError.
+        실패: design_id 가 비었으면 ValueError, 인자 수가 틀리면 TypeError(파이썬 기본).
         """
-        if len(args) == 1:
-            block_mm = args[0]
-        elif len(args) == 2:
-            block_mm = args[1]                    # 옛 호출: args[0] = family(쓰지 않음)
-        else:
-            raise TypeError('RecipeToParts(design_id, block_mm) 또는 RecipeToParts(design_id, family, block_mm)')
         if not design_id:
             raise ValueError('design_id 가 필요하다')
         self.design_id = design_id
