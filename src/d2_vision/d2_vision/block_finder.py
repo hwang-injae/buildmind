@@ -25,7 +25,7 @@
   - tilted 가 true 인 블록에만 두 칸을 더한다(10/13): center_top_z_m = 윗면 가운데 평면 높이(m) · normal = 윗면 단위 법선 [nx, ny, nz]
     (위쪽, 평면 맞춤에서). 기울지 않은 블록은 위 칸 그대로.
 단위: 이 파일 안 좌표는 m(base_link), 치수 · 틈 · 높이 비교는 mm. 높이 지도는 block_checker.height_map(스캔 추론기와 같은 함수)을 쓴다.
-cv2 는 예비 마스크(masks_from_edges)에서만 쓴다 — 뒷단은 numpy 만 써서 CI(cv2 없음)에서도 시험한다.
+cv2 는 예비 마스크(masks_from_edges) · 그림(draw_found · draw_spare)에서만 쓴다 — 뒷단은 numpy 만 써서 CI(cv2 없음)에서도 시험한다.
 """
 import itertools
 import math
@@ -732,6 +732,49 @@ def masks_from_yolo(result, hw):
 
 
 OVERLAP_BGR = {'none': (0, 200, 0), 'top': (0, 200, 255), 'under': (0, 0, 255)}   # 그림 윤곽 색: 집을 수 있음 초록 · 위 노랑 · 덮임 빨강
+TARGET_BGR = (255, 0, 255)   # 받침 목표 자리 상자 색(자홍) — 잰 블록 초록보다 굵게 먼저 그려 둘이 겹쳐도 자홍 테가 남게
+# 그림 글자의 자세 이름 — cv2.putText 는 한글을 못 그려 영어로(10/14 20시 PL: 눕힘 FLAT · 옆세움 EDGE(잡기 이름 EDGE_SHORT · EDGE_LONG 과 같게) · 세움 STAND)
+UP_NAME = {'THICKNESS': 'FLAT', 'WIDTH': 'EDGE', 'LENGTH': 'STAND'}
+LABEL_SCALE = 0.4            # 글자 크기(FONT_HERSHEY_SIMPLEX 배율) — 화면을 덜 가리게 작게(10/14 20시 PL), 640×480 에서 블록 하나 폭 정도
+AXIS_PX = 25                 # 받침 그림 왼쪽 위 base +x · +y 방향 화살표 길이(픽셀) — 받침 관측 자세는 사진이 돌아가 있어 'dx dy' 방향을 보여 준다
+
+
+def _deg(a):
+    """각도 → 부호 붙은 정수 글자('+12' · '-3' · '+0'). '{:+.0f}' 는 −0.3 을 '-0' 으로 적어서 정수로 반올림해 쓴다."""
+    return f'{int(round(float(a))):+d}'
+
+
+def block_label(k, b):
+    """그림 글자 한 줄: '#번호(k + 1) 자세 yaw°' + 기울었으면 ' TILT'. 예: '#1 FLAT +12' · '#3 STAND -45 TILT'.
+    입력: k = 응답 순서(0부터 — find_blocks 답 순서 = 윗면 높은 순, 고르는 순서가 아님) · b = find_blocks 블록 dict(up · yaw_deg · tilted).
+    출력: ASCII 글자. 바깥 영향 없음."""
+    return f'#{k + 1} {UP_NAME.get(b["up"], b["up"])} {_deg(b["yaw_deg"])}' + (' TILT' if b.get('tilted') else '')
+
+
+def spare_label(measured, target):
+    """받침 그림의 잰 블록 글자: 'SPARE 자세 dyaw ±n'(잰 yaw − 목표 yaw, −90 이상 90 미만). 목표가 없으면 'SPARE 자세 yaw'.
+    받침 목표 yaw 가 90°(= −90°) 경계라 잰 yaw 만 쓰면 같은 자세가 +90 · −90 으로 번갈아 보여서 차이로 적는다. 바깥 영향 없음."""
+    name = UP_NAME.get(measured['up'], measured['up'])
+    if target is None:
+        return f'SPARE {name} {_deg(measured["yaw_deg"])}'
+    return f'SPARE {name} dyaw {_deg(wrap_deg(float(measured["yaw_deg"]) - float(target["yaw_deg"])))}'
+
+
+def spare_offset_text(measured, target):
+    """받침 그림 왼쪽 위 글자: 'base dx ±n.n dy ±n.n mm'(잰 − 목표 가운데, base_link x · y). 사진 가로 · 세로가 아님을 글자에 적는다."""
+    dx, dy = ((float(measured[k]) - float(target[k])) * 1000 for k in ('x_m', 'y_m'))
+    return f'base dx {dx:+.1f} dy {dy:+.1f} mm'
+
+
+def _put_label(cv2, img, txt, org, center=False):
+    """img 에 흰 글자(검은 테두리)를 org(글자 왼쪽 아래 — center 면 아래 가운데, 픽셀) 근처에 그린다 — 글자 크기를 재서 영상 밖으로
+    나가지 않게 org 를 당긴다. 바깥 영향: img 를 고친다(호출하는 쪽이 복사본을 넘긴다)."""
+    (w, h), base = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, 3)   # 테두리(굵기 3)까지 든 크기
+    x0 = org[0] - w / 2 if center else org[0]
+    x = max(min(int(x0), img.shape[1] - w - 2), 2)
+    y = max(min(int(org[1]), img.shape[0] - base - 2), h + 2)
+    cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, (0, 0, 0), 3)
+    cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, (255, 255, 255), 1)
 
 
 def draw_found(color, blocks, masks, mask_index):
@@ -739,7 +782,8 @@ def draw_found(color, blocks, masks, mask_index):
 
     입력: color (H, W, 3) BGR uint8 · blocks = find 결과(윗면 높이 순) · masks = BlockFinder.last_masks ·
           mask_index = last_info['mask_index'](blocks[k] 가 쓴 마스크 번호). 출력: 같은 크기 BGR 새 그림(자르거나 줄이지 않음).
-    블록마다 윤곽(overlap 색) + '번호(1부터, 응답 순서) up 첫 글자 yaw°'. 바깥 영향 없음. 실패: cv2 가 없으면 ImportError."""
+    블록마다 윤곽(overlap 색) + block_label 글자('#1 FLAT +12', 기울면 ' TILT')를 윤곽 위쪽 가운데에 작게(블록을 덜 가리게, 10/14 20시 PL).
+    글자는 영상 테두리 블록이어도 영상 안에 둔다. 바깥 영향 없음. 실패: cv2 가 없으면 ImportError."""
     import cv2
     img = np.ascontiguousarray(color).copy()
     for k, (b, mi) in enumerate(zip(blocks, mask_index)):
@@ -747,12 +791,84 @@ def draw_found(color, blocks, masks, mask_index):
         cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(img, cnts, -1, OVERLAP_BGR.get(b['overlap'], (255, 255, 255)), 2)
         vs, us = np.nonzero(m)
-        org = (int(us.mean()) - 20, int(vs.mean()) + 5) if len(us) else (5, 20 + 18 * k)
-        org = (min(max(org[0], 2), img.shape[1] - 90), min(max(org[1], 14), img.shape[0] - 4))   # 영상 테두리 블록도 글자가 잘리지 않게
-        txt = f'{k + 1} {b["up"][0]} {b["yaw_deg"]:+.0f}' + (' T' if b['tilted'] else '')
-        cv2.putText(img, txt, org, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3)
-        cv2.putText(img, txt, org, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        org = (int(us.mean()), int(vs.min()) - 4) if len(us) else (5 + 60, 20 + 14 * k)
+        _put_label(cv2, img, block_label(k, b), org, center=True)
     return img
+
+
+def project_to_image(pts_base, intr, T_base2cam):
+    """base 점 (N, 3) m → 영상 픽셀 (N, 2) [u, v] (depth_to_base_points 의 역). 카메라 앞(깊이 > 0)이 아닌 점이 있으면 None.
+    입력: intr (fx, fy, ppx, ppy) 픽셀 · T_base2cam 4x4 (카메라 → base, m). 바깥 영향 없음."""
+    fx, fy, ppx, ppy = intr
+    Tc = np.linalg.inv(np.asarray(T_base2cam, float))
+    pc = np.asarray(pts_base, float).reshape(-1, 3) @ Tc[:3, :3].T + Tc[:3, 3]
+    if (pc[:, 2] <= 1e-6).any():
+        return None
+    return np.stack([fx * pc[:, 0] / pc[:, 2] + ppx, fy * pc[:, 1] / pc[:, 2] + ppy], axis=1)
+
+
+def top_face_corners(b, size_m):
+    """블록 윗면 네 모서리 base 점 (4, 3) m. 입력: b = 블록 dict(x_m · y_m · top_z_m · yaw_deg · up) ·
+    size_m = [길이, 폭, 두께] m. 윗면 첫 변(TOP_AXES[up][0])이 yaw 방향(find_blocks yaw 규칙과 같음). 바깥 영향 없음."""
+    a, w = (float(size_m[DIM[ax]]) / 2 for ax in TOP_AXES[b['up']])
+    t = math.radians(float(b['yaw_deg']))
+    u, v = np.array([math.cos(t), math.sin(t)]), np.array([-math.sin(t), math.cos(t)])
+    c = np.array([float(b['x_m']), float(b['y_m'])])
+    xy = [c + su * a * u + sv * w * v for su, sv in ((1, 1), (-1, 1), (-1, -1), (1, -1))]
+    return np.array([[p[0], p[1], float(b['top_z_m'])] for p in xy])
+
+
+def draw_spare(color, measured, target, intr, T_base2cam, block_actual_m):
+    """받침 다시 재기(find_blocks area spare) 그림: 잰 블록 윗면 사각형(초록) + 목표 자리 상자(자홍) + 글자(wrist_image, 10/14 HMI · PL).
+
+    입력: color (H, W, 3) BGR uint8 · measured = measure_on_spare 블록 dict 또는 None(빈 받침) ·
+          target = ideal_spare_block(spare_spots[0]) 블록 dict 또는 None · intr (fx, fy, ppx, ppy) · T_base2cam 4x4 m ·
+          block_actual_m = [길이, 폭, 두께] m. 출력: 같은 크기 BGR 새 그림(입력은 그대로).
+    그림: 목표 상자(자홍, 4 px)를 먼저, 잰 블록(초록, 2 px)을 위에 — 딱 맞으면 초록 선 양옆에 자홍 테가 보인다.
+    글자: 목표 'TARGET'은 상자 아래 · 잰 블록 spare_label('SPARE FLAT dyaw +1')은 사각형 위(테두리를 가리지 않게).
+          둘 다 있으면 왼쪽 위에 spare_offset_text('base dx +2.1 dy -0.8 mm') + 그 아래 base +x · +y 방향 화살표
+          (받침 관측 자세는 사진이 돌아가 있어 base +x 가 사진 위쪽으로 보인다 — 숫자를 사진 가로 · 세로로 읽지 않게).
+    카메라 뒤로 가는 사각형은 그리지 않는다. 바깥 영향 없음. 실패: cv2 가 없으면 ImportError."""
+    import cv2
+    img = np.ascontiguousarray(color).copy()
+    for b, bgr, thick, below in ((target, TARGET_BGR, 4, True), (measured, OVERLAP_BGR['none'], 2, False)):
+        if b is None:
+            continue
+        px = project_to_image(top_face_corners(b, block_actual_m), intr, T_base2cam)
+        if px is None:
+            continue
+        cv2.polylines(img, [np.round(px).astype(np.int32)], True, bgr, thick)
+        cu, cv = px.mean(axis=0)
+        cv2.drawMarker(img, (int(round(cu)), int(round(cv))), bgr, cv2.MARKER_CROSS, 12 if below else 8, 1)
+        if below:
+            (_, h), _ = cv2.getTextSize('TARGET', cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, 3)
+            _put_label(cv2, img, 'TARGET', (cu, px[:, 1].max() + h + 6), center=True)
+        else:
+            _put_label(cv2, img, spare_label(b, target), (cu, px[:, 1].min() - 6), center=True)
+    if measured is not None and target is not None:
+        _put_label(cv2, img, spare_offset_text(measured, target), (5, 18))
+        dirs = base_axes_px(target, intr, T_base2cam)
+        if dirs is not None:
+            o = np.array([34.0, 66.0])                                  # 화살표 시작점(왼쪽 위 글자 아래 — 화살표가 위로 가도 글자와 안 겹치게)
+            for d, name in zip(dirs, ('+x', '+y')):
+                tip = o + AXIS_PX * d
+                cv2.arrowedLine(img, (int(o[0]), int(o[1])), (int(round(tip[0])), int(round(tip[1]))), (255, 255, 255), 1, tipLength=0.3)
+                _put_label(cv2, img, name, (tip[0] + 6 * d[0], tip[1] + 6 * d[1] + 4), center=True)
+    return img
+
+
+def base_axes_px(target, intr, T_base2cam):
+    """target 가운데(x_m · y_m · top_z_m)에서 base +x · +y 로 20 mm 갈 때 사진에서 움직이는 방향 — 단위 벡터 2개 [(du, dv), (du, dv)].
+    카메라 뒤 · 같은 점(방향 없음)이면 None. 바깥 영향 없음."""
+    c = np.array([float(target['x_m']), float(target['y_m']), float(target['top_z_m'])])
+    px = project_to_image(np.array([c, c + [0.02, 0.0, 0.0], c + [0.0, 0.02, 0.0]]), intr, T_base2cam)
+    if px is None:
+        return None
+    d = px[1:] - px[0]
+    n = np.linalg.norm(d, axis=1, keepdims=True)
+    if (n < 1e-6).any():
+        return None
+    return d / n
 
 
 class BlockFinder:

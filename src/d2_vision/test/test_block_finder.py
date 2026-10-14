@@ -16,7 +16,8 @@ import numpy as np
 import pytest
 import yaml
 
-from d2_vision.block_finder import BlockFinder, _in_area, blocks_from_masks, finder_cfg, masks_from_edges, wrap_deg
+from d2_vision.block_finder import (LABEL_SCALE, BlockFinder, _in_area, block_label, blocks_from_masks, draw_found, finder_cfg,
+                                   masks_from_edges, wrap_deg)
 
 ROBOT_YAML = Path(__file__).resolve().parents[2] / 'd2_robot' / 'd2_bringup' / 'config' / 'robot.yaml'
 CFG = finder_cfg(yaml.safe_load(ROBOT_YAML.read_text(encoding='utf-8')))
@@ -465,3 +466,42 @@ def test_기울어진_블록_평면은_사각형_안쪽_점으로_다시_맞추�
     assert k['center_top_z_m'] == pytest.approx(0.02, abs=1e-4)
     assert np.allclose(k['normal'], [-math.sin(th), 0.0, math.cos(th)], atol=1e-3)
     assert _tilt_keys(b, P[:2, :5], 0.0, cfg) == {}              # 10점 — 50점 미만
+
+
+def test_block_label_names_number_yaw_tilt():
+    """그림 글자: '#'번호는 1부터 · 자세 이름 FLAT · EDGE · STAND(10/14 20시 PL) · yaw 부호 · −0.3° 는 '+0' · 기울었을 때만 ' TILT'(한글 대신 ASCII)."""
+    blk = {'up': 'THICKNESS', 'yaw_deg': 12.4, 'tilted': False}
+    assert block_label(0, blk) == '#1 FLAT +12'
+    assert block_label(2, {**blk, 'up': 'WIDTH', 'yaw_deg': -3.0}) == '#3 EDGE -3'
+    assert block_label(0, {**blk, 'yaw_deg': -0.3}) == '#1 FLAT +0'
+    assert block_label(9, {**blk, 'up': 'LENGTH', 'yaw_deg': -45.0, 'tilted': True}) == '#10 STAND -45 TILT'
+    assert 'TILT' not in block_label(0, blk) and block_label(0, blk).isascii()
+
+
+@pytest.mark.parametrize('k', [0, 11])
+def test_draw_found_label_inside_image_at_border(k):
+    """오른쪽 아래 테두리에 닿은 블록도 긴 글자('#12 STAND -45 TILT')가 영상 밖으로 나가지 않는다(옛 고정 90 px 당김은 잘렸다)."""
+    cv2 = pytest.importorskip('cv2')
+    color = np.zeros((H, W, 3), np.uint8)
+    m = np.zeros((H, W), bool)
+    m[H - 20:, W - 30:] = True
+    blk = {'up': 'LENGTH', 'yaw_deg': -45.0, 'overlap': 'none', 'tilted': True}
+    masks = [m] * (k + 1)
+    img = draw_found(color, [blk] * (k + 1), masks, list(range(k + 1)))
+    txt = block_label(k, blk)
+    (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, 1)
+    vs, us = np.nonzero((img == 255).all(axis=2))          # 흰 글자 픽셀(윤곽은 초록 · 글자 테두리는 검정)
+    assert img.shape == color.shape and len(us)
+    assert us.max() < W - 1 and vs.max() < H - 1 and us.min() > 0 and vs.min() > 0   # 테두리에 닿지 않음 = 잘리지 않음
+    assert us.max() - us.min() + 1 >= 0.8 * tw              # 글자 폭이 거의 다 그려짐
+
+
+def test_draw_found_label_above_outline():
+    """글자는 블록 윤곽 위쪽에(블록을 덜 가리게, 10/14 20시 PL) — 가운데 블록이면 흰 글자 픽셀이 모두 마스크 윗변보다 위."""
+    pytest.importorskip('cv2')
+    color = np.zeros((H, W, 3), np.uint8)
+    m = np.zeros((H, W), bool)
+    m[200:240, 260:380] = True
+    img = draw_found(color, [{'up': 'THICKNESS', 'yaw_deg': 3.0, 'overlap': 'none', 'tilted': False}], [m], [0])
+    vs, us = np.nonzero((img == 255).all(axis=2))
+    assert len(vs) and vs.max() < 200 and abs((us.min() + us.max()) / 2 - 319.5) <= 3     # 윗변 위 · 가로 가운데

@@ -32,13 +32,16 @@
             z_m[iy·nx + ix]. 작업 관리자가 잡기 후보의 손가락 자리에 높은 셀이 있는지 본다.
         "area": "spare" → YOLO · 마스크 없이 받침(robot.yaml spare_spots[0]) 위 블록 하나를 깊이로만 잰다(spare_measure.measure_on_spare)
             → {"ok":true,"blocks":[b]}(b = 위 칸 + "base_z_m" 받침 윗면) 또는 빈 받침 {"ok":true,"blocks":[]}. 카메라는 작업 관리자가
-            먼저 받침 위로 옮겨 둔다. 컬러 · wrist_image 는 쓰지 않는다. 이때 height_map 은 받침 둘레(받침 가운데 ± 블록 길이/2 + 손가락 여유) 지도다.
+            먼저 받침 위로 옮겨 둔다. 재기는 깊이만 쓴다. 요청 뒤 컬러가 있으면 wrist_image 에 잰 블록 · 목표 자리를 그려 낸다(그림만, 10/14 HMI · PL).
+            이때 height_map 은 받침 둘레(받침 가운데 ± 블록 길이/2 + 손가락 여유) 지도다.
       기울어진 블록(tilted true)에만 "center_top_z_m"(윗면 가운데 평면 높이 m) · "normal"(윗면 단위 법선, 위쪽)을 더한다(block_finder).
         "area": "assembly" + "design_id" · "part_id"(10/14 W144 — 한석형 · 민범진) → 조립 자리에 방금 놓은 블록 하나를 깊이로만 잰다
             (placed_measure.measure_placed — 설계 자리 둘레, YOLO 없음) → {"ok":true,"part_id","blocks":[b] 또는 [],"rejected","detail","measured_stamp"}.
             못 재면(옆 블록과 붙음 · 덮임 · 세운 블록 · 기울어짐 · 점 부족 · 크기 다름 · 없음) blocks [] + rejected 코드 — 요청 오류(SCAN_FAILED)와 다르다.
   `/d2/vision/wrist_image`(sensor_msgs/CompressedImage, JPEG 품질 70, 640×480 그대로) — find_blocks 때마다 검출 결과
-      (윤곽 · 번호 · up · yaw)를 그린 그림 한 장(IRD E-67 '때만 내도 됨'). 매 프레임 내지 않는다.
+      (윤곽 · 윤곽 위 작은 글자 '#번호 FLAT/EDGE/STAND yaw[ TILT]' — 번호 = 답 순서(윗면 높은 순))를 그린 그림 한 장(IRD E-67 '때만 내도 됨').
+      매 프레임 내지 않는다. area spare 때는 잰 블록 윗면 · 받침 목표 자리 상자 · 가운데 차이(base dx · dy mm + 방향 화살표)를
+      그린다(block_finder.draw_spare, 컬러가 없으면 안 냄).
 
 설계 · 블록 이름 (E-52, 10/7)
   요청 design_id 칸으로 설계를 고른다(블록 이름에서 잘라 내지 않는다). part_ids 는 전체 블록 이름
@@ -137,13 +140,13 @@ from std_msgs.msg import String
 from d2_interfaces.srv import CheckProgress, JsonQuery
 from d2_motion.motion_math import RECIPE_SUFFIXES, load_recipe, recipe_parts
 from d2_vision.block_checker import BlockChecker, depth_to_base_points, mean_depth_mm, recipe_from_design, recipe_path
-from d2_vision.block_finder import BlockFinder, base_image, draw_found, finder_cfg, masks_from_yolo
+from d2_vision.block_finder import BlockFinder, base_image, draw_found, draw_spare, finder_cfg, masks_from_yolo
 from d2_vision.design_cache import RunDesignCache
 # 요청 검사(run_id 를 폴더 이름으로 써도 되는지까지) · 레시피 두 파일 → blocks/2 는 가짜 노드와 같은 함수를 쓴다(ROS 없는 계산, 시험 있음)
 from d2_vision.height_grid import height_grid, spare_map_area, supply_map_area
 from d2_vision.mock_scan import assembly_target, find_options, load_recipe_files, parse_request, structure_to_blocks
 from d2_vision.placed_measure import measure_placed
-from d2_vision.spare_measure import measure_on_spare
+from d2_vision.spare_measure import ideal_spare_block, measure_on_spare
 from d2_vision.structure_scanner import StructureScanner, family_of, save_capture, save_preview, scan_response
 from d2_vision.tcp_pose import TcpPose, camera_pose_mm, default_calib_path, load_calib, load_tilt_shift
 
@@ -726,10 +729,18 @@ class WristBlock(Node):
         """find_blocks 검출 결과를 그린 그림 한 장을 `/d2/vision/wrist_image`(JPEG 70, 640×480 그대로)로 낸다. 실패는 경고만."""
         try:
             img = draw_found(color, blocks, self.finder.last_masks, self.finder.last_info.get('mask_index', []))
+        except (ValueError, IndexError, cv2.error) as e:
+            self.get_logger().warn('wrist_image 를 못 만듦: %s' % e)
+            return
+        self._publish_jpeg(img, frame_id)
+
+    def _publish_jpeg(self, img, frame_id):
+        """다 그린 BGR 그림 한 장을 `/d2/vision/wrist_image`(JPEG 70, 크기 그대로)로 낸다. 인코딩 실패는 경고만(발행 안 함)."""
+        try:
             ok, buf = cv2.imencode('.jpg', img, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
             if not ok:
                 raise ValueError('JPEG 인코딩 실패')
-        except (ValueError, IndexError, cv2.error) as e:
+        except (ValueError, cv2.error) as e:
             self.get_logger().warn('wrist_image 를 못 만듦: %s' % e)
             return
         msg = CompressedImage(format='jpeg', data=buf.tobytes())
@@ -779,13 +790,15 @@ class WristBlock(Node):
 
     def _find_spare(self, res, rid, t0, want_map=False):
         """find_blocks area spare: 요청 뒤 깊이(scan_frames 장 평균) + TF 자세 → base 점 → measure_on_spare(받침 spare_spots[0]).
-        출력: JsonQuery 응답 res — {"ok":true,"blocks":[블록 하나]} 또는 빈 받침 {"ok":true,"blocks":[]}. YOLO · 컬러 · wrist_image 안 씀.
+        출력: JsonQuery 응답 res — {"ok":true,"blocks":[블록 하나]} 또는 빈 받침 {"ok":true,"blocks":[]}. YOLO 안 씀 · 재기는 깊이만.
+        요청 뒤 컬러가 있으면 wrist_image 한 장(잰 블록 윗면 · 목표 자리 상자 · 가운데 차이, block_finder.draw_spare) — 그림이 실패하거나
+        컬러가 없으면 그림만 건너뛴다(답 · 측정값은 그대로).
         want_map 이면 같은 깊이로 받침 둘레 높이 지도(spare_area)를 "height_map" 칸에 더한다 — 다시 잡기 전 손가락 자리 확인(one_pick p1_to_recipe, #20).
-        실패: 보정값 없음 → ERROR · TF · 깊이 시간 초과 → TIMEOUT(_snapshot) · spare_spots 없음 · 계산 예외 → ERROR. 바깥 영향: 로그."""
-        snap, err = self._snapshot(self.scan_frames, need_color=False)
+        실패: 보정값 없음 → ERROR · TF · 깊이 시간 초과 → TIMEOUT(_snapshot) · spare_spots 없음 · 계산 예외 → ERROR. 바깥 영향: 로그 · wrist_image."""
+        snap, err = self._snapshot(self.scan_frames, need_color=False)   # 컬러는 있으면 그림에만 — 없다고 실패하지 않는다
         if snap is None:
             return self._answer(res, 'find_blocks(spare)', err, t0)
-        depth_mm, _, _, T = snap
+        depth_mm, color, frame_id, T = snap
         try:
             pts = depth_to_base_points(depth_mm / 1000.0, self.intr, T, stride=1)
             b = measure_on_spare(pts, self.cfg['spare_spots'][0], self.cfg['block_actual_m'])
@@ -794,10 +807,22 @@ class WristBlock(Node):
             return self._answer(res, 'find_blocks(spare)', self._fail(False, 'ERROR', '받침 재기 예외: %s' % e), t0)
         self.get_logger().info('find_blocks(spare) %s: 점 %d → %s' % (
             rid, len(pts), '빈 받침' if b is None else (b['up'], b['x_m'], b['y_m'], b['yaw_deg'])))
+        if color is not None:
+            self._publish_spare_image(color, b, T, frame_id)
         out = {'ok': True, 'blocks': [b] if b else []}
         if want_map:
             out['height_map'] = height_grid(pts, spare_map_area(self.cfg))
         return self._answer(res, 'find_blocks(spare)', (True, '', out), t0)
+
+    def _publish_spare_image(self, color, b, T, frame_id):
+        """받침 다시 재기 그림(잰 블록 b 또는 None · 목표 = spare_spots[0] 눕힘)을 wrist_image 로 낸다. 그림 예외는 경고만 — 답은 그대로."""
+        try:
+            size = self.cfg['block_actual_m']
+            img = draw_spare(color, b, ideal_spare_block(self.cfg['spare_spots'][0], size), self.intr, T, size)
+        except Exception as e:                # 그림 때문에 받침 재기 답이 실패하면 안 된다
+            self.get_logger().warn('wrist_image(spare) 를 못 만듦: %r' % (e,))
+            return
+        self._publish_jpeg(img, frame_id)
 
 
     def _find_assembly(self, res, rid, target, t0):
