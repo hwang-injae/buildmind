@@ -7,14 +7,14 @@
 // 진행: /ws {type: gen} 알림이 오면 job 을 GET 으로 다시 받는다(알림이 몰려와도 빠짐없이). 알림이 끊겨도 만드는 동안 1초마다 다시 받는다.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '@/lib/api';
-import { NO_WEB, checkReasonKo, designName } from '@/lib/names';
+import { NO_WEB, WAKE_WORD, checkReasonKo, designName } from '@/lib/names';
 import type { GenCandidate, GenJob, Intent, Rules } from '@/lib/types';
 import type { Robot } from '@/lib/ws';
 import { roleItems } from './DesignView';
 import Preview3D from './Preview3D';
 
 const POLL_MS = 1000; // /ws 알림이 끊겼을 때를 위한 다시 받기 간격(만드는 동안만)
-const LISTEN_MS = 20000; // 마이크를 누른 뒤 문장을 기다리는 시간(녹음 + Whisper) — 넘으면 voice.py 가 안 도는 것으로 보고 안내
+const LISTEN_MS = 20000; // 마이크를 누른 뒤 문장을 기다리는 시간(시동어 · 녹음 · 받아 적기 — #171 측정 받아 적기 직전까지 5.6 ~ 9.5초) — 넘으면 안내
 const MAX_TRIES = 3; // 처음 + 모자란 만큼 더 2번(10/11 PL N3 · A5)
 const MAX_CANDS = 3; // 후보 수(E-67)
 const FAIL_KO: Record<string, string> = {
@@ -88,7 +88,7 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
     if (!listening) return;
     const t = setTimeout(() => {
       setListening(false);
-      setError('음성을 못 받았어요 → 마이크와 음성 프로그램(voice.py)이 켜져 있는지 → 웹 PC 터미널의 voice.py 로그 · 마이크 연결, 확인 뒤 다시 눌러 주세요');
+      setError(`음성을 못 받았어요 → 시동어 '${WAKE_WORD}'를 먼저 말했는지 · 마이크와 음성 프로그램(voice.py)이 켜져 있는지 → 웹 PC 터미널의 voice.py 로그 · 마이크 연결, 확인 뒤 다시 눌러 주세요`);
     }, LISTEN_MS);
     return () => clearTimeout(t);
   }, [listening]);
@@ -101,7 +101,7 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
     setBusy(false);
     if (!r.success) return setError(`마이크를 켜지 못했어요 — ${r.message ?? r.reason}`);
     setListening(true);
-    onLog('voice', '듣는 중 — 만들고 싶은 것을 말하세요');
+    onLog('voice', `듣는 중 — '${WAKE_WORD}' → 삑 → 만들고 싶은 것을 말하세요`);
   };
 
   const pick = async (index: number) => {
@@ -140,13 +140,14 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
           disabled={blocked || !baseId}
         />
         <button className="mic" onClick={listen} disabled={blocked || !baseId} aria-label="음성으로 요청"
-          title="누르고 만들고 싶은 것을 말하세요 — 문장이 글 창에 들어가고 바로 만들기 시작해요">
+          title={`누르고 '${WAKE_WORD}'라고 부른 뒤 삑 소리가 나면 만들고 싶은 것을 말하세요 — 문장이 글 창에 들어가고 바로 만들기 시작해요`}>
           {listening ? '듣는 중…' : '🎤 말하기'}
         </button>
         <button className="primary" onClick={() => start(text.trim(), 'web')} disabled={blocked || !baseId || !text.trim()}>
           {busy && !job ? '시작하는 중…' : 'AI 생성'}
         </button>
       </div>
+      {listening && <p className="hint">'{WAKE_WORD}'라고 부른 뒤 삑 소리가 나면 만들고 싶은 것을 말하세요({LISTEN_MS / 1000}초 안)</p>}
       {error && <p className="result bad">{error}</p>}
 
       {job && <JobView job={job} rules={rules} dark={dark} canPick={job.state === 'ready' && !busy} onPick={pick} />}

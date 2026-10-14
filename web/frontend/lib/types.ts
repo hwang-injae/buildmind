@@ -71,7 +71,7 @@ export interface Intent {
   intent: string;
   design_id: string | null;
   text: string;
-  confidence: number;
+  confidence: number | null; // voice.py 는 못 잰 때 null(#171)
 }
 
 /** /ws 이벤트 — 모두 {type, data} 한 겹(web/README 2장) */

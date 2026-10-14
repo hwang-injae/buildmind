@@ -95,6 +95,8 @@ export const URGENT_STOP = '급한 정지는 로봇 PC Ctrl+C · 펜던트';
 export const STOP_PENDING = '정지 확인 전이라 다시 시작이 안 돼요 → 로봇이 섰는지 → [정지]를 누른 뒤 [다시 시작]';
 // 정지가 아닌데 그리퍼가 블록을 쥐고 있음 — 작업 관리자가 시작 점검에서 거절한다. [그리퍼 열기]는 정지(STOPPED)에서만 받는다(W183)
 export const GRIP_HELD = '그리퍼가 블록을 쥐고 있어요 → 조립 · 스캔 전에 블록을 빼야 해요 → 블록을 받칠 사람과 함께 [정지] → [그리퍼 열기] → [다시 시작]';
+// 음성 시동어(#171 voice.py — 마이크 버튼 뒤 이 말을 들어야 녹음을 시작한다)
+export const WAKE_WORD = '헬로 로키';
 export const NO_WEB = `웹 서버(backend)와 연결이 안 돼요 → 웹 PC 의 web 컨테이너가 켜져 있는지 → 위 연결 표시의 '웹 서버' 점, 웹 PC 에서 docker compose ps · logs web. ${URGENT_STOP}`;
 
 /** 거절 까닭 코드 → 안내(응답에 message 가 없을 때). '' = 맞는 코드 없는 거절 — 까닭 글은 작업 관리자가 상태 칸에 보냄(E-111 A3) */
