@@ -59,9 +59,10 @@ export default function Home() {
         <div className="layout">
           <div className="col">
             <RobotPanel robot={robot} onLog={addLog} />
-            <WristCamera robot={robot} />
           </div>
           <div className="col">
+            {/* 손목 카메라는 넓은 칸 맨 위 — 블록 고르는 순서(우선순위)가 핵심이라 크게(10/14 PL). 그림이 없으면 한 줄로 접힘 */}
+            <WristCamera robot={robot} />
             <DesignView robot={robot} viewId={picked ?? robotDesign} rules={rules} dark={dark} onPick={setPicked} onLog={addLog}
               onRenamed={() => setNameVer((v) => v + 1)} />
             <GeneratePanel robot={robot} baseId={picked ?? robotDesign} rules={rules} dark={dark} onSaved={setPicked} onLog={addLog} />
