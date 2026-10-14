@@ -344,7 +344,8 @@ class MoveItExecutor:
 
         속도·가속은 scale(없으면 robot.yaml speed_scale)을 MoveIt 에 넘겨 MoveIt 이 매긴다 (joint_limits.yaml x 비율).
         pad_m > 0 이면 놓인 블록과 흩뿌린 주변 블록(obstacles)을 그만큼 부풀린 상자를 이 계획에만 더해 여유 있는 길을 찾게 한다.
-        obstacles 가 None · 빈 목록이면 주변 블록 상자는 없다(IRD 4.3). 옛 공급 칸 가정 상자는 10/14 지움(PL — 공급 칸 잔재 정리 ①).
+        흩뿌린 주변 블록은 장면에 없어서 pad_m 이 0 이어도 실제 크기 상자로 늘 더한다(놓인 블록은 장면에 있어 0 이면 안 더함 — 10/14 PL, #178
+        여유 0 마지막 시도가 옆 블록을 모르지 않게). obstacles 가 None · 빈 목록이면 주변 블록 상자는 없다(IRD 4.3). 옛 공급 칸 가정 상자는 10/14 지움(PL — 공급 칸 잔재 정리 ①).
         skip_slot 은 지금 쓰지 않는다 — 부르는 쪽(pick_place_node)이 아직 넘겨서 남겨 둠, 시연 뒤 공급 칸 잔재 정리 때 함께 지움.
         structure = 스캔 이동의 구조물 상자(motion_math.scan_structure_box) — 주면 pad_m 과 상관없이 이 계획에 더한다(W186).
         start_q · finger · held 를 주면 지금 자세 대신 그 출발 상태(관절 · 손가락 각 · 쥔 블록)로 계획한다 — 움직이기 전에
@@ -370,9 +371,9 @@ class MoveItExecutor:
         if keep_down:
             # True = 평소(TILT_TOL_DEG), 숫자 = 그 각까지(부르는 쪽이 정함 — 10/13 tool_tilt_max_deg 키는 지움)
             req.path_constraints = self.down_constraint() if keep_down is True else self.down_constraint(float(keep_down))
-        extra = ()
+        extra = self.obstacle_boxes(obstacles, pad_m)        # 흩뿌린 주변 블록 — 장면에 없으므로 여유 0 이어도 실제 크기로
         if pad_m > 0:
-            extra = self.padded_blocks(pad_m, skip_block) + self.obstacle_boxes(obstacles, pad_m)
+            extra = self.padded_blocks(pad_m, skip_block) + extra
         if structure is not None:
             extra = list(extra) + [self.structure_box(structure)]
         jt, why = self._send_plan(req, plan_time, extra)
