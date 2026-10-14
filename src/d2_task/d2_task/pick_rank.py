@@ -4,10 +4,13 @@
 시험 도구 one_pick.py 에서 10/13 실기로 확인한 고르기를 옮긴 것이다(레시피 4번 블록 11/11 · 집기 24/24 · 헛시도 0 · 사람 호출 0).
 작업 판단(task)이 find_blocks 결과로 '어느 블록을 어떤 잡기로 먼저 해 볼지' 후보 목록을 만든다. 로봇 · 메시지에는 손대지 않는다(계산만).
 
-고르는 규칙(위 칸 후보를 다 해 본 뒤 아래 칸):
+고르는 규칙(10/14 박진용 — 높은 곳에서 아래로):
+  묶음 ① 눕힌 블록(칸 1 ~ 4) → ② 옆으로 선 · 선 블록(칸 5) → ③ 큰 옮김(칸 6 — 잡을 게 하나도 없을 때만). 묶음 안에서는 **높은 층부터**
+  (기울어진 블록은 반올림 층이 아니라 실제 높이로 층 사이에 들어감 — level_of), 같은 높이 안에서는 칸 순서:
   1 남을 덮은 블록 중 치우면 열리는 수 ≥ COVER_MIN_FREE (큰 옮김은 빼고 6칸으로)  2 눕힘 곧게(FLAT_LONG ±2.4 mm 포함)  3 눕힘 틀기
   4 기울여 집기  5 옆으로 선 · 선 블록  6 FLAT_SHORT 큰 옮김(10 · 20 · 27.2 mm)
-  칸 안: 높은 층 → 치우면 열리는 수 → 곧게 · 틀기 · 기울여 집기 → 잡기 GRASP_ORDER → 작은 각 → 작은 옮김 → 손가락 쪽 틈 넓은 것.
+  그다음: 치우면 열리는 수 → 곧게 · 틀기 · 기울여 집기 → 잡기 GRASP_ORDER → 작은 각 → 작은 옮김 → 손가락 쪽 틈 넓은 것.
+  (예전엔 칸이 먼저라 위층 블록이 틀기 · 기울여 집기면 아래층 곧게 블록을 먼저 집었다 — 10/14 실기)
 깊이 점(pts)을 주면 줄 세우기 전에 모든 후보의 손가락 두 자리를 깊이로 보고 막힌 후보를 뺀다 — 위에서 본 사각형 검사만으로는
 곧게 FLAT_LONG 37번 중 19번 · 틀기 25번 중 21번이 고른 뒤 깊이에서 걸려 헛시도가 쌓였다(10/12 ~ 13 실기).
 """
@@ -136,6 +139,14 @@ class PickRanker:
         윗면 높이로 세면 작업대에 혼자 선 블록이 5층이 돼 맨 앞에 왔다(10/13 실기: 같은 옆으로 선 블록을 블록 4개 동안 헛시도)."""
         z = (b.get('center_top_z_m', b['top_z_m']) - self.T) if b.get('tilted') else (b['top_z_m'] - self.size[b['up']])
         return max(1, round((z - self.table_z) / self.T) + 1)
+
+    def level_of(self, b):
+        """집는 순서의 높이(층 단위) — 반듯한 블록은 layer_of(정수 층), 기울어진 블록은 반올림하지 않은 실제 높이(층 사이에 들어감,
+        10/14 박진용). 바닥 = 가운데 윗면(없으면 윗면) − 두께."""
+        if not b.get('tilted'):
+            return float(self.layer_of(b))
+        z = b.get('center_top_z_m', b['top_z_m']) - self.T
+        return max(1.0, (z - self.table_z) / self.T + 1.0)
 
     def covers(self, blocks, i):
         """i 번이 남을 덮은 블록인가 — 비전이 overlap=top 이라고 했거나 기울어진 블록 중, 위에서 본 사각형이 덮인(under) 블록과 겹치는 것.
@@ -287,7 +298,9 @@ class PickRanker:
                 else:
                     tier = 5
                 method = 2 if grasp == 'TILT' else (0 if dyaw == 0 else 1)
-                key = (tier, -lay, -fr, method, 0 if grasp == 'TILT' else self.GRASP_ORDER.index(grasp), abs(dyaw), abs(s), -self.gap_of(b, grasp))
+                group = 0 if tier <= 4 else (1 if tier == 5 else 2)     # 눕힌 블록 → 선 블록 → 큰 옮김(잡을 게 없을 때만)
+                key = (group, -self.level_of(b), tier, -fr, method, 0 if grasp == 'TILT' else self.GRASP_ORDER.index(grasp), abs(dyaw), abs(s),
+                       -self.gap_of(b, grasp))
                 tag = (f'{tier}칸 {TIER_NAMES[tier]} · 층{lay} · 열림{fr} · {POSE_KO[b["up"]]}{" 기울어짐" if grasp == "TILT" else ""} · {grasp} · '
                        f'{"기울여 집기" if grasp == "TILT" else self.method_of(dyaw, s)} · 틈 {self.gap_of(b, grasp):.0f} mm')
                 rows.append((key, i, grasp, dyaw, s, tag))
