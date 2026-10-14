@@ -89,26 +89,44 @@ def test_두번_다시_놓아도_벗어나면_남은_오차를_적고_다음_블
     assert m.last_build['placed'] == len(IDS) and io.world == set(IDS)           # 놓은 수 · 완료 중복 없음
 
 
-def test_측정_거절이면_자동_모드는_사람_확인():
+def _skipped_done(io, rows, m):
+    """측정을 못 써도 사람 대기 없이 끝까지 — 다시 집기 0, 놓은 수 그대로, 까닭 기록(10/14 21:5x 사용자 결정)."""
+    drive(m, 'DONE')
+    assert 'WAIT_SUPPLY' not in [s['state'] for s in io.states]
+    assert all(len(picks_of(io, p)) == 1 for p in IDS)                          # 다시 집지 않음
+    assert m.last_build['placed'] == len(IDS) and io.world == set(IDS)
+    return [v for k, p, v in rows if k == 'a4_regrasp']
+
+
+def test_측정_거절이면_다시_집지_않고_까닭을_적고_다음_블록():
     io = RegraspIO([ok_body(IDS[0], [], 'NEIGHBOR_MERGED', '옆 블록과 붙음')])
     m, rows = start(io)
-    drive(m, 'WAIT_SUPPLY')
-    assert len(picks_of(io, IDS[0])) == 1 and 'NEIGHBOR_MERGED' in io.states[-1]['message']
+    logs = _skipped_done(io, rows, m)
+    assert logs == ['측정 못 씀 — 다시 집기 안 함: 놓은 블록을 재지 못했어요(NEIGHBOR_MERGED: 옆 블록과 붙음)']
+    assert [f['part_id'] for e, f in io.w144_events if e == 'regrasp_skipped'] == [IDS[0]]
 
 
-def test_측정_시각이_요청_앞이면_다시_집지_않고_사람_확인():
+def test_모든_블록이_늘_거절이어도_대기_반복_없이_끝까지():
+    """10/14 진용 실기: 연짝 · 높은 층 블록이 늘 거절되면 [계속] 뒤에도 다시 거절돼 끝나지 않았다 — 이제는 블록마다 한 번 재고 넘어간다."""
+    io = RegraspIO([ok_body(p, [], 'SIZE_MISMATCH', '가장자리가 안 보임') for p in IDS])
+    m, rows = start(io)
+    logs = _skipped_done(io, rows, m)
+    assert len(logs) == len(IDS) and [p for _, p in io.measured] == IDS          # 블록마다 한 번만 잼
+
+
+def test_측정_시각이_요청_앞이면_다시_집지_않고_다음_블록():
     io = RegraspIO([(5.0, 0.0)], stamp=1.0)
     m, rows = start(io)
-    drive(m, 'WAIT_SUPPLY')
-    assert len(picks_of(io, IDS[0])) == 1 and 'measured_stamp' in io.states[-1]['message']
+    logs = _skipped_done(io, rows, m)
+    assert 'measured_stamp' in logs[0]
 
 
-def test_기울어짐_자세_다름이면_사람_확인():
+def test_기울어짐_자세_다름이면_다시_집지_않고_다음_블록():
     for kw, word in (({'tilted': True}, '기울'), ({'up': 'LENGTH'}, '자세')):
         io = RegraspIO([(5.0, 0.0)], **kw)
         m, rows = start(io)
-        drive(m, 'WAIT_SUPPLY')
-        assert len(picks_of(io, IDS[0])) == 1 and word in io.states[-1]['message']
+        logs = _skipped_done(io, rows, m)
+        assert word in logs[0]
 
 
 def test_다시_집기_길이_없으면_사람_확인_움직인_뒤_실패는_기존_정지처리():
@@ -137,13 +155,13 @@ def test_판단_함수_목표_칸():
     for bad in (None, dict(row, status='UNMEASURED', reason='FEW_POINTS', detail=''), dict(row, measured_stamp=None),
                 dict(row, measured_stamp=98.0), dict(row, measured_stamp=102.0), dict(row, tilted=None), dict(row, up='WIDTH'),
                 dict(row, yaw_deg=None), dict(row, top_z_m=None)):
-        assert regrasp_decision(bad, 99.0, 101.0, part, sent, CFG, 0)[0] == 'HUMAN'
-    assert regrasp_decision(row, 99.0, 101.0, part, None, CFG, 0)[0] == 'HUMAN'          # 원래 목표를 모름
+        assert regrasp_decision(bad, 99.0, 101.0, part, sent, CFG, 0)[0] == 'SKIP'
+    assert regrasp_decision(row, 99.0, 101.0, part, None, CFG, 0)[0] == 'SKIP'          # 원래 목표를 모름
     assert regrasp_decision(row, 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'EXHAUSTED'              # 소진 — 이어 감
     assert regrasp_decision(dict(row, dx_mm=1.0), 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'OK'
     assert regrasp_decision(dict(row, dx_mm=2.0), 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'EXHAUSTED'
     for bad in (dict(row, status='UNMEASURED', reason='FEW_POINTS', detail=''), dict(row, tilted=True), dict(row, measured_stamp=None)):
-        assert regrasp_decision(bad, 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'HUMAN'       # 측정 불가는 소진으로 치지 않음
+        assert regrasp_decision(bad, 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'SKIP'       # 측정 불가는 소진으로 치지 않음(따로 SKIP)
     assert json.dumps(goal['place_pose'])
 
 
@@ -231,7 +249,7 @@ def test_measured_stamp_1ms_반올림은_받고_그보다_밖은_막는다():
     for stamp in (round(t_req, 3), round(t_resp, 3)):            # 100.000 · 100.001 — 반올림으로 경계 밖에 찍힌 값
         assert regrasp_decision(dict(row, measured_stamp=stamp), t_req, t_resp, part, sent, CFG, 0)[0] == 'REGRASP'
     for stamp in (t_req - STAMP_ROUND_S - 1e-4, t_resp + STAMP_ROUND_S + 1e-4):
-        assert regrasp_decision(dict(row, measured_stamp=stamp), t_req, t_resp, part, sent, CFG, 0)[0] == 'HUMAN'
+        assert regrasp_decision(dict(row, measured_stamp=stamp), t_req, t_resp, part, sent, CFG, 0)[0] == 'SKIP'
 
 
 def _judge(dx_m, dy_m):

@@ -142,32 +142,32 @@ def regrasp_decision(row, t_req, t_resp, part, place_pose, cfg, tries):
           같은 로봇 PC 시계라는 가정 아래 t_req ≤ measured_stamp ≤ t_resp 일 때만 '이번 요청의 영상'으로 본다(밖이면 시계 · 영상을 믿지 않음).
           measured_stamp 는 1 ms 로 반올림돼 오므로 양 끝에 STAMP_ROUND_S(0.5 ms)만 둔다.
     출력: ('OK', None) = 두 축 모두 A4_TOL_MM 미만(반올림 전 값) — 그대로 이어 감 / ('EXHAUSTED', 글) = A4_TOL_MM 이상이지만 이미 A4_MAX_TRIES 번 다시 놓음 — 남은 오차를 적고
-          이어 감(유효한 측정일 때만 — 측정 불가 · 기울어짐 등은 그 전에 HUMAN) / ('REGRASP', 목표) = PickPlace 목표 {part_id, supply_slot '', grasp(레시피), pick_pose(잰 중심 ·
+          이어 감(유효한 측정일 때만 — 측정 불가 · 기울어짐 등은 그 전에 SKIP) / ('REGRASP', 목표) = PickPlace 목표 {part_id, supply_slot '', grasp(레시피), pick_pose(잰 중심 ·
           잰 yaw · 잰 윗면에서 자세 치수로 구한 중심 높이 — block_pose), place_pose(설계), open_width_m 0, obstacles []} /
-          ('HUMAN', 까닭) = 사람 확인. 다시 집기 조건 = |dx| ≥ A4_TOL_MM 또는 |dy| ≥ A4_TOL_MM(반올림 전 값). 측정을 못 했거나 믿을 수 없으면(대상 · 자세 다름 · 기울어짐 · 좌표 · yaw · 윗면 없음 · 측정 시각이 요청 · 답 사이가 아님 ·
+          ('SKIP', 까닭) = 측정을 못 씀 — 다시 집지 않고 까닭만 적고 다음 블록(사람 대기 없음, 10/14 21:5x 사용자 결정). 다시 집기 조건 = |dx| ≥ A4_TOL_MM 또는 |dy| ≥ A4_TOL_MM(반올림 전 값). 측정을 못 했거나 믿을 수 없으면(대상 · 자세 다름 · 기울어짐 · 좌표 · yaw · 윗면 없음 · 측정 시각이 요청 · 답 사이가 아님 ·
           원래 놓은 목표를 모름) 다시 집지 않는다. 놓는 목표는 원래 놓을 때 보낸 것 그대로(설계 중심으로 덮어쓰지 않음).
     """
     if row is None:
-        return 'HUMAN', '놓은 블록을 다시 재지 못했어요(측정 꺼짐 · 답 없음)'
+        return 'SKIP', '놓은 블록을 다시 재지 못했어요(측정 꺼짐 · 답 없음)'
     if row.get('status') != 'MEASURED':
-        return 'HUMAN', f'놓은 블록을 재지 못했어요({row.get("reason")}{": " + row["detail"] if row.get("detail") else ""})'
+        return 'SKIP', f'놓은 블록을 재지 못했어요({row.get("reason")}{": " + row["detail"] if row.get("detail") else ""})'
     stamp = row.get('measured_stamp')
     if not isinstance(stamp, (int, float)) or isinstance(stamp, bool) or not math.isfinite(stamp) or not t_req - STAMP_ROUND_S <= stamp <= t_resp + STAMP_ROUND_S:
-        return 'HUMAN', '측정 영상이 이번 요청 뒤의 것인지 확인되지 않았어요(measured_stamp가 요청 · 답 시각 사이가 아님)'
+        return 'SKIP', '측정 영상이 이번 요청 뒤의 것인지 확인되지 않았어요(measured_stamp가 요청 · 답 시각 사이가 아님)'
     if row.get('tilted') is not False:
-        return 'HUMAN', '놓은 블록이 기울어졌거나 기울기를 모릅니다'
+        return 'SKIP', '놓은 블록이 기울어졌거나 기울기를 모릅니다'
     want_up = design_up(part['quat'])
     if row.get('up') != want_up:
-        return 'HUMAN', f'놓은 블록 자세({row.get("up")})가 설계({want_up})와 다릅니다'
+        return 'SKIP', f'놓은 블록 자세({row.get("up")})가 설계({want_up})와 다릅니다'
     if row.get('yaw_deg') is None or row.get('top_z_m') is None:
-        return 'HUMAN', '잰 yaw · 윗면 높이가 없습니다'
+        return 'SKIP', '잰 yaw · 윗면 높이가 없습니다'
     dx_raw, dy_raw = row.get('dx_raw_mm', row['dx_mm']), row.get('dy_raw_mm', row['dy_mm'])   # 반올림 전 값으로 판단(1.996 이 2.00 으로 보여도 다시 집지 않음)
     if abs(dx_raw) < A4_TOL_MM - FLOAT_EPS_MM and abs(dy_raw) < A4_TOL_MM - FLOAT_EPS_MM:
         return 'OK', None
     if tries >= A4_MAX_TRIES:                      # 다시 집기를 다 썼다 — 남은 오차만 적고 이어 감(기존 VERIFY 판정은 이미 통과, 사람 대기 없음)
         return 'EXHAUSTED', f'다시 집기 {A4_MAX_TRIES}번을 다 써도 남은 오차 dx {row["dx_mm"]} · dy {row["dy_mm"]} mm — 그대로 다음 블록'
     if place_pose is None:
-        return 'HUMAN', '이 블록을 놓을 때 보낸 목표를 몰라 다시 놓을 자리를 정할 수 없어요'
+        return 'SKIP', '이 블록을 놓을 때 보낸 목표를 몰라 다시 놓을 자리를 정할 수 없어요'
     pick = block_pose(cfg, row['up'], row['yaw_deg'], row['x_m'], row['y_m'], row['top_z_m'])
     return 'REGRASP', {'part_id': part['part_id'], 'supply_slot': '', 'grasp': part['grasp'], 'pick_pose': pick,
                        'place_pose': copy.deepcopy(place_pose), 'open_width_m': 0.0, 'obstacles': []}
@@ -1280,10 +1280,10 @@ class TaskManager:
                 self.logger.log('a4_regrasp', self.placed, f'보정 소진: {out}')
                 self._w144_event('regrasp_exhausted', self.placed, dx_mm=row['dx_mm'], dy_mm=row['dy_mm'], tries=self._a4_tries.get(self.placed, 0))
                 return False                       # 기존 흐름(W144 촬영 → SELECT)으로 다음 블록
-            if verdict == 'HUMAN':
-                self.logger.log('a4_regrasp', self.placed, f'사람 확인: {out}')
-                self._hold(self.placed, f'{self.placed}: {out} — 손으로 바로 놓은 뒤 [계속]을 누르면 다시 확인합니다', then='verify')
-                return True
+            if verdict == 'SKIP':                   # 측정을 못 씀 — 다시 집지도, 사람을 부르지도 않고 까닭만 적고 다음 블록(10/14 21:5x 사용자 결정)
+                self.logger.log('a4_regrasp', self.placed, f'측정 못 씀 — 다시 집기 안 함: {out}')
+                self._w144_event('regrasp_skipped', self.placed, reason=out)
+                return False                       # 기존 흐름(W144 촬영 → SELECT)으로 다음 블록
             n = self._a4_tries[self.placed] = self._a4_tries.get(self.placed, 0) + 1
             self.logger.log('a4_regrasp', self.placed, f'{n}번째 다시 집기: dx {row["dx_mm"]} · dy {row["dy_mm"]} mm(설계 중심 기준) · '
                                                        f'놓을 자리 = 처음 보낸 목표')
