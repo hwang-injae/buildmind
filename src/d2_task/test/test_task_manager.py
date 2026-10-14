@@ -347,6 +347,16 @@ def test_복구_때_쥔_블록이_있으면_ERROR():
     m.on_safety(SAFE_OK)
     drive(m, 'ERROR')
     assert '쥐고' in io.states[-1]['message']
+    assert '[정지] → [그리퍼 열기] → [다시 시작]' in io.states[-1]['message']      # 화면과 같은 빼는 길(10/14 PL)
+
+
+def test_복구_때_그리퍼_상태를_모르면_ERROR_연결부터_안내():
+    m, io = go(pick_script=[(False, 'STOPPED')])
+    drive(m, 'STOPPED')
+    m.gripper = None
+    m.on_safety(SAFE_OK)
+    drive(m, 'ERROR')
+    assert '그리퍼 상태를 몰라' in io.states[-1]['message'] and '[그리퍼 열기]' not in io.states[-1]['message']
 
 
 def test_ERROR는_잠금이_풀린_신호가_새로_와야_RECOVER():
@@ -456,6 +466,7 @@ def test_출발_때도_점검을_한_번_더_한다():
     m.on_gripper({'grasped': True})
     assert m.command('start') == (False, '')
     assert m.state == 'READY'
+    assert '[정지] → [그리퍼 열기] → [다시 시작]' in io.states[-1]['message']      # 화면 GRIP_HELD 와 같은 길(10/14 PL)
 
 
 def test_음성_의도는_화면_버튼과_똑같이():

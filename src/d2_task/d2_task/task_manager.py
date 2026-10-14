@@ -1149,8 +1149,12 @@ class TaskManager:
             if self._gripper_busy:                # 열기 답 전에는 gripper/state 도 믿을 수 없고 팔도 움직이지 않는다 — 답이 오면 다음 단계가 이어 본다
                 return None
         grip = self.gripper
-        if grip is None or grip.get('grasped'):
-            return self._to_error('블록을 쥐고 있거나 그리퍼 상태를 모른다. 사람이 확인한 뒤 [다시 시작]')
+        # 안내는 화면(HMI GRIP_HELD)과 같은 길(10/14 PL — E-114 꼴). 쥔 채 [다시 시작]만 다시 누르면 RECOVER → ERROR 를 되풀이하므로
+        # 빼는 길([정지] → [그리퍼 열기] — 정지에서만 받음)을 알린다. 상태를 모르면 그리퍼 연결부터
+        if grip is None:
+            return self._to_error('그리퍼 상태를 몰라 이어 갈 수 없어요 → 그리퍼 신호가 오는지 → 로봇 PC 그리퍼 노드와 그리퍼 전원 · 연결을 확인한 뒤 [다시 시작]')
+        if grip.get('grasped'):
+            return self._to_error('그리퍼가 블록을 쥐고 있어 이어 갈 수 없어요 → 쥔 블록을 먼저 빼야 해요 → 블록을 받칠 사람과 함께 [정지] → [그리퍼 열기] → [다시 시작]')
         self._recover_slow = True
         if self._scatter is not None and self._scatter.via_spare:
             # 받침 경유: 사람이 확인하고 [다시 시작]하면 시도 수 · 안 된 후보를 비우고 이어 간다(one_pick hold → Enter 와 같음).
@@ -1654,7 +1658,7 @@ class TaskManager:
         if self.gripper is None:
             return False, '', '그리퍼 신호를 아직 못 받았어요. 로봇 PC의 로봇 노드(그리퍼)와 그리퍼 전원 · 연결을 확인한 뒤 다시 누르세요'
         if self.gripper.get('grasped'):
-            return False, '', '그리퍼가 블록을 쥐고 있어 시작할 수 없어요. 로봇 담당자에게 정리 · 복구를 요청해 주세요'
+            return False, '', '그리퍼가 블록을 쥐고 있어 시작할 수 없어요 → 조립 · 스캔 전에 블록을 빼야 해요 → 블록을 받칠 사람과 함께 [정지] → [그리퍼 열기] → [다시 시작]'   # 화면 GRIP_HELD 와 같은 길(10/14 PL)
         return True, '', ''
 
     # ---------- 상태 바꾸기 · 방송 ----------
