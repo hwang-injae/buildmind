@@ -11,6 +11,7 @@ import { NO_WEB, WAKE_WORD, checkReasonKo, designName } from '@/lib/names';
 import type { GenCandidate, GenJob, Intent, Rules } from '@/lib/types';
 import type { Robot } from '@/lib/ws';
 import { roleItems } from './DesignView';
+import CountUp from './CountUp';
 import Preview3D from './Preview3D';
 
 const POLL_MS = 1000; // /ws 알림이 끊겼을 때를 위한 다시 받기 간격(만드는 동안만)
@@ -89,7 +90,7 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
     if (!listening) return;
     const t = setTimeout(() => {
       setListening(false);
-      setError(`음성을 못 받았어요 → 시동어 "${WAKE_WORD}"를 먼저 말했는지 · 마이크와 음성 프로그램(voice.py)이 켜져 있는지 → 웹 PC 터미널의 voice.py 로그 · 마이크 연결, 확인 뒤 다시 눌러 주세요`);
+      setError(`음성을 못 받았어요 — "${WAKE_WORD}"를 먼저 말하고 다시 눌러 주세요`);
     }, LISTEN_MS);
     return () => clearTimeout(t);
   }, [listening]);
@@ -100,7 +101,7 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
     listenFrom.current = robot.intent;
     const r = await api.voiceListen();
     setBusy(false);
-    if (!r.success) return setError(`마이크를 켜지 못했어요 — ${r.message ?? r.reason}`);
+    if (!r.success) return setError(`마이크를 켜지 못했어요${r.message ? ` — ${r.message}` : ''}`);
     setListening(true);
     onLog('voice', `듣는 중 — 시동어 "${WAKE_WORD}" → 삑 → 요청`);
   };
@@ -115,7 +116,7 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
     const j = await api.getGenJob(jobId);
     if (j) setJob(j);
     onSaved(r.data.design_id);
-    onLog('gen', `저장: ${r.data.design_id}(부모 ${r.data.parent_id ?? '없음'})`);
+    onLog('gen', `저장: ${designName(r.data.design_id)}`);
   };
 
   const blocked = busy || running || listening;
@@ -141,14 +142,14 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
           disabled={blocked || !baseId}
         />
         <button className="mic" onClick={listen} disabled={blocked || !baseId} aria-label="음성으로 요청"
-          title={`누르고 시동어 "${WAKE_WORD}"를 말한 뒤 삑 소리가 나면 요청을 말하세요 — 문장이 글 창에 들어가고 바로 만들기 시작해요`}>
+          title={`누른 뒤 "${WAKE_WORD}" → 삑 → 요청을 말하세요`}>
           {listening ? '듣는 중…' : '🎤 말하기'}
         </button>
         <button className="primary" onClick={() => start(text.trim(), 'web')} disabled={blocked || !baseId || !text.trim()}>
           {busy && !job ? '시작하는 중…' : 'AI 생성'}
         </button>
       </div>
-      {listening && <p className="hint">시동어 &quot;{WAKE_WORD}&quot;를 말하세요 → 삑 뒤에 요청({LISTEN_MS / 1000}초 안)</p>}
+      {listening && <p className="hint">&quot;{WAKE_WORD}&quot; → 삑 → 요청 ({LISTEN_MS / 1000}초 안)</p>}
       {error && <p className="result bad">{error}</p>}
 
       {job && <JobView job={job} rules={rules} dark={dark} canPick={job.state === 'ready' && !busy} onPick={pick} />}
@@ -158,24 +159,24 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
 
 /** 생성 작업 하나 — 진행 한 줄 · 참고한 설계 · 통과한 후보(끝난 뒤에만 그림 — 10/11 PL A5) */
 function JobView({ job, rules, dark, canPick, onPick }: { job: GenJob; rules: Rules | null; dark: boolean; canPick: boolean; onPick: (i: number) => void }) {
-  const again = (job.attempt ?? 1) > 1 ? ` (모자란 만큼 더 만들기 ${job.attempt}/${MAX_TRIES})` : '';
+  const again = (job.attempt ?? 1) > 1 ? ` (더 만드는 중 ${job.attempt}/${MAX_TRIES})` : '';
   const code = job.code ?? '';
-  let status: string;
+  let status: React.ReactNode;
   if (job.state === 'running') {
-    if (job.count) status = `후보 검사 중… 통과 ${job.passed ?? 0}/${MAX_CANDS}` + again;
+    if (job.count) status = <>후보 검사 중… 통과 <CountUp value={job.passed ?? 0} />/{MAX_CANDS}{again}</>;
     else status = (job.reading?.length ? '참고 설계를 읽고 ' : '') + '후보 만드는 중…' + again;
   } else if (job.state === 'ready') {
     const n = job.candidates.length;
-    status = n < MAX_CANDS ? `통과한 후보 ${n}개(${MAX_CANDS}개를 다 못 채웠어요) — 하나를 고르세요` : '통과한 후보 하나를 고르세요';
-  } else if (job.state === 'saved') status = `${designName(job.saved?.design_id)} 저장했어요 — 위 설계 3D 에서 [조립]`;
+    status = `통과한 후보 ${n}개 — 하나를 고르세요`;
+  } else if (job.state === 'saved') status = `${designName(job.saved?.design_id)} 저장했어요 — 위에서 [조립]`;
   else if (OWN_MESSAGE.has(code)) status = job.message || FAIL_KO[code];
-  else status = `${FAIL_KO[code] ?? code} — ${job.message ?? ''}`;
+  else status = [FAIL_KO[code] ?? FAIL_KO.GEN_FAILED, job.message].filter(Boolean).join(' — '); // 모르는 코드는 글자 그대로 안 보임
 
   return (
     <>
       <p className={`result ${job.state === 'failed' ? 'bad' : job.state === 'running' ? '' : 'ok'}`}>{status}</p>
       {/* 기다리는 시간 안내(W108 — 민범진 #147 측정 31 ~ 165초, 10/14 시험 165 ~ 384초 → 전체 상한 5분 = design_gen GEN_LIMIT_S) */}
-      {job.state === 'running' && <p className="muted small">AI가 만드는 데 몇 분 걸려요(최대 5분) — 끝나면 검사를 통과한 후보만 보여 줘요</p>}
+      {job.state === 'running' && <p className="muted small">몇 분 걸려요(최대 5분)</p>}
       {job.state !== 'running' && job.base_id && (
         <p className="muted small">
           바탕 {designName(job.base_id)}

@@ -8,10 +8,11 @@
 // 실패면 backend 가 준 버튼만 남긴다(블록 수 초과 = [취소]만 · 그 밖 = [다시 스캔] · [취소] — 레시피 초안 7-1). [AI로 고치기]는 챌린지(10/14 뒤).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '@/lib/api';
-import { NO_WEB, designName, stateName } from '@/lib/names';
+import { NO_WEB, designName, readable, stateName } from '@/lib/names';
 import type { Cmd, Rules, ScanPreview, ScanSaveJob } from '@/lib/types';
 import type { Robot } from '@/lib/ws';
 import CloudView from './CloudView';
+import CountUp from './CountUp';
 import Preview3D, { type Item3D } from './Preview3D';
 
 const POLL_MS = 1000; // /ws 알림이 끊겼을 때를 위한 다시 받기 간격(저장하는 동안만)
@@ -104,29 +105,27 @@ export default function ScanReview({ robot, rules, dark, onSaved, onLog }: Props
     setBusy(false);
     if (!r.data) return setError(r.error ?? NO_WEB);
     setJob({ job_id: r.data.job_id, state: 'running', run_id: scan.run_id });
-    onLog('button', '스캔 저장 — AI가 역할 · 순서 · 잡기를 채우고 검사해요');
+    onLog('button', '스캔 저장 — AI가 채우고 검사해요');
   };
   const send = async (label: string, cmd: Cmd) => {
     setBusy(true);
     const r = await api.command(cmd);
     setBusy(false);
-    onLog('button', r.success ? label : `${label} 실패 — ${r.message ?? r.reason}`);
+    onLog('button', r.success ? label : `${label} 실패${r.message ? ` — ${r.message}` : ''}`);
   };
 
   let status = '점군과 추론 설계를 비교하고 고르세요';
-  if (live) status = st?.message || stateName(st?.state);
+  if (live) status = readable(st?.message) || stateName(st?.state);
   else if (job?.state === 'running')
-    status = 'AI가 역할 · 순서 · 잡기를 채우고 검사하는 중…' + ((job.attempt ?? 1) > 1 ? ` (다시 채우기 ${job.attempt}/${MAX_TRIES})` : '');
+    status = 'AI가 채우고 검사하는 중…' + ((job.attempt ?? 1) > 1 ? ` (다시 ${job.attempt}/${MAX_TRIES})` : '');
   else if (job?.state === 'saved')
-    status = `${designName(job.saved?.design_id)}(으)로 저장했어요 — 구조물을 치우고 위 설계 3D 에서 [조립]`
-      // AI 가 부모(바탕 설계)를 고른 까닭 한 줄(10/14 PL · 민범진 — 전엔 생성 기록에만)
-      + (job.saved?.ai_reason ? ` · 바탕 ${designName(job.saved.parent_id)} — AI가 고른 까닭: ${job.saved.ai_reason}` : '');
+    // AI 가 바탕을 고른 까닭은 설계 3D 칸 · 기록에(저장하면 곧 출발 대기라 이 칸은 닫힌다)
+    status = `${designName(job.saved?.design_id)}(으)로 저장했어요 — 구조물을 치우고 위에서 [조립]`;
   else if (job?.state === 'failed') status = job.message || '저장하지 못했어요';
   const failed = job?.state === 'failed';
   const can = (a: 'cancel' | 'rescan') => !failed || (job?.actions ?? ['rescan', 'cancel']).includes(a);
 
   const poseText = preview?.pose_id ? `자세 ${preview.pose_id}` : '';
-  const pointsText = preview?.points ? `점 ${preview.points.toLocaleString()}개` : '';
   return (
     <section className="panel scan-panel" ref={panel}>
       <div className="panel-head">
@@ -137,9 +136,11 @@ export default function ScanReview({ robot, rules, dark, onSaved, onLog }: Props
           ))}
         </ol>
         <span className="muted small">
-          {scan
-            ? `블록 ${scan.blocks.blocks.length}개 · 가려져 추정 ${scan.inferred_count}개${scan.nearest_base ? ` · 가장 비슷한 기본 설계 ${designName(scan.nearest_base)}` : ''}`
-            : [poseText, pointsText].filter(Boolean).join(' · ')}
+          {scan ? (
+            <>블록 <CountUp value={scan.blocks.blocks.length} />개 · 가려져 추정 {scan.inferred_count}개{scan.nearest_base ? ` · 가장 비슷한 기본 설계 ${designName(scan.nearest_base)}` : ''}</>
+          ) : (
+            <>{poseText}{poseText && preview?.points ? ' · ' : ''}{preview?.points ? <>점 <CountUp value={preview.points} />개</> : null}</>
+          )}
         </span>
       </div>
       <div className="scan-grid">
@@ -155,7 +156,7 @@ export default function ScanReview({ robot, rules, dark, onSaved, onLog }: Props
         </figure>
         <figure>
           <figcaption>
-            추론 설계 <span className="muted small">— 반투명 = 가려져서 추정한 블록</span>
+            추론 설계 <span className="muted small">— 반투명은 추정</span>
           </figcaption>
           {scan && rules ? (
             <Preview3D items={items} blockMm={rules.block_size_mm} frameKey={scan.run_id} dark={dark} />

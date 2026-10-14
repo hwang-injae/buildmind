@@ -26,8 +26,8 @@ def command(body: Command, request: Request):
     """/d2/hmi/command 요청 → {success, reason}. 로봇 PC 가 끊겼으면 출발 · 스캔은 보내지 않고 success false + 안내."""
     mqtt = request.app.state.mqtt
     if body.cmd in NEEDS_BRIDGE and not mqtt.bridge_connected():
-        return {'success': False, 'reason': '', 'message': '로봇 PC 연결 끊김이라 조립 · 스캔을 막았어요 → 로봇 PC 의 다리(d2_bridge)가 켜져 있는지 · 네트워크 '
-                '→ 로봇 PC 터미널의 다리 로그, 로봇 PC 에서 웹 PC IP 로 ping'}   # 거절 글 형식(10/14 PL — 문제 → 확인할 것 → 확인 방법)
+        # 화면 글은 짧게 — 확인 방법(다리 d2_bridge 로그 · ping)은 web/README 3-1(10/14 17시 PL)
+        return {'success': False, 'reason': '', 'message': '로봇 PC 연결 끊김이라 조립 · 스캔을 막았어요'}
     return mqtt.request('/d2/hmi/command', body.model_dump())
 
 

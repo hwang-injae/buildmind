@@ -9,6 +9,7 @@ import * as api from '@/lib/api';
 import { designName, rejectText } from '@/lib/names';
 import type { CmdResult, ScanMatch } from '@/lib/types';
 import { gripperOpening, holdingBlock, type Robot } from '@/lib/ws';
+import CountUp from './CountUp';
 
 const GOOD_RATE = 0.9; // V-48 기준(일치율 ≥ 90 %) — 이보다 낮으면 '많이 달라요'(새 모양인지 스캔 실수인지 사람이 3D 로 확인 → [그대로 저장] · [다시 스캔], 10/14 PL)
 
@@ -39,22 +40,21 @@ export default function ScanRecommend({ robot, onView, onLog }: Props) {
   if (!runId) return null;
   if (list === null) return <p className="hint">비슷한 저장 설계를 찾는 중…</p>;
   if (list === 'fail' || list.length === 0)
-    return <p className="hint">추천할 저장 설계를 못 찾았어요 → 스캔이 제대로 됐는지 → 위 점군 · 블록 수를 보고 [다시 스캔] 또는 [취소]</p>;
+    return <p className="hint">비슷한 저장 설계가 없어요 — [그대로 저장] 또는 [다시 스캔]</p>;
 
   const best = list[0];
   const st = robot.state;
   const canSend = !sending && !robot.safety?.locked && !gripperOpening(robot) && !holdingBlock(robot) && robot.bridge && st?.state === 'SCAN_REVIEW';
-  const line = (m: ScanMatch) => `부품 ${m.matched}/${Math.max(m.scan_count, m.part_count)} 일치 (${Math.round(m.rate * 100)} %)`;
+  const line = (m: ScanMatch) => <>부품 {m.matched}/{Math.max(m.scan_count, m.part_count)} 일치 (<CountUp value={Math.round(m.rate * 100)} /> %)</>;
   // 추천 설계와 스캔이 다른 블록 수 — 하나라도 다르면 [조립]은 스캔한 구조가 아니라 추천 설계를 쌓는다(10/14 PL · 민범진 제안 1)
   const differ = Math.max(best.scan_count, best.part_count) - best.matched;
-  // 안내(E-114 꼴 — 문제 → 무엇을 확인 → 어떻게, 10/14 PL). 막지 않는다(경고색 아님). 많이 다르면 새 모양으로 단정하지 않는다 —
-  // 스캔 실수일 수 있어 틀린 설계를 [그대로 저장]하지 않게 [다시 스캔]도 같이 알린다
+  // 안내 한 줄(막지 않음). 많이 다르면 새 모양으로 단정하지 않는다 — 스캔 실수일 수 있어 [다시 스캔]도 같이 알린다
   const advice =
     differ === 0
-      ? '스캔한 구조와 같아요 → 그대로 [조립]하면 같은 모양으로 복제돼요'
+      ? '스캔과 같아요 — [조립]하면 그대로 복제돼요'
       : best.rate < GOOD_RATE
-        ? '추천 설계와 많이 달라요 → 스캔이 실제 구조와 맞는지 → 3D에서 스캔 결과를 보고, 맞으면 [그대로 저장] · 틀리면 [다시 스캔]'
-        : `추천 설계와 블록 ${differ}개 달라요 → 다른 블록이 실제로 있는지 → 3D로 비교하고, 스캔한 그대로 쌓으려면 [그대로 저장] · 추천 설계로 쌓으려면 [조립]`;
+        ? '많이 달라요 — 스캔이 맞으면 [그대로 저장], 틀리면 [다시 스캔]'
+        : `블록 ${differ}개 달라요 — 스캔대로면 [그대로 저장], 추천대로면 [조립]`;
 
   async function assemble() {
     setSending(true);

@@ -311,7 +311,7 @@ def test_bridge_down_is_gen_failed(store, monkeypatch):
     gen = DesignGenerator(store, real_check(), RULES)
     with pytest.raises(GenError) as e:
         gen.generate('벤치', BENCH)
-    assert e.value.code == 'GEN_FAILED' and 'claude_bridge' in e.value.message
+    assert e.value.code == 'GEN_FAILED' and '중계' in e.value.message
 
 
 def test_bridge_down_and_usage_limit_messages(store):
@@ -328,7 +328,7 @@ def test_bridge_down_and_usage_limit_messages(store):
                           APIStatusError(502, 'claude 실패: context length limit')])
     with pytest.raises(GenError) as e:
         gen.generate('벤치', BENCH)
-    assert e.value.code == 'GEN_FAILED' and 'claude_bridge' in e.value.message
+    assert e.value.code == 'GEN_FAILED' and '중계' in e.value.message
     with pytest.raises(GenError) as e:
         gen.generate('벤치', BENCH)
     assert e.value.code == 'GEN_FAILED' and '사용 한도' in e.value.message and e.value.final
@@ -616,7 +616,7 @@ def test_relay_reason_is_shown(store):
     gen, _ = make(store, [RelayError(502, 'claude 가 정해진 형식으로 답하지 않았다: 블록 3개')])
     with pytest.raises(GenError) as e:
         gen.generate('벤치', BENCH)
-    assert e.value.message.startswith('설계 AI 실패(claude 가 정해진 형식으로 답하지 않았다: 블록 3개) →') and not e.value.final   # 거절 글 형식(10/14 PL)
+    assert e.value.message == '설계 AI 호출이 실패했어요 — claude 가 정해진 형식으로 답하지 않았다: 블록 3개' and not e.value.final   # 짧은 한 줄(10/14 17시 PL)
 
 
 def test_where_reads_only_part_numbers(good):
