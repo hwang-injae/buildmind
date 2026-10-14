@@ -28,5 +28,7 @@ colcon build --symlink-install --packages-select d2_bringup d2_motion d2_gripper
 source install/setup.bash
 ```
 
+main을 받은 뒤에는 바뀐 패키지를 전부 다시 빌드한다 — `robot.yaml` · 설치 레시피를 바꾼 커밋이면 `d2_bringup`도 꼭 넣는다(설치 폴더에서 읽으므로 빌드하지 않으면 옛 값이 남음). 순서는 [src/README](../README.md) '빌드 · 시험'.
+
 가상·실물 launch 명령의 패키지 이름은 기존과 같다. 가상 에뮬레이터 실행·종료 시
 컨테이너 삭제 처리는 [저장소 규칙](../../AGENTS.md)을 먼저 확인한다.

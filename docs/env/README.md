@@ -7,7 +7,7 @@
 | 그리퍼 | OnRobot RG2 |
 | 카메라 | 손목 RealSense D435i(깊이 있음) — 로봇 PC. **웹캠은 쓰지 않는다**(10/6 주제 개편 E-19) |
 | ROS 2 통신 | **로봇 PC 안에서만**: CycloneDDS(`rmw_cyclonedds_cpp`), `ROS_DOMAIN_ID` = 60 (팀 60번대). **PC 사이는 MQTT**(10/6 E-27) |
-| 컨테이너 | Docker compose, **웹 PC에만**(10/6 E-31): `mosquitto`(MQTT 브로커 1883) · `db`(PostgreSQL 16) · `web`(backend FastAPI :8000 + frontend 정적 파일 · AI 생성 · 저장소). 셋 다 황인재. 웹 PC 호스트에는 설계 AI 중계 `web/claude_bridge.py`(10/13 E-99) · 음성. 로봇 PC는 전부 호스트 |
+| 컨테이너 | Docker compose, **웹 PC에만**(10/6 E-31): `mosquitto`(MQTT 브로커 1883) · `db`(PostgreSQL 16) · `web`(backend FastAPI :8000 + frontend 정적 파일 · AI 생성 · 저장소). 셋 다 황인재. 웹 PC 호스트에는 설계 AI 중계 `web/claude_bridge.py`(10/13 E-99) · 음성 `web/backend/voice.py`(민범진 #171). 로봇 PC는 전부 호스트 |
 | PC | 2대: **로봇 PC = 박진용 PC**(ROS 2 노드 전부) + **웹 PC = 한석형 PC**(ROS 없음 — 브로커 · DB · 웹 · 설계 AI 중계 · 음성)(10/11 E-92). 두 PC는 **Wi-Fi** — 브로커는 웹 PC Wi-Fi IPv4에서 로봇 PC만 받는다(6-1, #136) |
 
 이 저장소 워크스페이스(`rokey_9_pjt2_D2`)는 두산 드라이버 워크스페이스 위에 겹쳐 쓴다. ROS 2 Jazzy와 두산 드라이버를 처음부터 까는 순서는 강의 설치 안내를 따른다. 이 문서는 **팀이 맞춰야 하는 것**만 적는다.
@@ -171,23 +171,25 @@ docker --version
 | 컨테이너(서비스 이름) | 안에서 도는 것 | 따로 두는 이유 | 만드는 사람 (S-17) |
 |---|---|---|---|
 | `mosquitto` | MQTT 브로커(eclipse-mosquitto, 1883) — `web/mosquitto/mosquitto.conf` | PC 사이 통신의 가운데 서버. 설치 없이 이미지 1줄 | 황인재 · 10/6 저녁~10/7 (W102) |
-| `db` | PostgreSQL 16(`designs` · `builds`, 10/6 E-39) | DB 프로그램은 컨테이너로 띄우는 것이 가장 쉽다. 데이터는 볼륨 · 로컬 폴더 | 황인재 · W088(일정표 기준) |
-| `web` | backend(FastAPI :8000 — REST · WebSocket `/ws` · paho-mqtt · **AI 설계 생성(Claude — 호스트 중계 `claude_bridge`를 `D2_LLM_URL`로 부름, 10/13 E-99) · 저장소 인터페이스**) 한 프로세스 + frontend 정적 파일(Next.js + three.js — 브라우저에서 실행, 10/7 E-41) | 웹 서버 · OpenAI 라이브러리(형식만 — 주소는 중계)를 한 이미지에. `env_file .env`로 키(음성 STT용). compose(W102) 전에는 호스트로 띄워도 된다 | 황인재 · backend 최소형(W126) 10/9 · 저장소(W111, JSON 폴더) · 화면 10/10 저녁부터 · compose(W102) — 일정표 기준(10/8에 잡은 날짜는 못 지킴) |
+| `db` | PostgreSQL 16(`designs` · `builds` · `gen_logs` + 보기 `templates`, 10/6 E-39 · E-95) — `.env` `COMPOSE_PROFILES=db`일 때만 뜸 | DB 프로그램은 컨테이너로 띄우는 것이 가장 쉽다. 데이터는 로컬 폴더 `web/db/data` | 황인재 · W088(10/14 main) |
+| `web` | backend(FastAPI :8000 — REST · WebSocket `/ws` · paho-mqtt · **AI 설계 생성(Claude — 호스트 중계 `claude_bridge`를 `D2_LLM_URL`로 부름, 10/13 E-99) · 저장소 인터페이스**) 한 프로세스 + frontend 정적 파일(Next.js + three.js — 브라우저에서 실행, 10/7 E-41) | 웹 서버 · OpenAI 라이브러리(형식만 — 주소는 중계)를 한 이미지에. `env_file .env`로 키(음성 STT용). 코드 · 설정 · 레시피 · 화면 `frontend/out`은 이미지에 넣지 않고 읽기 전용으로 연결한다(uvicorn `--reload` 없음 — 코드가 바뀌면 `restart web`, 아래) | 황인재 · backend 최소형(W126) 10/9 · 저장소(W111) · 화면(W112) · compose(W102) — 모두 main |
 
 | 호스트에서 바로 | 이유 |
 |---|---|
 | 설계 AI 중계 `web/claude_bridge.py` (웹 PC) | 컨테이너 안에는 Claude 로그인이 없다 — 웹 PC에 로그인된 Claude Code(`claude -p`)를 부른다(키 없음 · 구독 한도). `python3 web/claude_bridge.py --host 172.17.0.1`(docker0 — `web` 컨테이너만 부름), 준비 점검 `--check`(10/13 E-99, [web/README](../../web/README.md) 1-C) |
-| 음성 (웹 PC) | 마이크 장치를 컨테이너에 넘기기가 번거롭다. `voice.py`(예정 — 담당 민범진, 10/13 E-105): 마이크 버튼(`d2/hmi/voice/listen`) → 시동어 → Whisper API → MQTT `d2/hmi/intent` |
+| 음성 (웹 PC) | 마이크 장치를 컨테이너에 넘기기가 번거롭다. `web/backend/voice.py`(담당 민범진 — 10/13 E-105, #171 10/14 main): 마이크 버튼(`d2/hmi/voice/listen`) → 시동어 "hello rokey" → 받아 적기(Whisper STT — OpenAI, E-118) → MQTT `d2/hmi/intent` · 정지 낱말('정지' · '멈춰' · '스톱' · '그만')이면 `d2/safety/stop/req`. 실행 `python3 web/backend/voice.py --host <웹 PC Wi-Fi IP>`(브로커가 Wi-Fi IPv4에만 열려 있음), 준비 점검 `--check`(마이크 · 스피커 · 시동어 모델 · 키 · 브로커). 설치(라이브러리 · 마이크 · 스피커)는 웹 PC에서 한석형 · 민범진(E-118 ③) |
 | 로봇 PC 전부(브링업 · 동작 · 그리퍼 · 정지 · 비전 · task · 다리) | 10/3에 시험한 호스트 환경(두산 드라이버 · MoveIt2 · RealSense)을 그대로 쓴다. 다리는 paho-mqtt만 더 깐다 |
 
 **컨테이너는 그 안에 넣는 것의 담당이 만든다(10/5 S-17).** 브로커는 W102로 먼저 띄워 쓰고, 두 PC 연결 확인은 W129(일정표). 1시간 넘게 막히면 일단 호스트로 돌리고 compose(10/12) 때 마저 한다.
 
-컨테이너는 성능을 바꾸지 않는다(1장). DB는 PostgreSQL 16(10/6 21시 E-39 · W088 10/14 들어옴) — `.env`의 `DATABASE_URL`이 비면 지금처럼 JSON 파일 폴더(`web/backend/data`), 채우면 `db` 컨테이너에 저장한다. 띄우는 순서는 아래와 같다 — 브로커를 열기 전에 방화벽부터([web/README](../../web/README.md) '두 PC Wi-Fi 연결').
+컨테이너는 성능을 바꾸지 않는다(1장). DB는 PostgreSQL 16(10/6 21시 E-39 · W088 10/14 들어옴) — `.env`의 `DATABASE_URL`이 비면 JSON 파일 폴더(`web/backend/data`), 채우면 `db` 컨테이너에 저장한다. 띄우는 순서는 아래와 같다 — 브로커를 열기 전에 방화벽부터([web/README](../../web/README.md) '두 PC Wi-Fi 연결'). compose 명령은 `ps` · `logs` · `restart`도 모두 `D2_WEB_IPV4` · `WEB_UID` · `WEB_GID`가 있어야 돈다(compose 파일이 필수 값으로 읽음 — 없으면 '필수 변수 없음'으로 멈춤).
 
 ```bash
 cd <저장소>/web
 cp .env.example .env          # OPENAI_API_KEY=…(음성 STT만) · D2_LLM_MODEL · DB 넷(COMPOSE_PROFILES=db · POSTGRES_PASSWORD · DATABASE_URL …) (값은 적지 않는다)
+(cd frontend && npm ci && npm run build)   # 화면 → web/frontend/out(컨테이너가 읽기 전용으로 연결 — 호스트 Node 24 필요, web/README 1-B)
 # 다른 터미널(호스트): python3 web/claude_bridge.py --host 172.17.0.1   — 설계 AI 중계(E-99), 먼저 --check
+# 다른 터미널(호스트): python3 web/backend/voice.py --host <웹 PC Wi-Fi IP>   — 음성(E-105), 먼저 --check
 D2_WEB_IPV4=<웹 PC Wi-Fi IP> WEB_UID=$(id -u) WEB_GID=$(id -g) docker compose up -d   # mosquitto · db · web
 docker compose ps
 docker compose logs -f web    # 키 읽힘(값은 안 찍음) · 브로커 연결 · DB 연결 확인
@@ -200,6 +202,8 @@ docker compose logs -f web    # 키 읽힘(값은 안 찍음) · 브로커 연�
 - DB에 못 붙으면: `web`은 시작 때 약 30초(20번) 다시 붙어 보고, 그래도 안 되면 꺼졌다 다시 켜지기를 되풀이한다 — 화면이 안 열린다(JSON으로 저절로 넘어가지 않음). `docker compose logs db web`으로 까닭을 본다.
 - 되돌리기(JSON 폴더로): `.env`의 `DATABASE_URL`을 비우고 `docker compose up -d web`.
 - 설계 AI 중계(`claude_bridge`)는 10/14 #167로 '사용 한도' 판단이 바뀌었다 — 통합 뒤 웹 PC 호스트에서 중계를 다시 켠다(`--check` 먼저).
+
+**main을 받은 뒤 웹 PC 반영(코드는 바인드 마운트 · `--reload` 없음):** ① 화면이 바뀌었으면 `cd web/frontend && npm ci && npm run build` ② `D2_WEB_IPV4=<웹 PC Wi-Fi IP> WEB_UID=$(id -u) WEB_GID=$(id -g) docker compose -f web/compose.yaml restart web` — `up -d`는 설정이 같으면 컨테이너를 그대로 둬서 바뀐 코드를 안 읽는다. 다시 켜질 때 기본 설계 4개를 다시 등록한다(E-112 P5). `requirements.txt` · `Dockerfile` · `compose.yaml`이 바뀌었을 때만 `up -d --build` ③ 호스트 프로그램 `claude_bridge.py` · `voice.py`가 바뀌었으면 그 터미널에서 끄고 다시 켠다(compose가 다시 켜 주지 않음). 로봇 PC 반영은 [src/README](../../src/README.md) '빌드 · 시험'.
 
 | 규칙 | 내용 |
 |---|---|
@@ -227,8 +231,9 @@ docker compose logs -f web    # 키 읽힘(값은 안 찍음) · 브로커 연�
 | 다른 팀 섞임 | `ros2 node list` | 우리 노드만 |
 | 로봇 연결(실기) | `ping -c 3 192.168.1.100` | 응답 |
 | 정지 준비 | 프로그램 시작 화면 | '[정지 준비] … 있음' 두 줄 |
-| 컨테이너(웹 PC) | `docker compose -f web/compose.yaml ps` | `mosquitto` · `db` · `web` Up |
+| 컨테이너(웹 PC) | `D2_WEB_IPV4=… WEB_UID=$(id -u) WEB_GID=$(id -g) docker compose -f web/compose.yaml ps` | `mosquitto` · `db` · `web` Up |
 | 설계 AI 중계(웹 PC) | `python3 web/claude_bridge.py --check --host 172.17.0.1` | ❌ 없음(종료 코드 0) |
+| 음성(웹 PC) | `python3 web/backend/voice.py --check --host <웹 PC Wi-Fi IP>` | 마이크 · 스피커 · 시동어 모델 · 키 · 브로커 모두 ✅ |
 | 키 | `git status` | `.env` 없음 |
 | 안전 | 펜던트 | 든 사람이 있다. 두산 TCP 속도 제한 · 충돌 감지가 켜져 있다(작업 공간 제한은 안 씀 — 10/13 E-107) |
 | 키 · 인터넷 | 웹 PC `web` 시작 로그 | OpenAI 키 읽힘(값은 안 찍음), 브로커 · DB 연결 |

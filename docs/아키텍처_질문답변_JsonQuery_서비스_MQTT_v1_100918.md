@@ -1,6 +1,6 @@
 # 아키텍처 질문 답변 — JsonQuery · 서비스 vs 액션 · MQTT 인터페이스
 
-> 2026-10-07 · 황인재(HMI) 질문 정리(10/9 링크만 지금 판으로 — 내용은 10/7 기준, 바뀐 것은 IRD가 맞다. 10/14: 형식 이름 · 시간 제한 · 정지 안내 · [조립]만 지금 것으로 고침 — PM). 이름 · 칸의 정본은 [IRD](02_인터페이스_IRD_v3_101315.md)다(이 문서와 다르면 IRD가 맞다).
+> 2026-10-07 · 황인재(HMI) 질문 정리(10/9 링크만 지금 판으로 — 내용은 10/7 기준, 바뀐 것은 IRD가 맞다. 10/14: 형식 이름 · 시간 제한 · 정지 안내 · [조립]만 지금 것으로 고침 — PM. 10/15: `scan_infer` 시간 제한 · 시간 제한 위치 · 정지 요청 보내는 곳 · 음성 듣기 길만 지금 코드(main 2d74462)에 맞춤 — PM). 이름 · 칸의 정본은 [IRD](02_인터페이스_IRD_v3_101315.md)다(이 문서와 다르면 IRD가 맞다).
 > 근거: IRD 1장 원칙 2 · 4장 · 10장, [결정 기록 10/4](decisions/결정기록_시나리오_역할_인터페이스_1004_v1_101321.md), [SDD](03_설계_SDD_v3_101321.md), `src/d2_interfaces/srv/JsonQuery.srv`, 그림 [시스템 아키텍처 v7](images/시스템아키텍처_v7_101320.png)(정본 = 저장소의 같은 이름 [.drawio](images/시스템아키텍처_v7_101320.drawio) — [아키텍처 설명](시스템아키텍처_설명_v4_101321.md)), 비교 저장소 https://github.com/rokey-c2/cobot3-ws-c2 (10/4 커밋 `4f3aa66`).
 
 ## 1. JsonQuery는 왜 있나
@@ -22,7 +22,7 @@ string response_json     # 응답 JSON 글자, 맨 앞 "schema": "<이름>/<앞>
 1. **주고받는 내용이 크고 자주 바뀐다.** 블록 JSON · 레시피 · 검사 결과 · `find_blocks` 블록 목록은 여러 겹으로 들어 있고 길이도 매번 다르다. `.srv` 칸으로 하나하나 적으면 칸이 바뀔 때마다 `d2_interfaces`를 모든 PC에서 다시 빌드해야 한다. JSON 글자로 두면 빌드 없이 고친다.
 2. **팀 규칙 ② (과도한 구조화 금지).** 비슷한 srv 6개를 따로 만들지 않고 하나로 같이 쓴다.
 3. **MQTT 다리가 단순해진다.** 웹 PC에는 ROS가 없어서 MQTT로는 어차피 JSON이 오간다. 다리는 `request_json` 안의 객체에 `req_id`만 더해 그대로 넘긴다. 칸이 바뀌어도 다리 코드는 대개 그대로다(IRD 10.1).
-4. **그래도 '묻고 답하기'는 지킨다.** 토픽이 아니라 서비스라서 답이 오는지 · 실패 코드(`success` / `reason`) · 시간 제한(5초)을 ROS가 처리한다.
+4. **그래도 '묻고 답하기'는 지킨다.** 토픽이 아니라 서비스라서 답이 오는지 · 실패 코드(`success` / `reason`)를 한 짝으로 받는다. 시간 제한은 부르는 쪽이 건다 — 로봇 PC 안 `timeout.service_s` 3초(`find_blocks`는 `timeout.find_blocks_s` 10초), PC 사이 MQTT는 `mqtt.req_timeout_s` 5초.
 
 **대신 포기한 것:** 빌드할 때 칸을 검사하지 못한다. 그래서 JSON 맨 앞에 `"schema"`(예 `parts/4.0` — 형식 버전 규칙은 IRD 6장)를 붙이고 시험(`tests/`)으로 막는다. 로봇을 움직이는 요청은 틀리면 위험해서 전용 메시지로 남겼다(`PickPlace` · `MoveTo` · `GripperCommand` · `StopRequest`). 10/4 결정 원칙이 **"자주 바뀌는 건 JSON, 틀리면 위험한 건 전용 메시지"** 다.
 
@@ -53,7 +53,7 @@ string response_json     # 응답 JSON 글자, 맨 앞 "schema": "<이름>/<앞>
 
 `move_to`는 최대 45초(`timeout.move_to_s` — 10/7 PL 30 → 45) 걸리지만 서비스다. 중간 보고가 필요 없고 멈추는 건 정지 노드가 하니까 서비스로 둔 것으로 보인다.
 
-> ⚠️ 확인할 점: `scan_infer`(점군 추론)는 ROS 서비스 시간 제한 5초 안에 안 끝날 수 있다. 실제로 재 보고 넘으면 robot.yaml `timeout.*` 값을 늘리는 쪽으로 비전 파트와 맞춘다.
+> ⚠️ 확인할 점: `scan_infer`(점군 추론)는 ROS 서비스 시간 제한 5초 안에 안 끝날 수 있다. 실제로 재 보고 넘으면 robot.yaml `timeout.*` 값을 늘리는 쪽으로 비전 파트와 맞춘다. **(→ 10/12 PL · E-88 덧붙임: `scan_infer` 제한은 `timeout.service_s` 3초 그대로 — 로봇 PC에서 따로 재지 않고, 넘으면 그때 PL이 정한다)**
 
 ## 3. MQTT로 오가는 인터페이스 전부 (IRD 10장, 10/7 W121 임시 정함)
 
@@ -82,7 +82,7 @@ retained라서 화면이 늦게 붙어도 마지막 값을 받는다(ROS의 TRAN
 | MQTT | ROS 서비스 | 요청 → 응답 |
 |---|---|---|
 | `d2/hmi/command/req` · `res` | `/d2/hmi/command` (HmiCommand) | `{"req_id","cmd","design_id","mode"}` → `{"req_id","success","reason"}` |
-| `d2/safety/stop/req` · `res` | `/d2/safety/stop` (StopRequest) | `{"req_id","source","reason"}` → `{"req_id","success","message"}` |
+| `d2/safety/stop/req` · `res` | `/d2/safety/stop` (StopRequest) | `{"req_id","source","reason"}` → `{"req_id","success","message"}` — 보내는 곳 = 웹 backend(화면 [정지], `source: web`) · 웹 PC 호스트 `voice.py`(음성 '정지', `source: voice` — 10/14 #171) |
 | `d2/safety/resume/req` · `res` | `/d2/safety/resume` (std_srvs/Trigger) | `{"req_id"}` → `{"req_id","success","message"}` |
 | `d2/task/check_design/req` · `res` | `/d2/task/check_design` (JsonQuery) | 부품 JSON `parts/4.0` + `base_recipe`(+ 스캔 저장만 `made_by: "scan"`) + `req_id` → `check_result/3.0` + `req_id` · `success` · `reason` |
 
@@ -112,6 +112,6 @@ retained라서 화면이 늦게 붙어도 마지막 값을 받는다(ROS의 TRAN
 ### 3.7 MQTT로 안 넘어가는 것
 
 - **로봇 PC 안에서만:** `pick_place` · `move_to` · `check_progress` · `gripper/command` · `scene/attach` · `scan_capture` · `scan_infer` · `find_blocks` · `camera_status` · `path_markers`.
-- **웹 PC 안에서만:** 브라우저(frontend) ↔ backend는 REST(`/api/designs` · `/api/robot`) + WebSocket `/ws`. 브라우저는 브로커에 직접 붙지 않는다(E-41).
+- **웹 PC 안에서만:** 브라우저(frontend) ↔ backend는 REST(`/api/designs` · `/api/robot` · `/api/voice/listen`) + WebSocket `/ws`. 브라우저는 브로커에 직접 붙지 않는다(E-41). backend → `voice.py` 듣기 시작은 MQTT `d2/hmi/voice/listen`(`voice_listen/1` — 웹 PC 브로커 안, 다리는 안 거침), `voice.py`가 받아 적은 요청은 `d2/hmi/intent`로 낸다(위 3.2).
 
 > 참고: `src/d2_bridge`는 10/7 현재 저장소에 아직 없다(→ 지금은 있음 — W127). 위 표는 IRD에 적힌 약속이고, 다리 코드(W127)는 이 표대로 만든다.
