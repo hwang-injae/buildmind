@@ -10,13 +10,28 @@ export function setTemplateNames(list: { id: string; name: string }[]) {
 
 const DESIGN_RE = /^(\d{3}(?:_[A-Z]+)+)_V(\d{3})$/; // <Template ID>_V<3자리>(E-84)
 
-/** '001_CHAIR_BENCH_V001' → '벤치 V001', V000 → '벤치 (기본)'. 꼴이 다르면 받은 그대로 */
+let displayNames: Record<string, string> = {}; // 사람이 붙인 표시 이름(W197) — 설계 ID → 이름
+
+/** backend 설계 목록의 표시 이름을 기억한다(page 가 처음 붙을 때 · 목록을 받을 때마다) */
+export function setDisplayNames(list: { design_id: string; display_name?: string | null }[]) {
+  displayNames = Object.fromEntries(list.filter((d) => d.display_name).map((d) => [d.design_id, d.display_name as string]));
+}
+
+/** 이름 고치기 뒤 한 설계만 바꾼다(null = 지움) */
+export function setDisplayName(id: string, name: string | null) {
+  if (name) displayNames[id] = name;
+  else delete displayNames[id];
+}
+
+/** '001_CHAIR_BENCH_V001' → '벤치 V001', V000 → '벤치 (기본)', 표시 이름이 있으면 '젠가 탑 4층 · 벤치 V001'(10/14 PL '나' — 원래 판도 같이).
+ *  목록 · 3D 제목 · 로봇 패널 · 진행 줄 · 생성 · 스캔 글이 모두 이 한 곳을 쓴다. 꼴이 다르면 받은 그대로 */
 export function designName(id?: string | null): string {
   if (!id) return '';
   const m = DESIGN_RE.exec(id);
   if (!m) return id;
   const name = templateNames[m[1]] ?? m[1];
-  return m[2] === '000' ? `${name} (기본)` : `${name} V${m[2]}`;
+  const base = m[2] === '000' ? `${name} (기본)` : `${name} V${m[2]}`;
+  return displayNames[id] ? `${displayNames[id]} · ${base}` : base;
 }
 
 /** 역할 → 한국어 · 3D 색(설계 3D · 후보 미리보기 · 블록 이름이 같이 쓴다) */

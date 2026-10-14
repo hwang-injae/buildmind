@@ -8,7 +8,7 @@
 import threading
 import uuid
 from collections import OrderedDict
-from typing import Literal
+from typing import Literal, Optional
 
 from design_gen import GenError, scan_actions
 from design_store import split_design_id
@@ -82,7 +82,9 @@ class GenJobs:
             self.publish({'type': 'scan_save', 'data': {'job_id': job_id, 'stage': stage, **info}})
         try:
             rec = self.gen.save_scan(scan_result, on_progress=progress)
-            job.update(state='saved', saved={'design_id': rec['design_id'], 'version': rec['version'], 'parent_id': rec['parent_id']})
+            job.update(state='saved', saved={'design_id': rec['design_id'], 'version': rec['version'], 'parent_id': rec['parent_id'],
+                                             # AI 가 부모를 고른 까닭 — 화면에 한 줄(10/14 PL · 민범진 제안 1, 전엔 기록에만)
+                                             'ai_template': rec.get('ai_template'), 'ai_reason': rec.get('ai_reason')})
         except GenError as e:
             job.update(state='failed', code=e.code, message=e.message, detail=e.detail, actions=scan_actions(e.detail))
         except Exception as e:   # noqa: BLE001 — 저장소 · 검사 경로 고장도 화면에 실패로
@@ -260,6 +262,26 @@ def get_design(design_id: str, request: Request):
         raise HTTPException(404, f'{design_id} 설계가 없다') from None
     except ValueError as e:
         raise HTTPException(409, str(e)) from None
+
+
+class NameBody(BaseModel):
+    """표시 이름(W197) — 글자면 붙이고, 빈 글자 · null 이면 지운다."""
+    name: Optional[str] = None
+
+
+@router.put('/{design_id}/name')
+def rename(design_id: str, body: NameBody, request: Request):
+    """설계의 표시 이름을 붙이거나 지운다(W197 — design_id · 레시피는 그대로) → {design_id, display_name}.
+    없는 설계 404, 이름 꼴이 틀리면 400(글자 수 · 줄바꿈), 저장소 끊김 503. 바깥 영향: 저장소 한 칸 쓰기."""
+    try:
+        name = request.app.state.store.set_display_name(design_id, body.name)
+    except KeyError:
+        raise HTTPException(404, f'{design_id} 설계가 없다') from None
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    except OSError as e:
+        raise HTTPException(503, f'저장소에 못 썼어요 → DB · 데이터 폴더 → backend 로그({e})') from None
+    return {'design_id': design_id, 'display_name': name}
 
 
 @router.get('/{design_id}/builds')

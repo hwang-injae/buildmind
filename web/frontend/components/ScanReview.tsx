@@ -116,7 +116,10 @@ export default function ScanReview({ robot, rules, dark, onSaved, onLog }: Props
   if (live) status = st?.message || stateName(st?.state);
   else if (job?.state === 'running')
     status = 'AI가 역할 · 순서 · 잡기를 채우고 검사하는 중…' + ((job.attempt ?? 1) > 1 ? ` (다시 채우기 ${job.attempt}/${MAX_TRIES})` : '');
-  else if (job?.state === 'saved') status = `${designName(job.saved?.design_id)}(으)로 저장했어요 — 구조물을 치우고 위 설계 3D 에서 [조립]`;
+  else if (job?.state === 'saved')
+    status = `${designName(job.saved?.design_id)}(으)로 저장했어요 — 구조물을 치우고 위 설계 3D 에서 [조립]`
+      // AI 가 부모(바탕 설계)를 고른 까닭 한 줄(10/14 PL · 민범진 — 전엔 생성 기록에만)
+      + (job.saved?.ai_reason ? ` · 바탕 ${designName(job.saved.parent_id)} — AI가 고른 까닭: ${job.saved.ai_reason}` : '');
   else if (job?.state === 'failed') status = job.message || '저장하지 못했어요';
   const failed = job?.state === 'failed';
   const can = (a: 'cancel' | 'rescan') => !failed || (job?.actions ?? ['rescan', 'cancel']).includes(a);

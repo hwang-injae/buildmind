@@ -1,5 +1,6 @@
 -- D2 웹 PC DB (PostgreSQL 16) — 설계 · 조립 기록 · AI 호출 기록 (W088). 정본 = PM 폴더 설계_DB_v1 부록 A(10/13 PL 확인판)
--- + 10/14 E-111 형식 4.0(design/4.0 · parts/4.0 — order → sequence) + gen_logs.extra(표에 없는 기록 키 — 스캔 채우기 run_id 등).
+-- + 10/14 E-111 형식 4.0(design/4.0 · parts/4.0 — order → sequence) + gen_logs.extra(표에 없는 기록 키 — 스캔 채우기 run_id 등)
+-- + 10/14 W197 designs.display_name(사람이 보는 이름 — design_id 는 그대로).
 -- db 컨테이너가 데이터 폴더가 비었을 때 한 번만 돌린다(/docker-entrypoint-initdb.d). 키 · 비밀번호는 .env(여기 없음).
 -- 저장소 코드(web/backend/design_store.py PgDesignStore)가 이 표만 쓴다 — DB 접근은 그 파일 한 곳.
 CREATE TABLE designs (
@@ -22,6 +23,7 @@ CREATE TABLE designs (
                      ELSE left(design_id, length(design_id) - 5) <> ai_template END) STORED,   -- 생성 칸끼리는 서로 못 가리켜 design_id 로
     schema           text NOT NULL DEFAULT 'design/4.0',
     created          timestamptz NOT NULL DEFAULT now(),
+    display_name     text CHECK (display_name IS NULL OR length(display_name) BETWEEN 1 AND 40),   -- 사람이 보는 이름(W197 — 고쳐도 됨, 비면 화면은 '벤치 V001')
     CHECK ((made_by = 'cad') = (parent_id IS NULL))
 );
 CREATE INDEX designs_template_idx ON designs (template_id);

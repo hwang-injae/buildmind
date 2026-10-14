@@ -69,6 +69,9 @@ async function getJson<T>(path: string): Promise<T | null> {
 export const listDesigns = () => getJson<DesignSummary[]>('/api/designs');
 /** design/4.0 하나(3D 보기용). 없으면 null */
 export const getDesign = (id: string) => getJson<Design>('/api/designs/' + encodeURIComponent(id));
+/** 표시 이름 붙이기 · 지우기(빈 글자) — W197. design_id · 레시피는 그대로. 실패면 {error}(없는 설계 · 40자 넘음 등 — backend 글 그대로) */
+export const renameDesign = (id: string, name: string) =>
+  postJson<{ design_id: string; display_name: string | null }>('/api/designs/' + encodeURIComponent(id) + '/name', { name }, AI_TIMEOUT_MS, 'PUT');
 /** 설계 규칙 숫자 — 3D 블록 크기(robot.yaml block_size_m 한 곳, 10/9 PL E-78) */
 export const getRules = () => getJson<Rules>('/api/designs/rules');
 /** 스캔 '추천 설계' — 지금 스캔(run_id)과 저장된 설계 전부의 일치율 높은 순 3개. 옛 스캔 · 못 받음은 null */
@@ -85,13 +88,13 @@ export const scanPreviewUrl = (kind: 'capture' | 'live', seq: number) => `${BASE
 // ---------- AI 생성(W108 · W112) ----------
 const AI_TIMEOUT_MS = 15000; // 생성 시작 · 저장 요청 기본 기다림(생성 자체는 뒤에서 돌고 진행은 /ws 로 온다)
 
-/** POST 하고 JSON 을 받는다. 실패면 {error} — FastAPI 의 {detail} 글을 그대로(예: 409 '이미 설계를 만드는 중이에요') */
-async function postJson<T>(path: string, body: unknown, timeoutMs = AI_TIMEOUT_MS): Promise<{ data?: T; error?: string }> {
+/** POST(또는 method) 하고 JSON 을 받는다. 실패면 {error} — FastAPI 의 {detail} 글을 그대로(예: 409 '이미 설계를 만드는 중이에요') */
+async function postJson<T>(path: string, body: unknown, timeoutMs = AI_TIMEOUT_MS, method = 'POST'): Promise<{ data?: T; error?: string }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(BASE + path, {
-      method: 'POST',
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: ctrl.signal,

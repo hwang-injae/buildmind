@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import * as api from '@/lib/api';
 import type { DesignPart, CmdResult, Design, Rules } from '@/lib/types';
 import { gripperOpening, type Robot } from '@/lib/ws';
-import { MADE_KO, ROLE, designName, rejectText, roleOf, stateName } from '@/lib/names';
+import { MADE_KO, ROLE, designName, rejectText, roleOf, setDisplayName, stateName } from '@/lib/names';
 import DesignTree from './DesignTree';
 import Preview3D, { type Item3D } from './Preview3D';
 
@@ -26,16 +26,19 @@ interface Props {
   dark: boolean;
   onPick: (id: string) => void;
   onLog: (kind: string, text: string) => void;
+  onRenamed: () => void; // 표시 이름을 바꿨다 — page 가 다시 그려 모든 곳의 이름(designName)이 바뀌게
 }
 
 const SELECTABLE = ['IDLE', 'READY', 'DONE']; // 설계를 고르고 출발할 수 있는 작업 관리자 상태(web/README 3장 상태표)
 
-export default function DesignView({ robot, viewId, rules, dark, onPick, onLog }: Props) {
+export default function DesignView({ robot, viewId, rules, dark, onPick, onLog, onRenamed }: Props) {
   const [design, setDesign] = useState<Design | null>(null);
   const [failed, setFailed] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<CmdResult | null>(null); // [조립] 답(select_design · start 중 거절된 것)
+  const [naming, setNaming] = useState<string | null>(null); // [이름 고치기] 입력 중인 글(null = 닫힘) — W197
+  const [nameErr, setNameErr] = useState('');
   const robotDesign = robot.state?.design_id ?? null;
 
   useEffect(() => {
@@ -64,7 +67,27 @@ export default function DesignView({ robot, viewId, rules, dark, onPick, onLog }
   const opening = gripperOpening(robot); // 그리퍼 여는 중엔 조립을 막는다(10/13 18시 PL)
   const canSend = !!design && !sending && !robot.safety?.locked && !opening && robot.bridge && SELECTABLE.includes(st?.state ?? '');
 
-  useEffect(() => setSent(null), [viewId]); // 다른 설계를 보면 앞 결과는 지운다
+  useEffect(() => {
+    setSent(null); // 다른 설계를 보면 앞 결과 · 이름 입력은 지운다
+    setNaming(null);
+    setNameErr('');
+  }, [viewId]);
+
+  /** [이름 고치기] 저장 — 표시 이름만 바뀐다(design_id · 레시피 · 로봇 쪽 그대로, W197). 비우면 지움. 바깥 영향: 저장소 한 칸 */
+  async function saveName() {
+    if (!design || naming === null) return;
+    const r = await api.renameDesign(design.design_id, naming);
+    if (r.error || !r.data) {
+      setNameErr(`이름을 못 바꿨어요(${r.error ?? '답 없음'}) → 40자 이하 · 한 줄인지 → 고쳐서 다시 [저장]`);
+      return;
+    }
+    setDisplayName(design.design_id, r.data.display_name);
+    setDesign({ ...design, display_name: r.data.display_name });
+    setNaming(null);
+    setNameErr('');
+    onRenamed();
+    onLog('button', `이름 고치기(${design.design_id}) → ${r.data.display_name ?? '지움'}`);
+  }
 
   /** [조립]: select_design → 받으면 start. 이미 이 설계로 출발 대기(READY — 스캔 저장 뒤 등)면 start 만. 바깥 영향: 로봇 출발 */
   async function assemble() {
@@ -115,11 +138,25 @@ export default function DesignView({ robot, viewId, rules, dark, onPick, onLog }
             <span className="muted"> · {MADE_KO[design.made_by] ?? design.made_by} · 블록 {design.parts.parts.length}개{loading ? ' · 바꾸는 중…' : ''}</span>
           </span>
         )}
+        {design && naming === null && (
+          <button className="head-btn name-btn" onClick={() => setNaming(design.display_name ?? '')} title="사람이 보는 이름만 바꿔요 — 설계 ID · 레시피는 그대로">
+            이름 고치기
+          </button>
+        )}
         {design && onRobot && <span className="tag ok">로봇에 선택됨</span>}
         <button className="head-btn list-btn" aria-expanded={pickerOpen} onClick={() => setPickerOpen((o) => !o)}>
           {pickerOpen ? '목록 닫기 ▴' : '설계 목록 ▾'}
         </button>
       </div>
+      {design && naming !== null && (
+        <form className="name-edit" onSubmit={(e) => { e.preventDefault(); saveName(); }}>
+          <input id="design-name" value={naming} maxLength={40} autoFocus placeholder="예: 젠가 탑 4층 (비우면 이름을 지워요)"
+            aria-label="설계 표시 이름" onChange={(e) => setNaming(e.target.value)} />
+          <button type="submit" className="primary">저장</button>
+          <button type="button" className="secondary" onClick={() => { setNaming(null); setNameErr(''); }}>취소</button>
+          {nameErr && <p className="result bad">{nameErr}</p>}
+        </form>
+      )}
       {pickerOpen && <DesignTree picked={viewId} onRobot={robotDesign} onPick={onPick} />}
       {body}
       {design && (
