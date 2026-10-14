@@ -91,6 +91,8 @@ class TaskNode(Node):
         self.declare_parameter('w144_record', False)
         # W144 A4 놓은 블록 다시 재기(E-119 — find_blocks area assembly). 기본 끔: 켜면 VERIFY 통과 뒤 방금 놓은 블록만 재서 기록(다시 집기 없음)
         self.declare_parameter('w144_measure', False)
+        # W144 A4 자동 다시 집기(기본 끔): 켜면 잰 블록이 축별 3 mm 넘게 벗어났을 때 같은 블록을 다시 집어 설계 자리에 놓는다(측정도 같이 켜짐)
+        self.declare_parameter('w144_regrasp', False)
         self.declare_parameter('w144_camera_prefix', '/camera/camera')   # 손목 카메라 토픽 접두(표준 RealSense — 다르면 이 값으로, INTEGRATION.md)
         cb = ReentrantCallbackGroup()
         cfg = load_robot_yaml()
@@ -298,10 +300,14 @@ class TaskNode(Node):
         (design_id 필수 — 비전이 check_progress 와 같은 설계 캐시로 설계 자리를 찾는다, #177 · E-52 블록 이름에서 설계 이름을 잘라 내지 않음).
         반환: w144_measure 파라미터가 false 면 None(조회 안 함), 켜져 있으면 find_blocks 와 같은 (성공, reason, 응답 dict) —
         단 실패여도 응답 본문을 넘긴다(거절 까닭 기록용, 다른 find_blocks 호출은 그대로 버림). 로봇은 안 움직인다."""
-        if not bool(self.get_parameter('w144_measure').value):
+        if not (bool(self.get_parameter('w144_measure').value) or self.w144_regrasp_on()):
             return None
         return self._scan_query(self.find_cli, dict(run_id=run_id, area='assembly', design_id=design_id, part_id=part_id), should_abort,
                                 default_reason='ERROR', timeout_s=self.find_blocks_s, keep_failed_body=True)
+
+    def w144_regrasp_on(self):
+        """W144 A4 자동 다시 집기 파라미터(기본 false). 바깥 영향 없음."""
+        return bool(self.get_parameter('w144_regrasp').value)
 
     def scene_detach(self):
         """출발 때 장면에 남은 쥔 상자를 뗀다(SceneAttach part_id '' · attach false — one_pick 시작과 같음). 앞 실행이 쥔 채 멈췄으면 장면 속
