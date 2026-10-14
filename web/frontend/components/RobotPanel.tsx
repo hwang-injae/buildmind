@@ -57,8 +57,11 @@ export default function RobotPanel({ robot, onLog }: Props) {
   const label = (name: string, text: string) => (busy === name ? '보내는 중…' : text);
 
   const grasped = !!robot.gripper?.grasped;
-  // 그리퍼 열기 진행 · 결과('그리퍼 열기 실패: …' 포함) — 잠김 중엔 위 상태 칸이 정지 까닭만 보여서 따로 꺼낸다. 고르는 건 message_id 로만
+  // 그리퍼 열기 진행 · 결과('그리퍼 열기 실패: …' 포함) — [초기화] 알림 안에 보인다. 고르는 건 message_id 로만
   const gripMsg = opening || robot.state?.message_id === 'gripper_done' ? robot.state?.message : null;
+  // 잠김 중 상태 칸에 더 보일 작업 관리자 글 — 일반 정지 알림(message_id stopped — 정지 까닭 줄과 같은 뜻)만 빼고 그대로: 거절 까닭
+  // (message_id 없음 + 글 — E-111 A3) · 그리퍼 열기 · 초기화 안내. 전엔 잠김 중 거절 까닭이 어디에도 안 보였다(10/14 한석형 · PL)
+  const taskMsg = robot.state?.message_id !== 'stopped' ? robot.state?.message : null;
 
   /** [초기화]: cancel → 받으면 '블록을 치워 주세요'(잠금 유지). 바깥 영향: 이번 조립 기록을 닫는다(로봇은 안 움직임) */
   async function reset() {
@@ -98,7 +101,7 @@ export default function RobotPanel({ robot, onLog }: Props) {
         {locked ? (
           <>
             <div className="status-msg">{stopReasonKo(robot.safety!.reason)}. 원인을 없앤 뒤 [다시 시작]을 누르세요.</div>
-            {gripMsg && <div className="status-msg">{gripMsg}</div>}
+            {taskMsg && <div className="status-msg">{taskMsg}</div>}
           </>
         ) : (
           robot.state?.message && <div className="status-msg">{robot.state.message}</div>
