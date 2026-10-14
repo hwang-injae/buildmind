@@ -78,14 +78,12 @@ def test_두파일_판단은_역할이름과_받침을_보존한다(pair):
     assert p.next_block()['part_id'] == f'{MODEL}_LEG_001_01'
 
 
-def test_시험용_파일은_레시피_도구의_실제_벤치_파일과_같다():
-    """fixtures 가 레시피 도구 출력(src/recipe_manager/recipes)과 어긋나면(한쪽만 고침) 여기서 걸린다."""
+@pytest.mark.parametrize('suffix', ['_recipe.json', '_placements.csv'])
+@pytest.mark.parametrize('model', ['001_CHAIR_BENCH_V000', '002_CHAIR_BACK_V000', '003_DESK_STAND_V000', '004_DESK_PEDESTAL_V000'])
+def test_시험용_파일은_레시피_도구의_실제_파일과_같다(model, suffix):
+    """기본 설계 4종 × 두 파일: fixtures 가 레시피 도구 출력(src/recipe_manager/recipes)과 어긋나면(한쪽만 고침) 여기서 걸린다(10/14 점검 ③-4)."""
     real = Path(__file__).resolve().parents[2] / 'recipe_manager/recipes'
-    tool = json.loads((real / f'{MODEL}_recipe.json').read_text(encoding='utf-8'))
-    if tool.get('schema') != 'recipe/4.0' or 'template' not in tool:
-        pytest.skip('레시피 도구의 recipes/ 가 아직 template.composition 구조가 아니다(한세교 도구 수정 전) — 바뀌면 이 시험이 켜진다')
-    for suffix in ('_recipe.json', '_placements.csv'):
-        assert (FIXTURES / f'{MODEL}{suffix}').read_bytes() == (real / f'{MODEL}{suffix}').read_bytes()
+    assert (FIXTURES / f'{model}{suffix}').read_bytes() == (real / f'{model}{suffix}').read_bytes()
 
 
 def test_짝_해시는_객체_기준이라_키_순서나_들여쓰기와_상관없다(pair):

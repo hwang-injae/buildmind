@@ -182,7 +182,7 @@ class DesignChecker:
     def _parse(self, request, errors):
         """형식을 확인해 sequence 순 블록 목록을 돌려준다. 틀린 곳은 errors 에 쌓는다."""
         def bad(detail, kind, part=None, reason='CHECK_FAILED'):
-            """형식 오류 한 줄을 바깥 errors 에 쌓는다. 입력: detail = 이유 글자, kind = position · ai_fields · scope, part = 부품 order(없으면 None), reason = 실패 코드. 반환 없음. 바깥 영향은 errors 목록뿐이며 실패하지 않는다."""
+            """형식 오류 한 줄을 바깥 errors 에 쌓는다. 입력: detail = 이유 글자, kind = position · ai_fields · scope, part = 부품 sequence(없으면 None), reason = 실패 코드. 반환 없음. 바깥 영향은 errors 목록뿐이며 실패하지 않는다."""
             errors.append({'part': part, 'reason': reason, 'detail': f'형식: {detail}', 'kind': kind})
 
         items = request.get('parts') if isinstance(request, dict) else None
@@ -230,8 +230,16 @@ class DesignChecker:
 
     @staticmethod
     def _num(v):
-        """bool 은 숫자로 안 친다(JSON true 가 1 로 읽히는 것을 막는다)."""
-        return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+        """유한한 수(int · float)면 True. bool 은 숫자로 안 친다(JSON true 가 1 로 읽히는 것을 막는다).
+
+        float 로 바꿀 수 없을 만큼 큰 정수(예: 10**400)는 math.isfinite 가 OverflowError 를 내므로 숫자가 아닌 것으로 본다(10/14 점검 ③-5).
+        """
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return False
+        try:
+            return math.isfinite(v)
+        except OverflowError:
+            return False
 
     def _box(self, b):
         """블록 하나 → 상자 정보. x0 x1 y0 y1 z0 z1 은 mm, i 는 0부터 센 순서."""

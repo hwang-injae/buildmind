@@ -9,7 +9,7 @@
         /d2/safety/stop (StopRequest — 시간 초과 · Ctrl+C 때 먼저 정지 요청),
         /d2/vision/scan_capture · scan_infer (JsonQuery — 촬영 점군 수집과 추론),
         /d2/hmi/save_build (JsonQuery — 끝난 조립의 build/2 요약, 저장이 확인될 때까지 TaskManager 가 들고 있고 여기서 비동기로 보낸다)
-내보내는 것: /d2/task/state (JSON state/1), /d2/task/progress (JSON progress/2.0) — 늦게 붙는 쪽(다리)도 마지막 값을 받게 TRANSIENT_LOCAL
+내보내는 것: /d2/task/state (JSON state/2), /d2/task/progress (JSON progress/2.0) — 늦게 붙는 쪽(다리)도 마지막 값을 받게 TRANSIENT_LOCAL
         /d2/task/scan_result (JSON scan_result/2.0 — 구조 검사·저장은 HMI에서 진행)
 기록(CSV): ROS 파라미터 log_dir 아래 <run_id>.csv — 기본은 홈 아래 d2_data/runs(저장소 밖), `~` 는 홈으로 바뀐다. 빈 값을 주면 파일 기록이 꺼지고 run_id 만 만든다
 설계 조회: 설계 선택 때(출발은 받아 둔 설계, E-55 ①) /d2/hmi/get_design (JsonQuery, design/4.0) 을 비동기로 부르고 timeout.service_s 안에 답이 없으면 실패로 본다.
@@ -230,6 +230,8 @@ class TaskNode(Node):
             for client, name in ((self.capture_cli, '/d2/vision/scan_capture'), (self.infer_cli, '/d2/vision/scan_infer')):
                 if not client.service_is_ready():
                     waiting.append(name)
+            if not self.stop_cli.service_is_ready():
+                waiting.append('/d2/safety/stop')              # 스캔도 촬영 자세로 팔을 움직인다 — 시간 초과 · Ctrl+C 때 세울 곳(10/14 점검 ③-5)
             return waiting
         if not self.check_cli.service_is_ready():
             waiting.append('/d2/vision/check_progress')
@@ -270,7 +272,7 @@ class TaskNode(Node):
         return self._scan_query(self.capture_cli, dict(pose_id=pose_id, run_id=run_id), should_abort)
 
     def scan_infer(self, run_id, should_abort):
-        """run_id의 점군 추론을 요청한다. 결과 좌표는 blocks/1의 mm, 제한 시간·실패는 _scan_query와 같다."""
+        """run_id의 점군 추론을 요청한다. 결과 좌표는 blocks/2의 mm, 제한 시간·실패는 _scan_query와 같다."""
         return self._scan_query(self.infer_cli, dict(run_id=run_id), should_abort)
 
     def find_blocks(self, run_id, should_abort, **opts):
@@ -378,7 +380,9 @@ class TaskNode(Node):
                 return ok
 
             def stop_robot():
-                self.request_stop('W144 촬영 실패')
+                # reason 은 계약 값만(StopRequest: TIMEOUT · CTRL_C, 비우면 정지 노드가 STOP_TASK) — 까닭 글은 로그로(10/14 점검 ③-5)
+                self.get_logger().error('W144 촬영 실패 — 정지 요청(STOP_TASK)')
+                self.request_stop('')
 
             rec = cls(folder, move_observe, stop_robot)
             tr = W144Trace(folder, run_id, self._ros_ns)
@@ -626,8 +630,11 @@ class TaskNode(Node):
             if not wait_until(accepted, should_abort, timeout_s=max(0.0, deadline - time.monotonic())):
                 sent.add_done_callback(self._cancel_late)      # 아직 답이 없던 목표는 받아지는 대로 바로 취소
                 return False, ('STOPPED' if should_abort() else 'TIMEOUT')
-        except KeyboardInterrupt:                              # Ctrl+C: 받아지는 대로 취소하고 끝낸다
-            sent.add_done_callback(self._cancel_late)
+        except KeyboardInterrupt:                              # Ctrl+C: 먼저 세우고, 받아지는 대로 취소하고 끝낸다(10/14 점검 ③-5)
+            try:
+                self._stop_on_interrupt()
+            finally:                                           # 정지 요청이 실패 · 예외여도 취소 예약은 반드시 건다
+                sent.add_done_callback(self._cancel_late)
             raise
         handle = sent.result()
         if not handle.accepted:
@@ -653,8 +660,11 @@ class TaskNode(Node):
                 return False, ('CANCELED' if should_abort() else 'TIMEOUT')
             r = result.result().result
             return r.success, r.reason
-        except KeyboardInterrupt:                              # Ctrl+C: _active 를 지우기 전에 목표를 취소한다
-            self.cancel_active()
+        except KeyboardInterrupt:                              # Ctrl+C: 먼저 세우고(정지 요청) _active 를 지우기 전에 목표를 취소한다(10/14 점검 ③-5)
+            try:
+                self._stop_on_interrupt()
+            finally:                                           # 정지 요청이 실패 · 예외여도 목표 취소는 반드시 시도한다
+                self.cancel_active()
             raise
         finally:
             with self._active_lock:
@@ -666,6 +676,18 @@ class TaskNode(Node):
         handle = sent.result()
         if handle is not None and handle.accepted:
             handle.cancel_goal_async()
+
+    def _stop_on_interrupt(self):
+        """Ctrl+C 를 받은 pick_place 안에서 정지 노드에 먼저 세우라고 요청한다(CTRL_C). 반환 없음.
+
+        실패 · 예외는 로그만 남기고 삼킨다 — 부르는 쪽이 이어서 목표 취소를 해야 하고, 원래 KeyboardInterrupt 를 덮으면 안 된다.
+        """
+        try:
+            ok, message = self.request_stop('CTRL_C')
+            if not ok:
+                self.get_logger().error(f'Ctrl+C 정지 요청 거절 · 실패: {message}')
+        except Exception as e:                                 # noqa: BLE001
+            self.get_logger().error(f'Ctrl+C 정지 요청 예외: {e!r}')
 
     def cancel_active(self):
         """Ctrl+C 때: 진행 중인 pick_place 목표의 취소 요청이 나갈 때까지 잠깐 기다린다."""
@@ -687,7 +709,8 @@ class TaskNode(Node):
 
 
 def main():
-    """task 상태표와 executor 를 돌린다. Ctrl+C 는 목표 취소 · 정지 서비스 요청 뒤 제한 있는 기록 마무리를 한다."""
+    """task 상태표와 executor 를 돌린다. Ctrl+C 는 정지 서비스 요청(CTRL_C) → 목표 취소, 예상 못 한 예외는 정지 요청(빈 reason = STOP_TASK) → 목표 취소 뒤
+    다시 던진다. 끝날 때 제한 있는 기록 마무리를 한다."""
     logging.basicConfig(level=logging.INFO, format='[%(name)s] %(message)s')
     init_ros()
     node = TaskNode()
@@ -710,6 +733,24 @@ def main():
                 break
             except KeyboardInterrupt:
                 node.get_logger().warn('정지 요청 중 Ctrl+C — 정지 요청부터 다시 보낸다')
+    except Exception as e:                         # 예상 못 한 예외로 노드가 끝난다 — 세 단계를 따로 시도하고 원래 예외를 다시 던진다(10/14 점검 ③-5)
+        log = node.get_logger()
+        log.error(f'[작업 관리자] 예상 못 한 예외로 끝남({e!r}) — 정지 요청부터')
+        try:
+            node.manager.shutdown()                # ① 새 이동 · 목표를 막는다(_shutdown 플래그 → halted() 참, 로봇 명령은 안 보냄)
+        except Exception as step_error:            # noqa: BLE001 — 실패해도 정지 요청은 보낸다
+            log.error(f'종료 ① 새 작업 막기 실패: {step_error!r}')
+        try:
+            ok, message = node.request_stop('')    # ② 먼저 세운다(빈 reason → 정지 노드가 STOP_TASK)
+            if not ok:
+                log.error(f'종료 ② 정지 요청 거절 · 실패: {message}')
+        except Exception as step_error:            # noqa: BLE001 — 실패해도 목표 취소는 시도한다
+            log.error(f'종료 ② 정지 요청 예외: {step_error!r}')
+        try:
+            node.cancel_active()                   # ③ 진행 중인 집기 · 놓기 목표 취소
+        except Exception as step_error:            # noqa: BLE001
+            log.error(f'종료 ③ 목표 취소 실패: {step_error!r}')
+        raise
     finally:
         node.manager.finalize(LOG_FLUSH_S)
         node.w144_finish(False)                    # 조립 기록이 꺼져 있어도 W144 녹화는 닫는다(이미 닫혔으면 아무것도 안 함)

@@ -12,7 +12,7 @@ task 는 로봇 PC 에서 돈다. 웹 화면 · 음성은 웹 PC 에 있고 다�
   pick_place(goal, should_abort, on_feedback, on_result) -> (ok, reason)    goal = TaskPlanner.next_block 의 FOUND dict. 피드백 step · 결과 수신 시각을 콜백으로 알린다
   request_stop(reason) -> (ok, message)             정지 노드에 먼저 세우라고 요청(응답은 접수 여부)
   publish_state(dict) · publish_progress(dict)
-move_to · check_progress · pick_place 는 io 가 robot.yaml 의 제한 시간(service_s 3 · move_to_s 45 · pick_place_s 90)을 건다.
+move_to · check_progress · pick_place 는 io 가 robot.yaml 의 제한 시간(service_s 3 · move_to_s 45 · pick_place_s 120 — 10/13 W188)을 건다.
 시간 초과 때 request_stop(reason) 으로 정지 노드에 먼저 요청하고, stopped 신호를 확인하기 전에는 복구하지 않는다. 기다리는 동안
 should_abort() 가 참이 되면(정지 신호 · Ctrl+C) 곧바로 빠져나와 (False, 'STOPPED') 로 돌려주고, 진행 중인 pick_place 목표는 취소한다.
 
@@ -36,7 +36,7 @@ import threading
 import time
 
 from d2_task.block_picker import BlockPicker
-from d2_task.recipe_document import same_major
+from d2_task.recipe_document import PLACEMENTS_SCHEMA, RECIPE_SCHEMA, same_major    # 형식은 정본(10/14 점검 ③-5)
 from d2_task.recipe_to_parts import ORIS
 from d2_task.run_logger import RunLogger, _reject_constant
 from d2_task.scatter_pick import REOBSERVE, REPLAN_SAME, ScatterFlow, StepTracker, contact_phase, grasped_now
@@ -44,8 +44,6 @@ from d2_task.task_planner import TaskPlanner
 
 PLAN_STREAK = 3                            # 받침 경유: 움직이기 전 길 계산 거절이 연달아 이만큼이면 사람(10/12 실기 — 장면에 남은 블록으로 20번 헛돎)
 
-RECIPE_SCHEMA = 'recipe/4.0'
-PLACEMENTS_SCHEMA = 'placements/4.0'
 DESIGN_SCHEMA = 'design/4.0'
 
 GRIPPER_POLL_S = 0.05                          # gripper 상태 대기 간격(s) — 정지가 끼면 이 안에 알아본다
@@ -89,7 +87,7 @@ class TaskManager:
 
     def __init__(self, cfg, io, logger=None, clock=time.monotonic, monitor_hmi=False, open_width_m=None, allow_reorient=False):
         """cfg = robot.yaml dict, io = 위 설명의 바깥 일 담당, logger = RunLogger(없으면 파일 없이 run_id 만 만든다), clock = 단조 시계(시험용).
-        allow_reorient 는 흩뿌림 세우기(눕힌 블록을 빈 자리에 세움) 허용 — 기본 False(운영 보류: W131 두 grasp 지원 · W146 정식 좌표 ·
+        allow_reorient 는 옛 흩뿌림 세우기(눕힌 블록을 빈 자리에 세움, E-87 ① — E-110으로 안 씀 · 받침 경유 세우기는 scatter_pick.STANDUP) 허용 — 기본 False(운영 보류: W131 두 grasp 지원 · W146 정식 좌표 ·
         W131 과 맞춘 손가락 · 회전 · 접근 · 후퇴 공간 판정이 끝나기 전). 시험만 True 로 만든다. task 노드는 넘기지 않으므로 운영에서는 세우기 요청을 만들지 않는다(10/11 W130).
         monitor_hmi 는 웹 연결 신호 감시 여부. 이 클래스의 기본은 False(시험 · 웹 없이 동작)이고, task 노드는 design_source 와 따로 노드 파라미터 monitor_hmi(기본 true)로 정해 넘긴다(E-62).
         공급 방식은 cfg['supply_mode'](없으면 slots): slots = 공급 칸 6개(기본), scatter = 흩뿌린 공급(관측 → 후보 고르기, E-55). scatter 는 open_width_m(m)을 명시로 받아야
@@ -184,11 +182,17 @@ class TaskManager:
 
     # ---------- 콜백 스레드에서 들어오는 것 ----------
     def on_safety(self, st):
-        """정지 노드의 safety_state/1(dict)을 적는다. 상태 전이는 작업 스레드가 run_once 에서 한다(콜백은 변수만)."""
+        """정지 노드의 safety_state/1(dict)을 적는다. 상태 전이는 작업 스레드가 run_once 에서 한다(콜백은 변수만).
+
+        객체(dict)가 아니면 버리고 경고만 남긴다 — 적어 두면 halted() 등이 .get 에서 터져 작업 스레드(노드)가 멈춘다(10/14 점검 ③-5).
+        """
+        if not isinstance(st, dict):
+            LOG.warning('safety/state 가 객체가 아니라 버린다: %r', st)
+            return
         with self._lock:
             self.safety = st
             self.safety_count += 1
-            if isinstance(st, dict) and st.get('stopped'):
+            if st.get('stopped'):
                 self._stop_count += 1
                 if self._scatter is not None:
                     self._scatter.invalidate()        # 관측 · 조회 중이던 흩뿌림 답은 정지 뒤에 적용하지 않는다
@@ -616,7 +620,7 @@ class TaskManager:
             self._start_goal(r)
             self._set('PICK_PLACE', None, f'{r["part_id"]} 를 집으러 갑니다')
         elif status == 'DONE':
-            with self._lock:               # DONE 방송과 요약 확정 사이에 새 설계 선택 · 출발이 끼어들지 못하게 한 잠금 안에서(파일 I/O 없음)
+            with self._lock:               # DONE 방송과 요약 확정 사이에 새 설계 선택 · 출발이 끼어들지 못하게 한 잠금 안에서. 요약 CSV 는 쓰기 스레드가 쓰지만, w144_record 가 켜져 있으면 w144_finish(녹화 종료 · ZIP)가 이 잠금 안에서 돈다(점검 ② 3번 — 박진용)
                 self.part_id = None
                 self._set('DONE', 'done', '조립이 끝났어요')
                 self._finish_run('DONE')
@@ -646,7 +650,7 @@ class TaskManager:
         return None
 
     def _spread_target(self, target):
-        """받침 경유일 때 목표의 놓는 중심을 같은 층 1 mm 띄운 값으로 바꾼 복사본(pick_rank.spread_parts — 설계 25 mm 간격에 실제 폭 24.8 mm 라
+        """흩뿌림 조립이면(받침 경유 여부와 상관없이 — 호출 쪽 _select) 목표의 놓는 중심을 같은 층 1 mm 띄운 값으로 바꾼 복사본(pick_rank.spread_parts — 설계 25 mm 간격에 실제 폭 24.8 mm 라
         틈 0.2 mm 뿐이어서 놓을 때 옆 블록을 밀어 줄이 틀어졌다, 10/13 실기). 진행표 · 확인(check_progress)은 설계 중심 그대로."""
         if self._spread is None:
             from d2_task.pick_rank import spread_parts
@@ -1136,7 +1140,7 @@ class TaskManager:
         poses = self.cfg.get('scan', {}).get('poses')
         if not isinstance(poses, list) or not poses or any(
                 not isinstance(p, str) or f'{p}_pose' not in self.cfg for p in poses) or len(set(poses)) != len(poses):
-            return self._reject('ERROR', 'scan.poses가 없거나 촬영 자세 설정과 맞지 않는다')
+            return self._reject('', 'scan.poses가 없거나 촬영 자세 설정과 맞지 않는다')     # 맞는 코드 없는 거절 = 빈 값 + 글(E-111 A3)
         ok, code, text = self._precheck(scan=True)
         if not ok:
             return self._reject(code, f'스캔 시작 점검 실패: {text}')
@@ -1484,7 +1488,8 @@ class TaskManager:
             if self._clock() - received > self.command_s:      # 늦은 출발 · 선택은 허용하지 않는다(웹은 이미 시간 초과로 보였다)
                 return self._reject('TIMEOUT', f'명령을 받은 뒤 {self.command_s} 초 안에 확정하지 못해 실행하지 않았다')
             if not ok:
-                return self._reject(why, f'설계를 못 가져왔다: {design_id!r} ({why or "이유 없음"})')
+                code = why if why in ('TIMEOUT', 'STOPPED', 'BUSY') else ''      # E-111 A3: 이 셋만 코드, 나머지(ERROR · 서버 이유)는 빈 값 + 글
+                return self._reject(code, f'설계를 못 가져왔다: {design_id!r} ({why or "이유 없음"})')
             planner, problem = self._planner_from(design, design_id)
             if problem:
                 return self._reject('', problem)

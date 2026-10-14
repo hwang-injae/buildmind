@@ -11,9 +11,9 @@ import ast
 import math
 import re
 
-from d2_task.recipe_document import same_major
+from d2_task.recipe_document import RECIPE_SCHEMA, same_major
 
-BASE_SCHEMA = 'recipe/4.0'
+BASE_SCHEMA = RECIPE_SCHEMA         # base_recipe = 기본 설계 레시피 — 정본 형식(10/14 점검 ③-5)
 TOL_MM = 0.000001            # 같다고 볼 오차 — 레시피 도구 · 변환기 TOL, 검사 묶음 PENETRATION_MM 과 같은 기준
 MAX_EXPR_LEN = 200           # 범위 식 길이 상한(깊게 겹친 괄호로 파서가 느려지는 것을 막는다)
 DESIGN_ID_RE = re.compile(r'(.+)_V\d{3}')
@@ -71,7 +71,7 @@ class TemplateChecker:
     def read_base(self, request):
         """요청의 base_recipe 를 확인해 규칙 {역할: {label, count, lay, long_edge, support, attach, dims, same_size, mirror}} 를 돌려준다.
 
-        먼저 본다: base_recipe 있음 · 객체 · schema 앞자리 recipe/4 · design_id 가 _V000 으로 끝남 · 요청 design_id(_V3자리 앞부분)와 model_id 앞부분이 같음 ·
+        먼저 본다: base_recipe 있음 · 객체 · schema 앞자리 recipe/4 · design_id 가 _V000 으로 끝남 · 요청 design_id(_V3자리 앞부분)와 base_recipe design_id 앞부분이 같음 ·
         template.composition 있음. 그 뒤 revision 모양(키·값·식)도 틀리면 RequestInvalid(이유를 적음). 요청 안 `template` 칸은 읽지 않는다.
         """
         if not isinstance(request, dict):

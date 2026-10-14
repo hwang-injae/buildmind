@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from d2_task.recipe_builder import RecipeBuilder
-from d2_task.recipe_document import recipe_sha256, same_major
+from d2_task.recipe_document import part_name, recipe_sha256, same_major
 from d2_task.recipe_to_parts import ori_extents
 
 SCHEMA_REQUEST = 'parts/4.0'
@@ -298,5 +298,5 @@ class PartsToRecipe:
             groups.sort(key=lambda ordered: (position(ordered[0])[1:], position(ordered[0])[0]))
             for group_no, ordered in enumerate(groups, 1):
                 for part_no, order in enumerate(ordered, 1):
-                    names[order] = f'{role}_{group_no:03d}_{part_no:02d}'
+                    names[order] = part_name(f'{role}_{group_no:03d}', f'{part_no:02d}')     # 이름 규칙은 정본(10/14 점검 ③-5)
         return names
