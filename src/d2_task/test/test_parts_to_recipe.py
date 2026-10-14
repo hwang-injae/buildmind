@@ -30,7 +30,7 @@ def make_converter():
 def load_base(model_id):
     """기본 설계 레시피 두 파일 → (RecipeDocument, 변환기 ② 로 만든 parts/4.0)."""
     document = RecipeDocument.load(RECIPES, model_id)
-    blocks = RecipeToParts(model_id, FAMILY[model_id], BLOCK_MM).convert(document.recipe, document.placements)
+    blocks = RecipeToParts(model_id, BLOCK_MM).convert(document.recipe, document.placements)
     return document, blocks
 
 
@@ -158,18 +158,6 @@ def test_to_template_recipe_completes_optional_label(role, label, expected):
     out = make_converter().to_template_recipe(built)
     assert out['template']['composition'][role] == {'label': expected, 'count': 0, 'parts': {}}
     assert built == before
-
-
-# to_template_recipe 는 입력(builder 출력)을 바꾸지 않는다
-def test_to_template_recipe_does_not_mutate(bench):
-    converter = make_converter()
-    document, _ = load_base('001_CHAIR_BENCH_V000')
-    built = {'schema': 'recipe/4.0', 'design_id': 'X', 'source_cad': None, 'stocks': [{'stock_id': 'PART_001', 'size_mm': BLOCK_MM}],
-             'parts': [{'part_name': 'LEG_001_01', 'stock_id': 'PART_001', 'center_mm': [0.0, 0.0, 7.5],
-                        'R': [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]}]}
-    before = copy.deepcopy(built)
-    out = converter.to_template_recipe(built)
-    assert built == before and out['template']['composition']['LEG']['parts']['LEG_001'][0]['part'] == '01'
 
 
 # 블록 번호는 코드가: 벤치 → LEG_001_01~04(왼 다리) · LEG_002_01~04(오른 다리) · SEAT_001_01~03. AI 의 part 값(묶음 표시)은 번호가 아니다

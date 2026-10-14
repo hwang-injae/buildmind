@@ -17,7 +17,7 @@ from test_recipe_to_parts import BLOCK_MM, IDS, RECIPES
 def blocks_of(model_id):
     doc = RecipeDocument.load(RECIPES, model_id)
     design_id, family, _ = IDS[model_id]
-    return doc, RecipeToParts(design_id, family, BLOCK_MM).convert(doc.recipe, doc.placements)
+    return doc, RecipeToParts(design_id, BLOCK_MM).convert(doc.recipe, doc.placements)
 
 
 @pytest.mark.parametrize('model_id', IDS)

@@ -25,8 +25,6 @@ SIZE_KEYS = ('LENGTH', 'WIDTH', 'THICKNESS')
 # 기울여 집는 윗면 기울기 범위 (°) — 위 끝은 집기 노드 기울여 집기 계산과 같은 motion_math.TILT_DEG(45°). 10/13 PL: tool_tilt_max_deg(30) 키를
 # 지움(30 ~ 35° 안전 모드는 충돌 민감도 오설정 탓). 위 끝 값은 석형님 확인
 TILT_DEG = (3.0, NODE_TILT_DEG[1])
-# 옛 세우기(E-37 · E-77 · E-87 ① — E-110으로 안 씀: 운영은 allow_reorient False, 받침 경유 세우기는 아래 STANDUP): 목표 자세(위 축) → 눕힌 블록을 집을 잡기
-REORIENT_GRASP = {'LENGTH': 'FLAT_SHORT', 'WIDTH': 'FLAT_LONG'}
 # 받침 경유 세우기(W131 교시 동작, 10/13): 목표 자세(위 축) → (집기 노드 잡기 이름, 교시 동작 이름). 블록 방향 yaw 는 세운 뒤
 # find_blocks 규약(세움 = WIDTH 변 · 옆세움 = LENGTH 변 방향) — 교시대로 긴 축 y 로 눕힌 블록을 세우면 세움 0° · 옆세움 90°
 STANDUP = {'LENGTH': ('STANDUP_HIGH', 'high', 0.0), 'WIDTH': ('STANDUP_SIDE', 'side', 90.0)}
@@ -160,7 +158,6 @@ class StepTracker:
                 self._current = self._step = self._result_at = None
 
 
-UP_INDEX = {'LENGTH': 0, 'WIDTH': 1, 'THICKNESS': 2}     # block_actual_m [길이, 폭, 두께] 에서 위 축 치수 자리
 
 
 def _finite(v):
@@ -221,11 +218,6 @@ class ScatterFlow:
             self.candidate = None
             return (self._token, epoch)
 
-    def is_current(self, ticket, epoch, halted):
-        """(읽기만) 답을 적용해도 되나: 더 새 요청이 없고 · 상태가 안 바뀌었고 · 정지 · 종료 중이 아닐 때만 참. 적용은 commit 으로 한다."""
-        with self._lock:
-            return (not halted) and ticket == (self._token, epoch)
-
     def commit(self, ticket, state_fn, result):
         """prepare() 결과를 적용한다. 요청 번호 · 상태 · 정지 · 종료 재확인과 후보 적용을 한 구간에서 한다. 반환: 적용했으면 True.
 
@@ -237,7 +229,7 @@ class ScatterFlow:
             epoch, halted = state_fn()
             if halted or ticket != (self._token, epoch):
                 return False
-            if result.get('status') in ('PICK', 'REORIENT', 'SPARE', 'SPARE_TIP', 'SPARE_CENTER'):
+            if result.get('status') in ('PICK', 'SPARE', 'SPARE_TIP', 'SPARE_CENTER'):
                 self.candidate = {'request': copy.deepcopy(result['request']), 'candidate': copy.deepcopy(result['candidate']),
                                   'gap_mm': result['gap_mm']}
             else:
@@ -251,7 +243,7 @@ class ScatterFlow:
             self.candidate = None
 
     # ---------- 후보 고르기와 요청 준비 ----------
-    def prepare(self, target, response, allow_reorient=False):
+    def prepare(self, target, response):
         """목표 블록 + find_blocks 응답 → 집기 요청 준비. 반환 dict 의 status:
 
         (후보는 이 함수가 정하지 않는다 — 계산만. 적용은 commit.)
@@ -267,10 +259,6 @@ class ScatterFlow:
         EMPTY         공급에 블록이 없다 → 채우기 안내(guide 'REFILL')
         NO_MATCH      블록은 있는데 맞는 후보가 없다 → 제외 이유(counts · message)를 안내(guide 'CHECK_BLOCKS')
         LOOKUP_FAILED 조회 실패 · 잘못된 응답 — 공급 부족이 아니다(reason)
-        REORIENT      (allow_reorient 이고 목표가 세움 · 옆세움인데 맞는 후보가 없을 때만) 눕힌 블록을 빈 자리(spare_spots)에 세우는 요청.
-                      옛 세우기 길(E-87 ① — E-110으로 안 씀): 운영 task 노드는 allow_reorient 를 넘기지 않아 만들지 않는다. 시험만 켠다.
-                      request 는 PICK 과 같은 칸 + 내부 표시 'reorient': True(액션으로는 안 감 — task_node 는 이름 있는 칸만 읽는다).
-                      세울 수 없으면(눕힌 후보 없음 · 기울어진 블록이 있음 · 빈 자리 없음) REORIENT 를 만들지 않고 NO_MATCH 그대로.
         target = {part_id, grasp, place_pose}. 목표 part_id · 놓을 자세 · 잡기는 그대로 유지하고 복사해서 쓴다.
         """
         if not self.configured:
@@ -284,10 +272,6 @@ class ScatterFlow:
                 return {'status': 'EMPTY', 'guide': 'REFILL'}
             if picked['counts']['invalid'] == len(response['blocks']):
                 return {'status': 'LOOKUP_FAILED', 'reason': 'ALL_INVALID'}      # 쓸 수 있는 블록이 하나도 없는 응답 — 조회 오류
-            if allow_reorient and up in REORIENT_GRASP:
-                reorient = self._reorient(target, response['blocks'], up)
-                if reorient is not None:
-                    return reorient
             return {'status': 'NO_MATCH', 'guide': 'CHECK_BLOCKS', 'counts': dict(picked['counts']),
                     'message': self._why(picked['counts'])}
         c = picked['block']
@@ -519,45 +503,6 @@ class ScatterFlow:
         b['tilt_tip_z_m'] = top - self.cfg['block_actual_m'][2] / 2 * n[2]
         return b
 
-    def _reorient(self, target, blocks, up):
-        """눕힌 블록 하나를 빈 자리에 세우는 요청(REORIENT) 또는 None(세울 수 없음 → 부르는 쪽이 NO_MATCH).
-
-        잡기 = REORIENT_GRASP[up](PL 확정), 눕힌 후보는 그 잡기로 BlockPicker 의 같은 규칙으로 고른다. 놓을 자세 = 빈 자리 중심 · yaw_deg 에
-        블록을 up 축이 위로 서게(block_pose — 공급 칸과 같은 yaw 규약, 세움은 윗면 25 mm 변 방향). part_id 는 목표 그대로(장면 · 진행표에서 같은 이름).
-        빈 자리 확인은 놓기 전 필수 — 이번 관측에서 외곽을 아는 블록(고른 블록 제외)의 수평 외곽과 세운 블록 외곽이 겹치면 점유.
-        기울어진 블록이 하나라도 있으면 외곽을 확정할 수 없어 세우지 않는다(관측 불확실성 — 근사 상자로 대신하지 않음).
-        손가락 접근 공간은 W131 접근 경로가 정해지기 전이라 보지 않는다. 바깥 영향 없음(계산만).
-        yaw 는 확정 규약(LENGTH 위 = WIDTH 방향, WIDTH 위 = LENGTH 방향, base x 0° · 반시계 + · 180° 같음)으로 spare_spots yaw_deg 를 그대로 쓴다.
-        임시 시험 전제(운영 활성화 전 확인 필요): spare_spots 좌표는 임시(W146 실기 확인 대기) · 빈 자리는 외곽 겹침만 확인(W131 손가락 · 회전 · 접근 · 후퇴 공간 없음).
-        운영 TaskManager 는 allow_reorient 기본 False 라 이 요청을 만들지 않는다 — W131 두 grasp 지원 · W146 정식 좌표 · W131 과 맞춘 공간 판정 뒤 활성화.
-        """
-        try:                                  # 세울 때만 검증한다 — 세우기가 꺼져 있으면 잘못된 spare_spots 가 일반 집기를 막지 않는다
-            spots = self._spare_spots(self.cfg.get('spare_spots', []))
-        except ValueError as e:
-            return {'status': 'BLOCKED', 'reason': 'INVALID_SPARE_SPOTS', 'guide': 'CHECK_BLOCKS', 'message': str(e)}
-        grasp = REORIENT_GRASP[up]
-        lie_up, axis = grasp_target(grasp, self.cfg)
-        picked = self.picker.pick(blocks, lie_up, axis)
-        if picked['status'] != 'FOUND' or any(b.get('tilted') is True for b in blocks):
-            return None
-        known = [b for i, b in enumerate(blocks) if i != picked['index'] and self.picker.is_valid(b)]
-        spot = next((s for s in spots
-                     if not any(self._rects_overlap(self._spot_rect(s, up), self._block_rect(b)) for b in known)), None)
-        if spot is None:
-            return None                       # 두 자리 모두 점유는 PL 제외 범위(미지원) — 점유된 자리로 보내지 않고, 부르는 쪽의 NO_MATCH 로 끝난다(한계)
-        obstacles = self._obstacles(blocks, picked['index'])
-        if isinstance(obstacles, dict):
-            return obstacles
-        c = picked['block']
-        pick_pose = block_pose(self.cfg, c['up'], c['yaw_deg'], c['x_m'], c['y_m'], c['top_z_m'])
-        # 바닥 = 빈 자리 z_m(받침 윗면, 없으면 작업면) — 10/13 새 받침은 윗면 80 mm 라 작업면 기준이면 80 mm 낮게 놓는다
-        place_pose = block_pose(self.cfg, up, spot['yaw_deg'], spot['x_m'], spot['y_m'],
-                                spot.get('z_m', self.cfg['table_z_m']) + self.cfg['block_actual_m'][UP_INDEX[up]])
-        request = {'part_id': target['part_id'], 'supply_slot': '', 'grasp': grasp, 'pick_pose': pick_pose, 'place_pose': place_pose,
-                   'open_width_m': self.open_width_m, 'obstacles': obstacles, 'reorient': True}
-        return {'status': 'REORIENT', 'request': copy.deepcopy(request), 'candidate': copy.deepcopy(c), 'gap_mm': picked['gap_mm'],
-                'spot': spots.index(spot)}
-
     @staticmethod
     def _spare_spots(spots):
         """robot.yaml spare_spots → 검증한 목록(값은 그대로). 형식이 틀리면 ValueError(조용히 빼지 않는다) — 세울 때만 부른다."""
@@ -567,38 +512,6 @@ class ScatterFlow:
             if not isinstance(s, dict) or not all(_finite(s.get(key)) for key in ('x_m', 'y_m', 'yaw_deg')):
                 raise ValueError(f'robot.yaml spare_spots {k}번이 {{x_m, y_m, yaw_deg}} 숫자가 아니다')
         return [dict(s) for s in spots]
-
-    def _footprint(self, up):
-        """위 축별 수평 외곽 (yaw 방향 길이, 직각 방향 길이) m — find_blocks yaw 규약(눕힘 · 옆세움 = LENGTH 변, 세움 = WIDTH 변)."""
-        length, width, thick = self.cfg['block_actual_m']
-        return {'THICKNESS': (length, width), 'WIDTH': (length, thick), 'LENGTH': (width, thick)}[up]
-
-    def _block_rect(self, b):
-        return (b['x_m'], b['y_m'], b['yaw_deg']) + self._footprint(b['up'])
-
-    def _spot_rect(self, s, up):
-        return (s['x_m'], s['y_m'], s['yaw_deg']) + self._footprint(up)
-
-    @staticmethod
-    def _rects_overlap(a, b):
-        """돌린 두 직사각형(x, y, yaw_deg, 길이, 폭)이 넓이를 가지고 겹치나(분리축). 변이 닿기만 하면 겹침 아님 — 여유값은 두지 않는다."""
-        import math
-
-        def axes_corners(r):
-            x, y, yaw, length, width = r
-            c, s = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
-            ux, vx = (c, s), (-s, c)
-            pts = [(x + i * length / 2 * ux[0] + j * width / 2 * vx[0], y + i * length / 2 * ux[1] + j * width / 2 * vx[1])
-                   for i in (-1, 1) for j in (-1, 1)]
-            return (ux, vx), pts
-
-        (a_axes, a_pts), (b_axes, b_pts) = axes_corners(a), axes_corners(b)
-        for ax in a_axes + b_axes:
-            pa = [p[0] * ax[0] + p[1] * ax[1] for p in a_pts]
-            pb = [p[0] * ax[0] + p[1] * ax[1] for p in b_pts]
-            if min(max(pa), max(pb)) - max(min(pa), min(pb)) <= 1e-9:
-                return False
-        return True
 
     def _obstacles(self, blocks, picked_index):
         """같은 응답에서 고른 인덱스 하나만 빼고 나머지를 장애물 자세로 바꾼다. 반환: 자세 목록, 또는 요청을 막는 BLOCKED dict.
