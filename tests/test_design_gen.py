@@ -380,6 +380,55 @@ def test_save_scan_checks_with_base_recipe_and_saves_as_scan(store, good):
     assert events == ['filled', 'checked']
 
 
+def seat_short(good):
+    """벤치 좌판 연짝 3개(sequence 9 ~ 11)를 AI 가 FLAT_SHORT 로 쓴 답(E-104 전 프롬프트의 '두 방향 다 되면 _SHORT')."""
+    b = copy.deepcopy(good)
+    for p in b:
+        if p['sequence'] in (9, 10, 11):
+            p['grasp'] = 'FLAT_SHORT'
+    return b
+
+
+def test_generate_turns_row_blocks_to_flat_long_before_check(store, good):
+    """연짝 잡기는 검사 전에 코드가 FLAT_LONG 으로(E-104) — 검사 요청 · 후보 · 저장 설계(parts · placements grasp_axis LENGTH)가 같고,
+    AI 가 처음 쓴 답(FLAT_SHORT)은 생성 기록 원문에 그대로 남는다."""
+    sent, check = [], real_check()
+    short = seat_short(good)
+    gen, _ = make(store, [answer([short, short, short])], check=lambda req: sent.append(req) or check(req))
+    r = gen.generate('벤치를 만들어 줘', BENCH)
+    seats = lambda parts: [p['grasp'] for p in parts if p['sequence'] in (9, 10, 11)]   # noqa: E731
+    assert len(sent) == 3 and all(seats(req['parts']) == ['FLAT_LONG'] * 3 for req in sent)
+    assert all(seats(c['parts']['parts']) == ['FLAT_LONG'] * 3 for c in r['candidates'])
+    assert r['candidates'][0]['check']['row_grasp'] == {'changed': [9, 10, 11], 'kept': []}
+    rec = gen.save(r, 0)
+    assert seats(rec['parts']['parts']) == ['FLAT_LONG'] * 3
+    steps = [s for s in rec['placements']['steps'] if s['sequence'] in (9, 10, 11)]
+    assert [(s['grasp'], s['grasp_axis']) for s in steps] == [('FLAT_LONG', 'LENGTH')] * 3
+    log = json.loads((store.gen_logs_dir / r['gen_log']).read_text(encoding='utf-8'))
+    assert '"FLAT_SHORT"' in log['calls'][0]['content'] and log['attempts'][0][0]['check']['row_grasp']['changed'] == [9, 10, 11]
+
+
+def test_save_scan_turns_row_blocks_to_flat_long(store, good):
+    """스캔 [저장]도 같은 규칙 — AI 가 채운 좌판 잡기가 FLAT_SHORT 여도 FLAT_LONG 으로 검사 · 저장(E-104)."""
+    gen, _ = make(store, [])
+    fills(gen, filled(seat_short(good)))
+    rec = gen.save_scan(scan_of(good))
+    assert [p['grasp'] for p in rec['parts']['parts'] if p['sequence'] in (9, 10, 11)] == ['FLAT_LONG'] * 3
+
+
+def test_row_grasp_keeps_block_without_finger_room(store):
+    """연짝이어도 놓는 순간 FLAT_LONG 손가락 자리가 없으면 그대로 두고 kept 로 알린다 — 3번은 끝이 1번에 막히고 옆이 2번에 막힘.
+    형식이 틀린 답은 건드리지 않는다(검사가 떨어뜨림)."""
+    gen, _ = make(store, [])
+    part = lambda seq, x, y: {'sequence': seq, 'x': x, 'y': y, 'z': 0.0, 'ori': 'x', 'role': 'SEAT', 'group': 1,   # noqa: E731
+                              'stage': 1, 'grasp': 'FLAT_SHORT'}
+    parts = [part(1, 75.0, 25.0), part(2, 0.0, 0.0), part(3, 0.0, 25.0)]
+    assert gen._row_grasp(parts) == {'changed': [2], 'kept': [3]}
+    assert [p['grasp'] for p in parts] == ['FLAT_SHORT', 'FLAT_LONG', 'FLAT_SHORT']
+    broken = [{'sequence': [1], 'x': 0.0}]
+    assert gen._row_grasp(broken) == {'changed': [], 'kept': []} and broken == [{'sequence': [1], 'x': 0.0}]
+
+
 def test_save_scan_refills_when_ai_moved_parts_or_filled_wrong(store, good):
     """AI 가 위치를 바꾸면(E-79) 검사 전에 떨어뜨리고 피드백으로 다시 채운다(ai_fields). 다시 채우기는 최대 2번 → 그래도면 CHECK_FAILED."""
     moved = copy.deepcopy(good)
