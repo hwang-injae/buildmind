@@ -1,0 +1,208 @@
+"""W144 A4 자동 다시 집기(기본 꺼짐) — 가짜 측정 입력으로 흐름만 본다(실제 재픽 효과 · 비전 · 로봇은 확인 안 함). ROS 없음."""
+import json
+import time
+
+from d2_task.scatter_pick import block_pose
+from d2_task.task_manager import A4_MAX_TRIES, TaskManager, design_up, regrasp_decision
+from test_a4_measure import MeasureIO, ok_body
+from test_task_manager import CFG, IDS, SAFE_OK, drive
+
+
+class RegraspIO(MeasureIO):
+    """측정 · 다시 집기를 켠 가짜. offsets = 부를 때마다 꺼내 쓰는 (dx_mm, dy_mm) 또는 응답 dict(없으면 (0, 0)).
+    moved_fail = 다시 집기 목표에서 '움직인 뒤 실패'를 흉내 낼 이유."""
+
+    def __init__(self, offsets=(), regrasp=True, **kw):
+        super().__init__('ok')
+        self.offsets, self.regrasp, self.kw, self.goals, self.moved_fail = list(offsets), regrasp, kw, [], None
+
+    def w144_regrasp_on(self):
+        return self.regrasp
+
+    def w144_measure(self, run_id, design_id, part_id, should_abort):
+        self.measured.append((run_id, part_id))
+        off = self.offsets.pop(0) if self.offsets else (0.0, 0.0)
+        if isinstance(off, dict):
+            return True, '', off
+        part = next(p for p in self.manager.planner.parts if p['part_id'] == part_id)
+        c = part['center']
+        b = {'x_m': c[0] + off[0] / 1000, 'y_m': c[1] + off[1] / 1000, 'yaw_deg': 1.0, 'up': design_up(part['quat']), 'tilted': False,
+             'top_z_m': c[2] + 0.0074}
+        b.update(self.kw)
+        return True, '', ok_body(part_id, [b], stamp=self.kw.get('stamp', time.time()))      # 요청 · 답 사이(같은 시계)
+
+    def pick_place(self, goal, should_abort, on_feedback=None, on_result=None):
+        self.goals.append(dict(goal))
+        if goal.get('a4_regrasp') and self.moved_fail:
+            on_feedback('pick')                               # 팔이 움직인 뒤
+            return False, self.moved_fail
+        return super().pick_place(goal, should_abort, on_feedback, on_result)
+
+
+def start(io):
+    m = TaskManager(CFG, io)
+    io.manager = m
+    m.on_safety(SAFE_OK)
+    m.on_gripper({'grasped': False})
+    rows = []
+    m.logger.log = lambda kind, part_id=None, value=None, module='task': rows.append((kind, part_id, value))
+    assert m.command('select_design', 'bench') == (True, '') and m.command('start') == (True, '')
+    return m, rows
+
+
+def picks_of(io, pid):
+    return [g for g in io.goals if g['part_id'] == pid]
+
+
+def test_꺼져_있으면_벗어나도_다시_집지_않는다():
+    io = RegraspIO([(5.0, 0.0)], regrasp=False)
+    m, rows = start(io)
+    drive(m, 'DONE')
+    assert len(picks_of(io, IDS[0])) == 1 and not [r for r in rows if r[0] == 'a4_regrasp']
+
+
+def test_3mm_넘으면_잰_자리에서_집어_설계_자리에_놓고_다시_잰다():
+    io = RegraspIO([(5.0, -1.0), (0.5, 0.2)])
+    m, rows = start(io)
+    drive(m, 'DONE')
+    g = picks_of(io, IDS[0])
+    assert len(g) == 2 and g[1]['a4_regrasp'] == 1 and g[1]['supply_slot'] == ''
+    assert list(g[1]['place_pose'][0]) == list(g[0]['place_pose'][0]) and list(g[1]['place_pose'][1]) == list(g[0]['place_pose'][1])   # 설계 자리 · 방향
+    assert abs(g[1]['pick_pose'][0][0] - (g[0]['place_pose'][0][0] + 0.005)) < 1e-6      # 잰 중심(x +5 mm)에서 집음
+    assert [p for _, p in io.measured][:2] == [IDS[0], IDS[0]]                          # 다시 놓은 뒤 다시 잼
+    assert io.world == set(IDS)
+    assert [v for k, p, v in rows if k == 'a4_regrasp'][0].startswith('1번째 다시 집기')
+
+
+def test_두번_다시_놓아도_벗어나면_사람_확인():
+    io = RegraspIO([(5.0, 0.0)] * 3)
+    m, rows = start(io)
+    drive(m, 'WAIT_SUPPLY')
+    assert len(picks_of(io, IDS[0])) == 1 + A4_MAX_TRIES
+    assert io.states[-1]['message_id'] == 'no_match_block' and '2번 다시 놓아도' in io.states[-1]['message']
+
+
+def test_측정_거절이면_자동_모드는_사람_확인():
+    io = RegraspIO([ok_body(IDS[0], [], 'NEIGHBOR_MERGED', '옆 블록과 붙음')])
+    m, rows = start(io)
+    drive(m, 'WAIT_SUPPLY')
+    assert len(picks_of(io, IDS[0])) == 1 and 'NEIGHBOR_MERGED' in io.states[-1]['message']
+
+
+def test_측정_시각이_요청_앞이면_다시_집지_않고_사람_확인():
+    io = RegraspIO([(5.0, 0.0)], stamp=1.0)
+    m, rows = start(io)
+    drive(m, 'WAIT_SUPPLY')
+    assert len(picks_of(io, IDS[0])) == 1 and 'measured_stamp' in io.states[-1]['message']
+
+
+def test_기울어짐_자세_다름이면_사람_확인():
+    for kw, word in (({'tilted': True}, '기울'), ({'up': 'LENGTH'}, '자세')):
+        io = RegraspIO([(5.0, 0.0)], **kw)
+        m, rows = start(io)
+        drive(m, 'WAIT_SUPPLY')
+        assert len(picks_of(io, IDS[0])) == 1 and word in io.states[-1]['message']
+
+
+def test_다시_집기_길이_없으면_사람_확인_움직인_뒤_실패는_기존_정지처리():
+    io = RegraspIO([(5.0, 0.0)])
+    io.pick_script = [(True, ''), (False, 'PLAN_FAILED')]
+    m, rows = start(io)
+    drive(m, 'WAIT_SUPPLY')
+    assert 'PLAN_FAILED' in io.states[-1]['message']
+    io2 = RegraspIO([(5.0, 0.0)])
+    io2.moved_fail = 'GRASP_FAILED'
+    m2, _ = start(io2)
+    drive(m2, 'ERROR')
+    assert '다시 집기' in io2.states[-1]['message']
+
+
+def test_판단_함수_목표_칸():
+    part = {'part_id': 'P', 'center': (0.4, -0.05, 0.0074), 'quat': (0.0, 0.0, 0.0, 1.0), 'grasp': 'FLAT_SHORT'}
+    row = {'status': 'MEASURED', 'x_m': 0.405, 'y_m': -0.05, 'dx_mm': 5.0, 'dy_mm': 0.0, 'yaw_deg': 2.0, 'up': 'THICKNESS',
+           'tilted': False, 'top_z_m': 0.0150, 'measured_stamp': 100.0}
+    sent = ((0.4011, -0.05, 0.0074), (0.0, 0.0, 0.0, 1.0))           # 놓을 때 보낸 목표(흩뿌림 1 mm 띄운 자리처럼 설계와 다를 수 있음)
+    v, goal = regrasp_decision(row, 99.0, 101.0, part, sent, CFG, 0)
+    assert v == 'REGRASP' and goal['pick_pose'] == block_pose(CFG, 'THICKNESS', 2.0, 0.405, -0.05, 0.0150)
+    assert goal['place_pose'] == sent and goal['grasp'] == 'FLAT_SHORT' and goal['open_width_m'] == 0.0      # 설계 중심으로 덮어쓰지 않음
+    assert regrasp_decision(dict(row, dx_mm=3.0), 99.0, 101.0, part, sent, CFG, 0) == ('OK', None)        # 3 mm 는 안(초과만 다시 집기)
+    for bad in (None, dict(row, status='UNMEASURED', reason='FEW_POINTS', detail=''), dict(row, measured_stamp=None),
+                dict(row, measured_stamp=98.0), dict(row, measured_stamp=102.0), dict(row, tilted=None), dict(row, up='WIDTH'),
+                dict(row, yaw_deg=None), dict(row, top_z_m=None)):
+        assert regrasp_decision(bad, 99.0, 101.0, part, sent, CFG, 0)[0] == 'HUMAN'
+    assert regrasp_decision(row, 99.0, 101.0, part, None, CFG, 0)[0] == 'HUMAN'          # 원래 목표를 모름
+    assert regrasp_decision(row, 99.0, 101.0, part, sent, CFG, A4_MAX_TRIES)[0] == 'HUMAN'
+    assert json.dumps(goal['place_pose'])
+
+
+def test_판단_뒤_적용_전에_정지가_끼면_다시_집지_않는다(monkeypatch):
+    import d2_task.task_manager as tm
+    from test_task_manager import SAFE_STOP
+    io = RegraspIO([(5.0, 0.0)])
+    m, rows = start(io)
+    real = tm.regrasp_decision
+
+    def decide_then_stop(*a):
+        out = real(*a)
+        m.on_safety(SAFE_STOP)                                    # 판단은 끝났고 적용 전에 정지
+        return out
+    monkeypatch.setattr(tm, 'regrasp_decision', decide_then_stop)
+    drive(m, 'STOPPED')
+    assert len(picks_of(io, IDS[0])) == 1 and not [r for r in rows if r[0] == 'a4_regrasp']
+
+
+def test_받침_경유_모드_다시_놓는_자리는_처음_보낸_1mm_띄운_목표_놓은_수_중복_없음():
+    from test_via_spare import SPARE_CFG, SpareIO, fast_wait, start as spare_start
+
+    class A4Spare(SpareIO):
+        def __init__(self):
+            super().__init__()
+            self.offsets, self.measured, self.w144_events = [(5.0, 0.0)], [], []
+
+        def w144_regrasp_on(self):
+            return True
+
+        def w144_measure(self, run_id, design_id, part_id, should_abort):
+            self.measured.append(part_id)
+            sent = next(g for g in reversed(self.goals) if g['part_id'] == part_id)['place_pose'][0]   # 처음 놓은 목표(띄운 자리) 기준
+            part = next(p for p in self.manager.planner.parts if p['part_id'] == part_id)
+            off = self.offsets.pop(0) if self.offsets else (0.0, 0.0)
+            b = {'x_m': sent[0] + off[0] / 1000, 'y_m': sent[1] + off[1] / 1000, 'yaw_deg': 0.0, 'up': design_up(part['quat']),
+                 'tilted': False, 'top_z_m': sent[2] + 0.0074}
+            return True, '', ok_body(part_id, [b], stamp=time.time())
+
+        def w144_event(self, event, **fields):
+            self.w144_events.append((event, fields))
+
+    a4 = A4Spare()                                                # test_via_spare.make 와 같은 순서로 만든다
+    m = TaskManager(SPARE_CFG, a4, open_width_m=0.0)
+    a4.manager = m
+    fast_wait(m)
+    m.on_safety(SAFE_OK)
+    m.on_gripper({'grasped': False})
+    spare_start(m)
+    drive(m, 'DONE')
+    first = [g for g in a4.goals if g['part_id'] == IDS[0]]
+    from_spare = [g for g in first if g.get('from_spare')]
+    regrasp = [g for g in first if g.get('a4_regrasp')]
+    assert len(from_spare) == 1 and len(regrasp) == 1 and not regrasp[0].get('via_spare')
+    assert regrasp[0]['place_pose'] == from_spare[0]['place_pose']              # 처음 보낸(1 mm 띄운) 목표 그대로
+    assert m.last_build['placed'] == len(IDS)                                   # 다시 집어도 놓은 수는 블록 수 그대로
+    assert a4.measured.count(IDS[0]) == 2 and a4.measured.count(IDS[1]) == 1    # 다시 놓은 뒤 다시 재고, 다음 블록으로
+
+
+def test_OK_판정_뒤라도_정지가_끼면_다음_단계로_가지_않는다(monkeypatch):
+    import d2_task.task_manager as tm
+    from test_task_manager import SAFE_STOP
+    io = RegraspIO([(0.5, 0.0)])                                  # 3 mm 안 — OK 판정
+    m, rows = start(io)
+    real = tm.regrasp_decision
+
+    def ok_then_stop(*a):
+        out = real(*a)
+        assert out == ('OK', None)
+        m.on_safety(SAFE_STOP)
+        return out
+    monkeypatch.setattr(tm, 'regrasp_decision', ok_then_stop)
+    drive(m, 'STOPPED')
+    assert len(io.goals) == 1 and [p for _, p in io.measured] == [IDS[0]]                       # 두 번째 블록으로 안 감

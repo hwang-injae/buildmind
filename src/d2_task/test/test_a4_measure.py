@@ -138,7 +138,7 @@ def test_못_잰_답은_UNMEASURED_로_오차를_만들지_않는다(res, want):
 def test_잰_답은_설계_중심과의_차를_mm_로():
     r = placed_offset(C, P, True, '', ok_body(P, [{'x_m': 0.403, 'y_m': -0.0525, 'yaw_deg': -2.0, 'up': 'THICKNESS'}]))
     assert r == {'status': 'MEASURED', 'x_m': 0.403, 'y_m': -0.0525, 'target_x_m': 0.4, 'target_y_m': -0.05,
-                 'dx_mm': 3.0, 'dy_mm': -2.5, 'yaw_deg': -2.0, 'up': 'THICKNESS', 'measured_stamp': ST}
+                 'dx_mm': 3.0, 'dy_mm': -2.5, 'yaw_deg': -2.0, 'up': 'THICKNESS', 'tilted': None, 'top_z_m': None, 'measured_stamp': ST}
 
 
 def test_측정_호출이_예외여도_조립은_이어가고_못_잰_것으로_적는다():
@@ -153,10 +153,10 @@ def test_측정_호출이_예외여도_조립은_이어가고_못_잰_것으로_
     assert io.world == set(IDS)
 
 
-def test_yaw_up_이_이상하면_None_으로_적고_top_z_m_은_적지_않는다():
-    for yaw in (math.inf, 10 ** 400, True, '3.0'):                # 무한 · 아주 큰 정수(OverflowError) · bool · 글자
-        r = placed_offset(C, P, True, '', ok_body(P, [{'x_m': 0.4, 'y_m': -0.05, 'yaw_deg': yaw, 'up': 'SIDEWAYS', 'top_z_m': 0.03}]))
-        assert r['status'] == 'MEASURED' and r['yaw_deg'] is None and r['up'] is None and 'top_z_m' not in r
+def test_yaw_up_tilted_top_z_m_이_이상하면_None():
+    for bad in (math.inf, 10 ** 400, True, '3.0'):                # 무한 · 아주 큰 정수(OverflowError) · bool · 글자
+        r = placed_offset(C, P, True, '', ok_body(P, [{'x_m': 0.4, 'y_m': -0.05, 'yaw_deg': bad, 'up': 'SIDEWAYS', 'top_z_m': bad, 'tilted': 'no'}]))
+        assert r['status'] == 'MEASURED' and r['yaw_deg'] is None and r['up'] is None and r['top_z_m'] is None and r['tilted'] is None
 
 
 def _on(**kw):
@@ -229,7 +229,7 @@ def _node(measure_on):
     path = Path(__file__).parents[1] / 'd2_task/task_node.py'
     tree = ast.parse(path.read_text(encoding='utf-8'))
     original = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'TaskNode')
-    names = {'_call', '_scan_query', '_failed_body', 'find_blocks', 'w144_measure'}
+    names = {'_call', '_scan_query', '_failed_body', 'find_blocks', 'w144_measure', 'w144_regrasp_on'}
     cls = ast.ClassDef(name='TaskNode', bases=[], keywords=[], decorator_list=[],
                        body=[n for n in original.body if isinstance(n, ast.FunctionDef) and n.name in names])
     scope = dict(threading=threading, time=time, json=json, wait_until=wait_until, JsonQuery=SimpleNamespace(Request=SimpleNamespace))

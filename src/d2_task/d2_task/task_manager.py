@@ -39,7 +39,8 @@ from d2_task.block_picker import BlockPicker
 from d2_task.recipe_document import PLACEMENTS_SCHEMA, RECIPE_SCHEMA, same_major    # 형식은 정본(10/14 점검 ③-5)
 from d2_task.recipe_to_parts import ORIS
 from d2_task.run_logger import RunLogger, _reject_constant
-from d2_task.scatter_pick import REOBSERVE, REPLAN_SAME, ScatterFlow, StepTracker, contact_phase, grasped_now
+from d2_task.scatter_pick import REOBSERVE, REPLAN_SAME, ScatterFlow, StepTracker, block_pose, contact_phase, grasped_now
+from d2_motion.motion_math import matrix_from_quat
 from d2_task.task_planner import TaskPlanner
 
 PLAN_STREAK = 3                            # 받침 경유: 움직이기 전 길 계산 거절이 연달아 이만큼이면 사람(10/12 실기 — 장면에 남은 블록으로 20번 헛돎)
@@ -108,11 +109,61 @@ def placed_offset(center_m, part_id, ok, why, body):
     if not (math.isfinite(dx) and math.isfinite(dy)):
         return unmeasured('BAD_RESPONSE', 'x_m · y_m 이 유한하지 않음', stamp)
     up = b.get('up') if b.get('up') in ('THICKNESS', 'WIDTH', 'LENGTH') else None
-    # top_z_m 은 적지 않는다 — 다시 집기 높이 입력은 미확정(측정 계약 · 독립 기준 검증 전 자동 집기에 쓰지 않음)
-    # MEASURED = 'x · y 를 기록할 수 있음'일 뿐 — yaw · 측정 시각 · 대상 확인까지 갖춘 다시 집기 판정이 아니다
+    tilted = b.get('tilted') if isinstance(b.get('tilted'), bool) else None
+    # top_z_m = #177 윗면 점 가운데 값(잰 값). 다시 집기 높이는 이것과 자세 치수로 구한다(regrasp_decision) — 설계 z 로 대신하지 않음
+    # MEASURED = 'x · y 를 기록할 수 있음'일 뿐 — 다시 집기 판정은 regrasp_decision(대상 · 자세 · 기울기 · 시각 · 횟수)이 따로 한다
     return {'status': 'MEASURED', 'x_m': round(x, 5), 'y_m': round(y, 5), 'target_x_m': round(float(center_m[0]), 5),
             'target_y_m': round(float(center_m[1]), 5), 'dx_mm': dx, 'dy_mm': dy, 'yaw_deg': _finite(b.get('yaw_deg')), 'up': up,
-            'measured_stamp': stamp}
+            'tilted': tilted, 'top_z_m': _finite(b.get('top_z_m')), 'measured_stamp': stamp}
+
+
+A4_TOL_MM = 3.0            # 축별 이보다 크면 다시 집어 놓는다(일정표 W144 · E-119 '문턱 3 mm 그대로')
+A4_MAX_TRIES = 2           # 같은 블록 다시 집기 최대 횟수(W144 '최대 2번' → 그래도 크면 사람)
+UP_NAMES = ('LENGTH', 'WIDTH', 'THICKNESS')
+
+
+def design_up(quat):
+    """설계 자세(쿼터니언 xyzw) → 위를 향한 블록 축 이름. 블록 축 k 의 base z 성분이 가장 큰 것. 바깥 영향 없음."""
+    R = matrix_from_quat(quat)
+    return UP_NAMES[max(range(3), key=lambda k: abs(R[2][k]))]
+
+
+def regrasp_decision(row, t_req, t_resp, part, place_pose, cfg, tries):
+    """W144 A4 자동 다시 집기 판단(ROS 없음 · 바깥 영향 없음). 기록 모드와 따로 — w144_regrasp 가 켜졌을 때만 부른다.
+
+    입력: row = placed_offset 결과(없으면 None) · t_req · t_resp = 측정을 부른 · 답을 받은 시각(time.time(), 초) ·
+          part = 설계 부품(part_id · quat · grasp) · place_pose = 이 블록을 놓을 때 실제로 보낸 목표((xyz m, 쿼터니언) — 흩뿌림이면 같은 층
+          1 mm 띄운 자리, 칸 방식이면 설계 자리. 모르면 None) · cfg = robot.yaml dict(block_actual_m) · tries = 이 블록을 이미 다시 집은 횟수.
+    최신성: #177 은 요청 뒤에 받은 깊이만 쓰고(fresh_frames) measured_stamp 는 그중 마지막 장을 받은 시각(노드 시계)이다 —
+          같은 로봇 PC 시계라는 가정 아래 t_req ≤ measured_stamp ≤ t_resp 일 때만 '이번 요청의 영상'으로 본다(밖이면 시계 · 영상을 믿지 않음).
+    출력: ('OK', None) = 축별 3 mm 안 — 그대로 이어 감 / ('REGRASP', 목표) = PickPlace 목표 {part_id, supply_slot '', grasp(레시피), pick_pose(잰 중심 ·
+          잰 yaw · 잰 윗면에서 자세 치수로 구한 중심 높이 — block_pose), place_pose(설계), open_width_m 0, obstacles []} /
+          ('HUMAN', 까닭) = 사람 확인. 측정을 못 했거나 믿을 수 없으면(대상 · 자세 다름 · 기울어짐 · 좌표 · yaw · 윗면 없음 · 측정 시각이 요청 · 답 사이가 아님 ·
+          원래 놓은 목표를 모름) 다시 집지 않는다. 놓는 목표는 원래 놓을 때 보낸 것 그대로(설계 중심으로 덮어쓰지 않음).
+    """
+    if row is None:
+        return 'HUMAN', '놓은 블록을 다시 재지 못했어요(측정 꺼짐 · 답 없음)'
+    if row.get('status') != 'MEASURED':
+        return 'HUMAN', f'놓은 블록을 재지 못했어요({row.get("reason")}{": " + row["detail"] if row.get("detail") else ""})'
+    stamp = row.get('measured_stamp')
+    if not isinstance(stamp, (int, float)) or isinstance(stamp, bool) or not math.isfinite(stamp) or not t_req <= stamp <= t_resp:
+        return 'HUMAN', '측정 영상이 이번 요청 뒤의 것인지 확인되지 않았어요(measured_stamp가 요청 · 답 시각 사이가 아님)'
+    if row.get('tilted') is not False:
+        return 'HUMAN', '놓은 블록이 기울어졌거나 기울기를 모릅니다'
+    want_up = design_up(part['quat'])
+    if row.get('up') != want_up:
+        return 'HUMAN', f'놓은 블록 자세({row.get("up")})가 설계({want_up})와 다릅니다'
+    if row.get('yaw_deg') is None or row.get('top_z_m') is None:
+        return 'HUMAN', '잰 yaw · 윗면 높이가 없습니다'
+    if abs(row['dx_mm']) <= A4_TOL_MM and abs(row['dy_mm']) <= A4_TOL_MM:
+        return 'OK', None
+    if place_pose is None:
+        return 'HUMAN', '이 블록을 놓을 때 보낸 목표를 몰라 다시 놓을 자리를 정할 수 없어요'
+    if tries >= A4_MAX_TRIES:
+        return 'HUMAN', f'{A4_MAX_TRIES}번 다시 놓아도 설계 자리에서 {A4_TOL_MM:g} mm 넘게 벗어나 있어요(dx {row["dx_mm"]} · dy {row["dy_mm"]} mm)'
+    pick = block_pose(cfg, row['up'], row['yaw_deg'], row['x_m'], row['y_m'], row['top_z_m'])
+    return 'REGRASP', {'part_id': part['part_id'], 'supply_slot': '', 'grasp': part['grasp'], 'pick_pose': pick,
+                       'place_pose': copy.deepcopy(place_pose), 'open_width_m': 0.0, 'obstacles': []}
 
 
 def wait_until(event, should_abort, poll_s=0.05, timeout_s=None):
@@ -209,6 +260,9 @@ class TaskManager:
         self._fresh = False                       # 출발 직후 첫 CHECK 인가 — 흩뿌림이면 장면 정리 · 홈부터(one_pick 시작과 같음)
         self._hold_then = None                    # 받침 경유 사람 확인(WAIT_SUPPLY) 뒤 [계속]에 할 일: 'reset'(시도 수 비우고 이어 감) · 'verify'(다시 확인)
         self._tally = {'sent': 0, 'ok': 0}        # 이번 조립의 집기 · 놓기 요청 수 · 성공 수(one_pick 집계와 같음 — 끝날 때 기록)
+        self._a4_tries = {}                       # W144 A4: 블록마다 자동으로 다시 집은 횟수(이번 조립)
+        self._a4_last = None                      # W144 A4: 마지막 측정 (token, 기록 row, 부른 시각, 답 받은 시각)
+        self._a4_place = {}                       # W144 A4: 블록마다 놓을 때 실제로 보낸 place_pose(흩뿌림은 1 mm 띄운 자리) — 다시 놓을 자리
         self._spread = None                       # 같은 층 1 mm 띄운 놓는 중심(part_id → [x, y, z] m) — 설계가 정해질 때 한 번 계산
         if self._scatter is not None:             # 흩뿌림 실패 뒤 재시도 설정(robot.yaml scatter.*) — 없거나 이상하면 만들 때 거절한다
             sc = cfg['scatter']
@@ -872,8 +926,9 @@ class TaskManager:
         요청마다 새 번호를 만들어 피드백 step · 결과 수신 시각(time.time())을 모으고, 끝나면 self.last_pick 에 남긴다
         ({request_id, ok, reason, step, result_at} — result_at 이 None 이면 결과 없이 끝난 것). 흩뿌림 집기가 실패하면 _scatter_failed 가 step(접촉 전후)과 result_at(gripper 상태가 결과 이후인지)으로 재시도 여부를 정한다.
         """
-        via = self._scatter is not None and self._scatter.via_spare
-        if self._scatter is not None and not via:
+        a4 = self.goal.get('a4_regrasp')      # W144 A4 다시 집기('regrasp' 는 받침 경유 헛잡음 다시 집기가 이미 쓰는 키 — 섞지 않음)
+        via = self._scatter is not None and self._scatter.via_spare and not a4
+        if self._scatter is not None and not via and not a4:   # W144 A4 다시 집기는 따로 센다(_a4_tries)
             part = self.goal['part_id']
             with self._lock:
                 if self._scatter_fail.get(part, 0) >= self.max_attempts:      # 복구 · 다른 실패 경로로 와도 한도를 넘는 요청은 보내지 않는다
@@ -897,12 +952,15 @@ class TaskManager:
         self._tally['ok'] += 1 if ok else 0
         self.logger.log('attempt', self.goal['part_id'], f'{self.goal.get("grasp")} {"성공" if ok else why}'
                         f'{"" if ok or self.last_pick["step"] is not None else "(움직이기 전)"} · 지금까지 {self._tally["ok"]}/{self._tally["sent"]}')
+        if a4:
+            return self._regrasp_result(ok, why)
         if via:
             handled = self._via_spare_result(ok, why)
             if handled is not False:
                 return handled
         if ok:
             self.placed = self.goal['part_id']
+            self._a4_place[self.placed] = copy.deepcopy(self.goal.get('place_pose'))     # W144 A4 다시 놓을 자리 = 이번에 실제로 보낸 목표
             self.logger.record_placed(self.placed, self.goal['supply_slot'])
             self.poll_hmi()
             if self._hmi_pause:
@@ -1135,6 +1193,8 @@ class TaskManager:
             self._scatter_fail.pop(self.placed, None)
         if self._measure_placed(part):
             return None                            # 측정 시간 초과(정지 요청 → ERROR) 또는 측정 중 정지 — 다음 단계로 가지 않는다
+        if self._a4_regrasp(part):
+            return None                            # 자동 다시 집기(PICK_PLACE) 또는 사람 확인(WAIT_SUPPLY)으로 갔다
         if getattr(self.io, 'w144_after_place', None) is not None:
             # W144: 최종 자리 확인이 끝난 블록을 observe 에서 촬영(one_pick final_placed — 설계 중심 · 방향). 촬영 실패면 io 가 세우고 ERROR
             aid = self._w144_open.pop(self.placed, None) if hasattr(self, '_w144_open') else None
@@ -1160,10 +1220,13 @@ class TaskManager:
         with self._lock:
             token = (self._epoch, self._stop_count, self.run_id, self.placed)
             design_id = self.design_id
+            self._a4_last = None
+        t_req = time.time()                         # 측정 최신성 비교 기준(비전 measured_stamp 는 같은 로봇 PC 시계)
         try:
             res = fn(token[2], design_id, token[3], self.halted)     # run_id · part_id · design_id 를 같은 잠금 시점 값으로
         except Exception as e:                     # noqa: BLE001 — 기록용 측정이 조립을 멈추게 하지 않는다(못 잰 것으로 적음)
             res = (False, 'ERROR', {'detail': f'{type(e).__name__}: {e}'})
+        t_resp = time.time()
         if res is None:                            # 꺼짐(task_node w144_measure false)
             return False
         if not (isinstance(res, tuple) and len(res) == 3):
@@ -1179,10 +1242,59 @@ class TaskManager:
                 return True                        # 늦은 답은 버리고 다음 run_once 가 정지 절차를 밟는다
             self.logger.log('a4_measure', self.placed, text)
             self._w144_event('placed_measured', self.placed, **row)
+            self._a4_last = (token, row, t_req, t_resp)
         if res[1] == 'TIMEOUT':                    # 정지 요청은 잠금 밖에서(기존 _failed 규칙)
             self._failed('TIMEOUT', f'{self.placed} 놓은 블록 다시 재기')
             return True
         return False
+
+    def _a4_regrasp(self, part):
+        """W144 A4 자동 다시 집기(기본 꺼짐 — io.w144_regrasp_on() 이 참일 때만). 반환: True = 상태를 바꿨다(PICK_PLACE · WAIT_SUPPLY), False = 이어 감.
+
+        판단은 regrasp_decision. 다시 집기는 같은 part_id 목표로 PICK_PLACE → 기존 성공 처리 → VERIFY(다시 잼). 사람 확인은 기존 _hold
+        (WAIT_SUPPLY no_match_block → [계속]이면 다시 확인). 바깥 영향: CSV 'a4_regrasp' 한 줄, 상태 방송.
+        """
+        on = getattr(self.io, 'w144_regrasp_on', None)
+        if on is None or not on():
+            return False
+        last = self._a4_last
+        mine = bool(last) and last[0][3] == self.placed
+        row, t_req, t_resp = (last[1], last[2], last[3]) if mine else (None, 0.0, 0.0)
+        verdict, out = regrasp_decision(row, t_req, t_resp, part, self._a4_place.get(self.placed), self.cfg, self._a4_tries.get(self.placed, 0))
+        with self._lock:                           # 판단 뒤 적용 전에 정지 · 취소 · run 바뀜이 끼면 버린다(commit 과 같은 방식, OK 도) — 다음 run_once 가 정지 절차
+            if not mine or (self._epoch, self._stop_count, self.run_id, self.placed) != last[0] or self.halted():
+                LOG.info('A4 다시 집기 판단을 버림(정지 또는 상태 바뀜): %s', self.placed)
+                return True
+            if verdict == 'OK':
+                return False
+            if verdict == 'HUMAN':
+                self.logger.log('a4_regrasp', self.placed, f'사람 확인: {out}')
+                self._hold(self.placed, f'{self.placed}: {out} — 손으로 바로 놓은 뒤 [계속]을 누르면 다시 확인합니다', then='verify')
+                return True
+            n = self._a4_tries[self.placed] = self._a4_tries.get(self.placed, 0) + 1
+            self.logger.log('a4_regrasp', self.placed, f'{n}번째 다시 집기: dx {row["dx_mm"]} · dy {row["dy_mm"]} mm(설계 중심 기준) · '
+                                                       f'놓을 자리 = 처음 보낸 목표')
+            self._start_goal(dict(out, status='FOUND', a4_regrasp=n))
+            self._set('PICK_PLACE', None, f'{self.placed} 가 설계 자리에서 벗어나 다시 집어 놓습니다({n}/{A4_MAX_TRIES})')
+        return True
+
+    def _regrasp_result(self, ok, why):
+        """W144 A4 다시 집기 PickPlace 결과. 성공 = 기존 성공 처리(조립 수는 record_placed 가 블록당 한 번만 셈) → VERIFY 로 다시 잼.
+        움직이기 전 PLAN_FAILED = 사람 확인(_hold, [계속]이면 다시 확인). 움직인 뒤 실패 · 정지 · 시간 초과 = 기존 _failed(정지 처리)."""
+        part = self.goal['part_id']
+        moved = self.last_pick['step'] is not None
+        self.logger.log('a4_regrasp', part, f'다시 집기 결과: {"성공" if ok else why}{"" if ok or moved else "(움직이기 전)"}')
+        if ok:
+            self.placed = part
+            self.logger.record_placed(self.placed, self.goal['supply_slot'])
+            self.poll_hmi()
+            if self._hmi_pause:
+                return self._enter_wait_hmi()
+            self._set('VERIFY', None, f'{self.placed} 를 다시 놓았다. 확인합니다')
+            return None
+        if why == 'PLAN_FAILED' and not moved:
+            return self._hold(part, f'{part}: 다시 집을 길을 찾지 못했어요(PLAN_FAILED) — 손으로 바로 놓은 뒤 [계속]을 누르면 다시 확인합니다', then='verify')
+        return self._failed(why or 'ERROR', f'{part} 다시 집기', log=False)
 
     def _wait_supply(self):
         """WAIT_SUPPLY: 먼저 관측 자세로 1번 간다. 도착한 뒤에야 '공급 채워 주세요'(supply_empty)를 방송하고 [계속]을 받는다.
@@ -1720,6 +1832,7 @@ class TaskManager:
         self._spare_on, self._spare_failed, self._plan_streak, self._spread = None, [], 0, None
         self._spare_empty = self._no_match = self._bad_blocks = self._spare_centers = 0
         self._fresh, self._hold_then, self._tally = True, None, {'sent': 0, 'ok': 0}
+        self._a4_tries, self._a4_last, self._a4_place = {}, None, {}
         self.placed = self.part_id = None
         self.run_id = self.logger.start_run(self.design_id, len(self.planner.parts))   # 실제 출발 때만 새 run_id
         self._w144_open, self._w144_last, self._w144_legs = {}, {}, {}    # W144 시도: 부품 → 열린 action_id · 마지막 실패 action_id, action → 단계 기록
