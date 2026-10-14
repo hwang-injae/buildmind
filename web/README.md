@@ -147,7 +147,7 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 ### 4-C. 스캔 → [그대로 저장] (IRD 8.4 ⑦, 10/9 PL ②)
 
 ```text
-scan_result/2.0 의 blocks/2(위치 · 방향 + inferred, 임시 이름 scan · family unknown — 저장 때 버림, E-111 B7) + nearest_base(추론기가 고른 기본 설계, 선택 칸 — 8장)
+scan_result/2.0 의 blocks/2(위치 · 방향 + inferred, 임시 이름 scan_<family>_NN · family = 가장 가까운 기본 설계 것(모르면 unknown) — 저장 때 버림) + nearest_base(추론기가 고른 기본 설계, 선택 칸 — 8장)
 → design_gen이 Claude 1번 호출: 4-A ②와 같은 RAG(DB 목록 요약 + 도구 get_design) → 가장 비슷한 설계를 골라 읽음
    → 그 설계를 참고해 role · group · sequence · stage · grasp만 채움(inferred는 '추측' 힌트). 블록 위치 · 방향은 바꾸지 않는다(복제가 목적)
    → 고른 설계 = parent_id, family = GPT 판단

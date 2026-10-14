@@ -246,7 +246,7 @@ class MockRobot:
         self.set_state('SCAN_INFER', '스캔 결과 계산 중', 'scan_running')
         if self.abort.wait(self.step_s * 2):
             return
-        scan = {'schema': 'blocks/2', 'design_id': 'scan', 'family': 'unknown', 'blocks': items}   # 스캐너 임시 이름 그대로(E-111 B7 — 저장 때 버림)
+        scan = {'schema': 'blocks/2', 'design_id': 'scan_chair_01', 'family': 'chair', 'blocks': items}   # 실제 wrist_block 처럼 scan_<family>_NN(가장 가까운 기본 설계의 family — 10/14 PL, 저장 때 버림)
         jpeg, ply = fake_scan_media(scan, self.origin, self.block_mm)
         result = {'schema': 'scan_result/2.0', 'run_id': run_id, 'inferred_count': 2, 'blocks': scan,
                   'image_path': f'/mock/scan/{run_id}/color.png' if jpeg else '',   # 로봇 PC 경로 흉내 — 웹은 열지 않는다
