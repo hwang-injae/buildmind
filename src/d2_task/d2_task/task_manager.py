@@ -462,6 +462,9 @@ class TaskManager:
             self._w144_starting = False
             ok, why = self.io.w144_start(self.design_id, self.run_id)
             if not ok:
+                # 덜 된 기록은 닫아 둔다(다음 run_once 가 잠금 밖에서 ZIP) — 열린 채 [다시 시작]으로 이어 가면 촬영이 반쯤 연 기록을 썼다(10/14 점검 ② 3)
+                with self._lock:
+                    self._w144_due = False
                 return self._to_error(why)
         if self._fresh and self._scatter is not None and self._scatter.via_spare:
             self._fresh = False
@@ -541,7 +544,16 @@ class TaskManager:
                 return self._failed(why, '웹 재연결 뒤 관측 자세 이동')
             if not self._observe([b['part_id'] for b in self.planner.parts]):
                 return
-            problems = self.planner.judge(expect_present=[self.placed] if self.placed else ())
+            # 받침 경유는 VERIFY 와 같은 엄격 판정(높이 place_dz_m · strict) — 놓은 뒤 확인을 기다리던 중 웹이 끊겼다 이어 가면
+            # 느슨한 판정으로 고치지 않은 블록 위로 진행했다(10/14 점검 ② 2ⓐ). 걸리면 VERIFY 처럼 사람이 고치고 [계속]
+            via = self._scatter is not None and self._scatter.via_spare
+            dz = (self.cfg.get('scatter') or {}).get('place_dz_m') if via else None
+            problems = self.planner.judge(expect_present=[self.placed] if self.placed else (), placed_dz_m=dz, strict=via)
+            if problems and via and self.placed:
+                self._hmi_recheck = False
+                first = problems[0]
+                return self._hold(self.placed, f'{first["part_id"]}: {first["detail"]} — 손으로 바로 놓은 뒤 [계속]을 누르면 다시 확인합니다',
+                                  then='verify')
             if problems:
                 return self._offset_over(problems)
             if self.placed:
@@ -882,8 +894,8 @@ class TaskManager:
     def _spare_regrasp(self, goal):
         """받침 경유 헛잡음 뒤 그 블록을 다시 찍어 위치를 고쳐 같은 잡기로 한 번 더(one_pick try_goal · see_block): 집기 위(노드가 열고 올라온 자리)에서
         find_blocks → 온전한 같은 자세 블록(확신도 0.5 이상 · 덮이지 않음 · 40 mm 안)이 없으면 공급 관측 자세로 가서 한 번 더.
-        반환: 적용했으면 True(PICK_PLACE), observe_supply 이동이 실패하면 평소 실패 처리(_failed — TIMEOUT 은 먼저 세움)를 하고 True,
-        못 찾았거나 정지 중이면 False(부르는 쪽이 평소대로). 바깥 영향: 팔 이동(observe_supply) · find_blocks."""
+        반환: 적용했으면 True(PICK_PLACE — 이 관측을 _spare_seen 으로 바꿔 둠), observe_supply 이동 · find_blocks 가 실패하면 평소 실패 처리
+        (_failed — TIMEOUT 은 먼저 세움)를 하고 True, 못 찾았거나 정지 중이면 False(부르는 쪽이 평소대로). 바깥 영향: 팔 이동(observe_supply) · find_blocks."""
         token = (self._epoch, self._stop_count)
         cand = goal.get('seen') or {}                  # 고를 때 본 블록(헛잡음 판단 뒤에는 ScatterFlow 후보가 비워진다)
         for go in (False, True):
@@ -895,14 +907,22 @@ class TaskManager:
                     # 이동 실패(TIMEOUT 포함)를 넘기고 다시 찍으러 가면 팔이 어디 있는지 모른 채 이어 갔다(#152 리뷰 4)
                     self._failed(why, f'{goal["part_id"]} 헛잡음 뒤 공급 관측 자세 이동')
                     return True
-            ok, _why, body = self.io.find_blocks(self.run_id, self.halted, height_map=True)
-            if not ok or self.halted():
+            ok, why, body = self.io.find_blocks(self.run_id, self.halted, height_map=True)
+            if self.halted():
                 return False
+            if not ok:
+                # 조회 실패(TIMEOUT 포함)도 다른 조회처럼 평소 실패 처리 — 예전엔 정지 요청 없이 SELECT 로 갔다(10/14 점검 ② 2ⓑ)
+                self._failed(why, f'{goal["part_id"]} 헛잡음 뒤 find_blocks')
+                return True
             req = self._scatter.reseen_request(goal, cand, body)
             if req is not None:
                 with self._lock:
                     if self.halted() or (self._epoch, self._stop_count) != token:
                         return False
+                    if self._spare_seen is not None:
+                        # 이 다시 잡기가 움직이기 전에 거절되면 '같은 관측의 다음 후보'를 이 관측에서 고른다 — 밀리기 전 옛 관측으로 고르면
+                        # 빈 자리로 갔다(10/14 점검 ② 2ⓒ)
+                        self._spare_seen = (self._spare_seen[0], body)
                     self.logger.log('spare', goal['part_id'], '헛잡음 — 다시 찍은 자리로 같은 잡기 한 번 더')
                     self._start_goal(dict(req, status='FOUND', regrasp=True))
                     self._set('PICK_PLACE', None, f'{goal["part_id"]}: 헛잡음 — 다시 찍은 자리로 한 번 더 집습니다')
@@ -1064,8 +1084,10 @@ class TaskManager:
         self._recover_slow = True
         if self._scatter is not None and self._scatter.via_spare:
             # 받침 경유: 사람이 확인하고 [다시 시작]하면 시도 수 · 안 된 후보를 비우고 이어 간다(one_pick hold → Enter 와 같음).
-            # 받침 기록(_spare_on)은 남겨 받침 위 블록부터 다시 잰다
+            # 받침 기록(_spare_on)은 남겨 받침 위 블록부터 다시 잰다. 기록이 없어도 정지 사이에 받침에 블록이 남았을 수 있어
+            # 첫 SELECT 에 받침을 한 번 잰다 — 있으면 그 블록부터 쓴다(출발 때와 같음, 10/14 점검 ② 2ⓓ)
             self._reset_spare_tries()
+            self._spare_check = self._spare_on is None
         self._set('CHECK', None, '진행 확인부터 다시 합니다')
         return None
 
@@ -1645,6 +1667,10 @@ class TaskManager:
         """상태를 바꾸고 /d2/task/state 로 알린다."""
         with self._lock:
             LOG.info('%s → %s %s', self.state, state, message)
+            if self.state == 'WAIT_SUPPLY' and state != 'WAIT_SUPPLY':
+                # 사람 확인 뒤 할 일(_hold_then)은 그 WAIT_SUPPLY 의 [계속]에만 — 웹 끊김 · 정지로 떠나면 비운다. 남겨 두면 나중의 다른
+                # [계속]이 엉뚱하게 VERIFY 로 갔다(10/14 점검 ② 2ⓐ). [계속]이 쓰는 길은 바꾸기 전에 이미 꺼내 갔다
+                self._hold_then = None
             self.state = state
             self._epoch += 1
             self.logger.log('state', self.part_id, state)

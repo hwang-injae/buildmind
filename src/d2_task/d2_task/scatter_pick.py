@@ -345,8 +345,10 @@ class ScatterFlow:
             return {'status': 'STAND_NOT_READY'}           # 받침에서 세우는 동작(robot.yaml standup_taught)이 없다 — 공급에서 옮기기 전에 막는다
         pts = height_points(response.get('height_map'))
         ranked, cut = self.picker.rank(blocks, list(failed), pts)
-        # 깊이를 못 받으면 기울여 집기는 뺀다 — 손가락 자리 · 윗면 평면을 깊이로 못 본 채 기울여 내려가지 않는다(one_pick NO_DEPTH)
-        ranked = [r for r in ranked if r[1] in SPARE_GRASPS and (pts is not None or r[1] != 'TILT')]
+        # 깊이를 못 받으면(높이 지도 없음 · 점 0개) 기울여 집기는 뺀다 — 손가락 자리 · 윗면 평면을 깊이로 못 본 채 기울여 내려가지 않는다
+        # (one_pick NO_DEPTH. 점 0개를 '받음'으로 보던 것 — 10/14 점검 ② 5)
+        depth = pts is not None and len(pts) > 0
+        ranked = [r for r in ranked if r[1] in SPARE_GRASPS and (depth or r[1] != 'TILT')]
         if not ranked:
             n = len(blocks)
             return {'status': 'NO_MATCH', 'guide': 'CHECK_BLOCKS', 'counts': {'no_clear': n},

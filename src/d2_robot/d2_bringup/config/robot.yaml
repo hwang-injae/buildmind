@@ -25,7 +25,7 @@ assembly_area_half_m: 0.15     # 조립 작업공간 = 조립 원점 ± 이 값 
 
 block_size_m: [0.075, 0.025, 0.015]   # 젠가 블록 설계 치수 LENGTH, WIDTH, THICKNESS = 최대 기준값 (레시피와 같아야 함)
 block_actual_m: [0.07445, 0.0248, 0.0148]   # 실측 평균 (10/6) — 집는 높이·쌓는 높이·장면 상자에 쓴다
-block_tolerance_m: 0.0005      # 실제 블록은 설계 치수보다 이 안에서 작다 (10/6 실측: 75 쪽은 -0.55 로 약간 넘음)
+block_tolerance_m: 0.0005      # 실제 블록은 설계 치수보다 이 안에서 작다 (10/6 실측: 75 쪽은 -0.55 로 약간 넘음). 기록용 — 지금 읽는 코드 없음(IRD 9장에 있어 키는 둠)
 
 # 로봇 공급 칸 (10/6 직접 교시로 다시 찍음, 잡기 6가지 순서). block_up = 위를 향하는 블록 축,
 # yaw_deg = 블록 긴 쪽 방향 (세우면 25 mm 쪽). tcp_z_m·grip_display_width_m = 10/4 교시 집는 높이 (세운 블록은 더 깊게 문다)
@@ -112,7 +112,7 @@ timeout:                       # 작업 관리자가 답을 기다리는 시간 
 recover:
   speed_ratio: 0.5             # 정지 해제 뒤 첫 관측 이동은 평소 속도의 절반. 성공 뒤 평소 속도로 돌아감 (IRD W121 C-1)
 
-mqtt:                          # PC 사이 MQTT (IRD 9 · 10장). host · port · qos · req_timeout_s · alive_s 는 다리(d2_bridge)만 읽는다
+mqtt:                          # PC 사이 MQTT (IRD 9 · 10장). 다리(d2_bridge)가 읽고, req_timeout_s · alive_s · lost_after_s 는 웹 backend(mqtt_client)도 읽는다(웹 host · port 는 웹 PC .env)
   host: localhost              # 브로커(웹 PC) 주소 — 웹 PC IP 는 W129 때 정함. 그 전엔 실행 때 -p mqtt_host:=<IP> 로 바꾼다
   port: 1883
   qos: 1                       # 명령 · 요청 · 응답 · 상태 토픽 QoS (그리퍼 상태만 0 — IRD 10.1 표)
@@ -130,7 +130,7 @@ find:                          # 흩어진 블록 집기 (IRD 9장, E-49)
 
 scatter:                       # 흩뿌린 공급 집기 실패 뒤 재시도 (W178, 10/12 PL 확인 대상)
   max_attempts: 3              # 같은 목표 블록의 총 집기 시도 수 — 이 수를 채우면 서서 사람을 부른다. 재관측 · 정지 · 복구로 비우지 않고, VERIFY 에서 present 로 확인된 뒤에만 지운다.
-                               # via_spare 면 팔이 움직인 실패만 센다(받침에 옮기기 · 받침에서 다시 집기 따로, 10/12 ~ 13 박진용 실기 규칙 — 2 → 3)
+                               # via_spare 면 팔이 움직인 실패만 센다 — 블록 하나에 공급 · 받침 단계(받침에 옮기기 · 눕히기 · 맞추기 · 다시 집기)를 합쳐 3번(10/12 ~ 13 박진용 실기 규칙 — 2 → 3, 10/13 PL)
   via_spare: true              # 받침 경유(10/13 PL 10시 지시): 공급에서 집기 쉬운 블록(BlockPicker.rank) → 받침(spare_spots 첫 자리)에 눕힘 →
                                # observe_spare 에서 find_blocks area 'spare' 로 재기 → 레시피 잡기로 곧게 다시 집어 조립. false 면 전처럼 바로 조립
   place_dz_m: 0.005            # 받침 경유 VERIFY: 놓은 블록 높이 어긋남이 이 안이어야 하고 present 여야 함(one_pick CHECK_DZ_M 5 mm) — 아니면 사람이 고치고 [계속]

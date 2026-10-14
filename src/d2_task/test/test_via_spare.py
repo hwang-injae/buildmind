@@ -169,7 +169,9 @@ def test_기울어진_블록은_윗면_법선으로_두께_절반만_물고_받�
                  center_top_z_m=top, normal=[-0.2588, 0.0, 0.9659])
     target = {'part_id': IDS[0], 'grasp': 'FLAT_SHORT', 'place_pose': ((0.4, -0.07, 0.01), (0, 0, 0, 1))}
     assert flow.prepare_spare(target, {'ok': True, 'blocks': [tilted]})['status'] == 'NO_MATCH'      # 깊이 없으면 기울여 집기 안 함
-    r = flow.prepare_spare(target, {'ok': True, 'blocks': [tilted], 'height_map': EMPTY_HM})
+    assert flow.prepare_spare(target, {'ok': True, 'blocks': [tilted], 'height_map': EMPTY_HM})['status'] == 'NO_MATCH'   # 점 0개도 깊이 없음(10/14 점검)
+    floor = dict(EMPTY_HM, z_m=[SPARE_CFG['table_z_m']])                      # 블록에서 먼 작업대 점 하나 — 깊이는 받았고 막는 점은 없음
+    r = flow.prepare_spare(target, {'ok': True, 'blocks': [tilted], 'height_map': floor})
     assert r['status'] == 'SPARE' and r['request']['grasp'] == 'TILT'
     center, _, n = tilt_block_pose(dict(tilted), T)
     shift = SPARE_CFG['grasp_depth_m'] - T / 2
@@ -550,3 +552,74 @@ def test_W144_녹화_열기_닫기는_작업_관리자_잠금_밖에서_한다()
     m.run_once()
     free = dict((e[0], e[1]) for e in io.w144 if e[0] in ('start_free', 'finish_free'))
     assert free == {'start_free': True, 'finish_free': True}
+
+
+# ---------- 10/14 10시 전체 점검 ② 박진용 ----------
+def test_사람_확인을_웹_끊김으로_떠나면_계속_뒤_할_일을_비운다():
+    """점검 ② 2ⓐ: WAIT_SUPPLY(놓은 뒤 확인 대기 then='verify') → WAIT_HMI 로 떠나면 _hold_then 이 남아 다음 [계속]이 엉뚱하게 VERIFY 로 갔다."""
+    m, io = make()
+    m.state, m._hold_then = 'WAIT_SUPPLY', 'verify'
+    m._set('WAIT_HMI', 'hmi_lost', '')
+    assert m._hold_then is None
+    m.state, m._hold_then = 'SELECT', None
+    m._hold(IDS[0], '사람 확인', then='verify')                              # 들어갈 때는 남는다
+    assert m.state == 'WAIT_SUPPLY' and m._hold_then == 'verify'
+
+
+def test_웹_다시_붙은_뒤_재확인도_받침_경유면_엄격하게_본다():
+    """점검 ② 2ⓐ: 웹 재연결 뒤 SELECT 재확인이 높이 기준(place_dz_m 5 mm) 없이 통과해 고치지 않은 블록 위로 진행했다."""
+    m, io = make()
+    start(m)
+    m.run_once()                                                              # CHECK → SELECT
+    io.world.add(IDS[0])
+    io.dz = 0.010                                                             # 놓은 블록이 10 mm 떠 있음(5 mm 넘음)
+    m.placed, m._hmi_recheck, m.state = IDS[0], True, 'SELECT'
+    m.run_once()
+    assert m.state == 'WAIT_SUPPLY' and m._hold_then == 'verify' and not m._hmi_recheck
+
+
+def test_헛잡음_뒤_다시_찍기_조회가_실패하면_실패_처리한다():
+    """점검 ② 2ⓑ: find_blocks 가 TIMEOUT 이어도 정지 요청 없이 SELECT 로 갔다."""
+    m, io = make()
+    m.run_id = 'R1'
+    io.find_script = [(False, 'TIMEOUT', None)]
+    goal = {'part_id': IDS[0], 'grasp': 'FLAT_SHORT', 'via_spare': True, 'attempt': (0.3, 0.2, 'FLAT_SHORT', 0, 0.0),
+            'seen': supply()['blocks'][0]}
+    assert m._spare_regrasp(goal) is True
+    assert ('stop', 'TIMEOUT') in io.calls
+
+
+def test_헛잡음_뒤_다시_잡기는_새로_찍은_관측을_다음_후보의_바탕으로_남긴다():
+    """점검 ② 2ⓒ: 다시 잡기가 움직이기 전에 거절되면 밀리기 전 옛 관측(_spare_seen)에서 다음 후보를 골라 빈 자리로 갔다."""
+    m, io = make()
+    m.run_id = 'R1'
+    old = supply()
+    new = supply()
+    new['blocks'][0]['x_m'] += 0.01                                          # 헛잡음으로 10 mm 밀림
+    m._spare_seen = ({'part_id': IDS[0]}, old)
+    io.find_script = [(True, '', new)]
+    goal = {'part_id': IDS[0], 'grasp': 'FLAT_SHORT', 'via_spare': True, 'attempt': (0.30, 0.20, 'FLAT_SHORT', 0, 0.0),
+            'seen': old['blocks'][0], 'place_pose': ((0.4, -0.07, 0.04), (0, 0, 0, 1))}
+    assert m._spare_regrasp(goal) is True and m.state == 'PICK_PLACE'
+    assert m._spare_seen[1] is new
+
+
+def test_복구_뒤_받침_기록이_없으면_첫_SELECT_에_받침을_한_번_잰다():
+    """점검 ② 2ⓓ: 정지 사이에 받침에 블록이 남았을 수 있다 — 기록이 없으면 확인, 기록이 있으면 원래대로 받침부터."""
+    m, io = make()
+    start(m)
+    m._assembling = True
+    for spare_on, want in ((None, True), (IDS[0], False)):
+        m._spare_on, m._spare_check, m.state = spare_on, False, 'RECOVER'
+        m._recover()
+        assert m.state == 'CHECK' and m._spare_check is want
+
+
+def test_W144_기록_시작이_실패하면_덜_된_기록을_닫는다():
+    """점검 ② 3: 시작 실패 뒤 [다시 시작]으로 이어 가면 반쯤 연 기록을 썼다 — 실패하면 닫기(ZIP)를 잡아 둔다."""
+    m, io = make_w144(fail_at='start')
+    assert m.command('select_design', 'bench') == (True, '') and m.command('start') == (True, '')
+    m.run_once()
+    assert m.state == 'ERROR'
+    m.run_once()
+    assert ('finish', False) in io.w144

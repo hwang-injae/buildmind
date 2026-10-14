@@ -323,7 +323,7 @@ class PickPlaceNode(Node):
                 qa = qb if qb is not None and self.exe.singular(qb) is None else None
             # 움직이기 전에 위 자세에서 수직으로 내려가는 직선이 풀리는지 미리 본다 (Pilz LIN, 위 자세에서 출발)
             # 놓기는 살살 — robot.yaml motion.place_speed_ratio(10/12 박진용: 조립할 때 절반 속도),
-            # 집기도 느리게 — motion.pick_speed_ratio(10/13 박진용: 집기 하강 너무 빠름, 0.3 → 0.2). 올라오는 직선은 같은 궤적이라 같이 느려진다
+            # 집기도 느리게 — motion.pick_speed_ratio(10/13 박진용: 집기 하강 너무 빠름, 0.3 → 0.15). 올라오는 직선은 같은 궤적이라 같이 느려진다
             ratio = m.get('place_speed_ratio', 1.0) if kind == 'place' else m.get('pick_speed_ratio', 1.0)
             down = None if qa is None else self.exe.plan_line(low, quat, self.cfg['speed_scale'] * LINE_SCALE * ratio, start_q=qa)[0]
             if down is None:
@@ -559,7 +559,8 @@ class PickPlaceNode(Node):
     def _standup(self, g, gh, finish):
         """잡기 STANDUP_HIGH · STANDUP_SIDE: 받침 자리의 눕힌 블록을 교시 동작으로 세운다(standup_case 가 자리 · 자세를 확인).
 
-        자리 · 자세가 교시와 다르면 움직이기 전에 PLAN_FAILED, 바쁘면 BUSY. 반환: finish(...) 결과.
+        자리 · 자세가 교시와 다르면 움직이기 전에 PLAN_FAILED, 바쁘면 BUSY. 예상 못 한 오류면 먼저 세우고 ERROR(_execute 와 같음).
+        반환: finish(...) 결과.
         """
         def pose(p):
             """geometry_msgs/Pose -> (위치 m, 3x3 회전)."""
@@ -574,6 +575,10 @@ class PickPlaceNode(Node):
             return finish(False, 'BUSY')
         try:
             return finish(*self.follow_standup(case, g, gh, pc, pr))
+        except Exception as e:            # 예상 못 한 오류: 교시 궤적이 아직 돌고 있을 수 있으니 먼저 세운다(10/14 점검 ② 5)
+            self.get_logger().error(f'{g.part_id}: 세우기 오류 {e!r}')
+            self.stopper.stop('ERROR')
+            return finish(False, 'ERROR')
         finally:
             self.busy.release()
 
@@ -705,7 +710,7 @@ class PickPlaceNode(Node):
         place_pose 에 눕힌다(_tilt_targets). 폭 · 닫기 · 놓기 값은 FLAT_SHORT 것.
 
         바깥 영향: 로봇 팔·그리퍼가 움직이고, 장면 관리에 쥔 블록 붙이기·떼기를 부탁한다.
-        실패·정지·취소 때는 세운 뒤 success=false 와 이유 코드(IRD 7장, 정지면 halt 이유)로 끝낸다.
+        실패·정지·취소 때는 세운 뒤 success=false 와 이유 코드(IRD 7장 — 정지 · 취소면 늘 CANCELED, 정지 이유는 로그에만 — _halted)로 끝낸다.
         """
         g, t0 = gh.request, time.monotonic()
         res = PickPlace.Result()
