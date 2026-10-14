@@ -62,8 +62,9 @@ export default function WristCamera({ robot }: { robot: Robot }) {
     <section className={`panel wrist-panel${full ? ' wrist-full' : ''}${w ? '' : ' wrist-idle'}`}>
       <div className="panel-head">
         <h2>손목 카메라</h2>
+        {/* 그림이 없으면 제목 줄 한 줄로 끝낸다 — 빈 카드가 3D 를 밀어내지 않게 */}
         <span className="muted head-sub" title={w ? new Date(w.at).toTimeString().slice(0, 8) : undefined}>
-          {w ? `블록 검출 · 고르는 순서 — ${age}초 전` : ''}
+          {w ? `블록 검출 · 고르는 순서 — ${age}초 전` : '블록을 찾을 때 그림이 와요'}
         </span>
         {w && (
           <div className="zoom-row" role="group" aria-label="확대">
@@ -79,14 +80,10 @@ export default function WristCamera({ robot }: { robot: Robot }) {
           </div>
         )}
       </div>
-      {w ? (
+      {w && (
         <div className="cam" onClick={aim} title="누른 곳을 중심으로 확대해요(×1 이면 ×2 로)">
           <img src={wristUrl(w.seq)} alt="손목 카메라 블록 검출 그림"
             style={{ transform: `scale(${view.z})`, transformOrigin: `${view.ox}% ${view.oy}%` }} />
-        </div>
-      ) : (
-        <div className="cam-empty" title="손목 비전이 흩뿌린 공급 영역에서 블록을 찾을 때(find_blocks)마다 그림이 와요 — 공급 칸 방식(slots)에서는 오지 않아요">
-          블록을 찾을 때 그림이 와요
         </div>
       )}
     </section>

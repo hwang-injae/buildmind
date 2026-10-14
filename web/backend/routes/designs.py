@@ -285,7 +285,7 @@ def rename(design_id: str, body: NameBody, request: Request):
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     except OSError as e:
-        raise HTTPException(503, f'저장소에 못 썼어요 → DB · 데이터 폴더 → backend 로그({e})') from None
+        raise HTTPException(503, '저장소에 못 썼어요 — 잠시 뒤 다시') from None   # 까닭(e)은 화면 대신 backend 로그
     return {'design_id': design_id, 'display_name': name}
 
 

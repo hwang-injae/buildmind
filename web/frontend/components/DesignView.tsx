@@ -79,7 +79,7 @@ export default function DesignView({ robot, viewId, rules, dark, onPick, onLog, 
     if (!design || naming === null) return;
     const r = await api.renameDesign(design.design_id, naming);
     if (r.error || !r.data) {
-      setNameErr(`이름을 못 바꿨어요(${r.error ?? '답 없음'}) → 40자 이하 · 한 줄인지 → 고쳐서 다시 [저장]`);
+      setNameErr(`이름을 못 바꿨어요 — ${r.error ?? '40자 이하 한 줄로 써 주세요'}`);
       return;
     }
     setDisplayName(design.design_id, r.data.display_name);
@@ -123,9 +123,9 @@ export default function DesignView({ robot, viewId, rules, dark, onPick, onLog, 
   const loading = !!viewId && !failed && design?.design_id !== viewId;
 
   let body: React.ReactNode;
-  if (!viewId) body = <div className="view3d-empty">[설계 목록]에서 고르거나 위에서 AI로 만들면 여기에 보여요</div>;
+  if (!viewId) body = <div className="view3d-empty">[설계 목록]에서 설계를 고르세요</div>;
   else if (failed) body = <div className="view3d-empty">설계를 못 받았어요</div>;
-  else if (!rules) body = <div className="view3d-empty">블록 크기(robot.yaml)를 아직 못 받았어요</div>;
+  else if (!rules) body = <div className="view3d-empty">받는 중…</div>;
   else if (design) body = <Preview3D items={items} blockMm={rules.block_size_mm} frameKey={design.design_id} dark={dark} />;
   else body = <div className="view3d-empty">받는 중…</div>;
 
@@ -160,7 +160,7 @@ export default function DesignView({ robot, viewId, rules, dark, onPick, onLog, 
       )}
       {/* 스캔 설계 — AI 가 바탕(부모)을 고른 까닭(10/14 PL · 민범진). 저장하면 곧 출발 대기라 스캔 칸이 닫혀서 여기 둔다 */}
       {design?.made_by === 'scan' && design.ai_reason && (
-        <p className="muted small">바탕 {designName(design.parent_id)} — AI가 고른 까닭: {design.ai_reason}</p>
+        <p className="muted small clamp2" title={design.ai_reason}>바탕 {designName(design.parent_id)} — {design.ai_reason}</p>
       )}
       {pickerOpen && <DesignTree picked={viewId} onRobot={robotDesign} onPick={onPick} />}
       {body}
@@ -198,7 +198,7 @@ export default function DesignView({ robot, viewId, rules, dark, onPick, onLog, 
                 : opening
                   ? '그리퍼를 여는 중 — 끝나면 누를 수 있어요'
                 : held
-                  ? '그리퍼가 블록을 쥐고 있어요 — 왼쪽 안내대로 먼저 빼세요'
+                  ? '그리퍼에 블록이 있어요 — 왼쪽 안내를 보세요'
                 : !robot.bridge
                   ? '로봇 PC 연결 끊김'
                   : `지금은 조립할 수 없어요(${stateName(st?.state) || '연결 전'})`}

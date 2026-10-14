@@ -54,6 +54,14 @@ export function partName(partId?: string | null, designId?: string | null): stri
   return m ? `${ROLE[m[1]]?.ko ?? m[1]} ${Number(m[2])}-${Number(m[3])}` : rest;
 }
 
+const PART_IN_TEXT = /(\d{3}(?:_[A-Z]+)+_V\d{3})_([A-Z]+(?:_[A-Z]+)?_\d{3}_\d{2})/g;
+const DESIGN_IN_TEXT = /\d{3}(?:_[A-Z]+)+_V\d{3}/g;
+
+/** 로봇 · backend 가 보낸 글 속 부품 · 설계 ID 를 사람이 읽는 이름으로(작업 관리자 글은 고치지 않고 화면에서만 —
+ *  '001_CHAIR_BENCH_V000_LEG_001_03 를 집으러 갑니다' → '다리 1-3 를 집으러 갑니다', 10/14 17시 PL: 화면에 코드 안 씀) */
+export const readable = (text?: string | null): string =>
+  (text ?? '').replace(PART_IN_TEXT, (_, d: string, p: string) => partName(`${d}_${p}`, d)).replace(DESIGN_IN_TEXT, (d) => designName(d));
+
 export const MADE_KO: Record<string, string> = { cad: '도면', web: '웹 글', voice: '음성', scan: '스캔' };
 
 const STATE_KO: Record<string, string> = {
@@ -88,30 +96,29 @@ export function checkReasonKo(detail: string): string {
   return table.find(([k]) => detail.includes(k))?.[1] ?? '규칙 위반';
 }
 
-// ---------- 거절 · 실패 글(10/14 PL — '무엇이 문제 → 무엇을 확인 → 어떻게 확인' 한 줄) ----------
-// 화면이 직접 만드는 글만 여기. 작업 관리자(state/2 · 응답 message)와 backend 가 보낸 글은 고치지 않고 그대로 보인다.
-export const URGENT_STOP = '급한 정지는 로봇 PC Ctrl+C · 펜던트';
+// ---------- 거절 · 실패 글 — '무엇이 문제 — 무엇을 할지' 짧은 한 줄(10/14 17시 PL: 명령 · 프로그램 이름 · 코드는 화면에 안 씀) ----------
+// 화면이 직접 만드는 글만 여기. 작업 관리자(state/2 · 응답 message)가 보낸 글은 고치지 않고 그대로 보인다.
+export const URGENT_STOP = '급하면 펜던트 비상정지';
 // 시간 초과 뒤 정지 확인 전 ERROR(state/2 message_id stop_pending — 10/14 PL 안 A): 작업 관리자가 stopped 신호 전엔 [다시 시작]을 무시한다.
 // [정지](또는 펜던트)로 stopped 를 받게 하면 STOPPED → 그 뒤 [다시 시작]이 된다
-export const STOP_PENDING = '정지 확인 전이라 다시 시작이 안 돼요 → 로봇이 섰는지 → [정지]를 누른 뒤 [다시 시작]';
+export const STOP_PENDING = '정지 확인 전이에요 — [정지]를 누른 뒤 [다시 시작]';
 // 정지가 아닌데 그리퍼가 블록을 쥐고 있음 — 작업 관리자가 시작 점검에서 거절한다. [그리퍼 열기]는 정지(STOPPED)에서만 받는다(W183)
-export const GRIP_HELD = '그리퍼가 블록을 쥐고 있어요 → 조립 · 스캔 전에 블록을 빼야 해요 → 블록을 받칠 사람과 함께 [정지] → [그리퍼 열기] → [다시 시작]';
+export const GRIP_HELD = '그리퍼가 블록을 쥐고 있어요 — 블록을 받치고 [정지] → [그리퍼 열기]';
 // 음성 시동어(#171 voice.py — 마이크 버튼 뒤 이 말을 들어야 녹음을 시작한다)
 export const WAKE_WORD = 'hello rokey'; // 영어로 보임(10/14 PL)
-export const NO_WEB = `웹 서버(backend)와 연결이 안 돼요 → 웹 PC 의 web 컨테이너가 켜져 있는지 → 위 연결 표시의 '웹 서버' 점, 웹 PC 에서 docker compose ps · logs web. ${URGENT_STOP}`;
+export const NO_WEB = '웹 서버와 연결이 안 돼요 — 웹 PC가 켜져 있는지 보세요';
 
 /** 거절 까닭 코드 → 안내(응답에 message 가 없을 때). '' = 맞는 코드 없는 거절 — 까닭 글은 작업 관리자가 상태 칸에 보냄(E-111 A3) */
 const REJECT_HINT: Record<string, string> = {
-  STOPPED: '정지 잠금이 걸려 있어요 → 정지 까닭이 없어졌는지 → 위 상태 칸의 정지 까닭을 확인하고 왼쪽 [다시 시작]',
-  BUSY: '로봇이 다른 일을 하는 중이에요 → 지금 상태가 이 버튼을 받는지 → 위 상태 칸을 보고, 끝난 뒤 다시',
-  TIMEOUT: "로봇 PC 답이 늦어요 → 명령이 늦게 먹었는지 · 로봇 PC 가 살아 있는지 → 위 상태 칸이 바뀌었는지, 연결 표시의 '로봇 PC' 점",
-  ERROR: '로봇 PC 가 처리하다 실패했어요 → 작업 관리자 · 다리가 살아 있는지 → 로봇 PC 터미널 로그',
-  '': '작업 관리자가 받지 않았어요 → 까닭 글 → 위 상태 칸',
+  STOPPED: '멈춤 중이에요 — 원인을 없애고 [다시 시작]',
+  BUSY: '로봇이 다른 일을 하는 중이에요 — 끝난 뒤 다시',
+  TIMEOUT: '로봇 PC 답이 늦어요 — 상태 칸이 바뀌었는지 보세요',
+  ERROR: '로봇 PC에서 실패했어요 — 상태 칸을 보세요',
+  '': '로봇이 받지 않았어요 — 상태 칸을 보세요',
 };
 
-/** 버튼 하나의 거절 한 줄. message 가 있으면 그대로(보낸 쪽 글), 없으면 까닭 코드 안내. 입력: 버튼 이름 · 응답(success false) */
+/** 버튼 하나의 거절 한 줄. message 가 있으면 그대로(보낸 쪽 글), 없으면 까닭 코드 안내(코드 자체는 부르는 쪽 title 로만). 입력: 버튼 이름 · 응답(success false) */
 export function rejectText(label: string, r: { reason?: string | null; message?: string | null }): string {
-  if (r.message) return `${label} 안 됨 — ${r.message}`;
-  const hint = REJECT_HINT[r.reason ?? ''] ?? `까닭 코드 ${r.reason} → 위 상태 칸 → 로봇 PC 작업 관리자 터미널 로그`;
-  return `${label} 안 됨 — ${hint}`;
+  if (r.message) return `${label} 안 됨 — ${readable(r.message)}`;
+  return `${label} 안 됨 — ${REJECT_HINT[r.reason ?? ''] ?? REJECT_HINT['']}`;
 }

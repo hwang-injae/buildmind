@@ -28,7 +28,7 @@ async function post(path: string, body?: unknown): Promise<CmdResult> {
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: ctrl.signal,
     });
-    if (!res.ok) return { success: false, reason: 'ERROR', message: `웹 서버가 오류로 답했어요(${res.status}) → backend 로그 → 웹 PC 에서 docker compose logs web` };
+    if (!res.ok) return { success: false, reason: 'ERROR', message: `웹 서버 오류(${res.status}) — 잠시 뒤 다시` };
     return (await res.json()) as CmdResult;
   } catch {
     return { success: false, reason: 'ERROR', message: NO_WEB };

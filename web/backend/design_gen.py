@@ -139,7 +139,7 @@ class DesignGenerator:
                 from openai import OpenAI
                 self._client = OpenAI(base_url=LLM_URL, api_key='claude-bridge', timeout=CALL_TIMEOUT_S, max_retries=CALL_RETRIES)
             except Exception as e:   # noqa: BLE001 — 라이브러리 없음 등 모두 '생성 못 함'으로
-                raise GenError('GEN_FAILED', f'설계 AI 를 부를 준비를 못 했어요({type(e).__name__}) → 웹 backend 에 openai 라이브러리가 있는지 → 웹 PC 에서 docker compose logs web') from e
+                raise GenError('GEN_FAILED', '설계 AI 중계를 부를 준비를 못 했어요 — 웹 PC를 확인하세요') from e   # openai 라이브러리 없음 등
         return self._client
 
     # ---------- Template 이름 · 스캔 AI 판단 기록 ----------
@@ -254,11 +254,11 @@ class DesignGenerator:
                                         for c in cands])
                 if cands and all(c['check']['service_failed'] for c in cands):
                     first = cands[0]['check']
-                    raise GenError(first['reason'] or 'ERROR', '설계 검사를 못 했어요 → 로봇 PC 작업 관리자(검사 묶음)와 다리가 살아 있는지 → 화면 연결 표시의 로봇 PC 점, 로봇 PC 터미널 로그',
+                    raise GenError(first['reason'] or 'ERROR', '설계 검사를 못 했어요 — 로봇 PC 연결을 확인하세요',
                                    [{'part': None, 'reason': first['reason'], 'detail': first['message'] or ''}])
                 invalid = [e for c in cands for e in c['check']['errors'] if e.get('reason') == 'REQUEST_INVALID']
                 if invalid:                                  # 웹 쪽 잘못(base_recipe 등) — 다시 만들어도 같다(D10)
-                    raise GenError('REQUEST_INVALID', '검사 요청 오류(웹 쪽 잘못 — 다시 만들지 않아요) → 고른 설계의 기본 설계(V000) 레시피가 저장소에 맞게 있는지 → backend 로그 · 화면 설계 목록의 기본 설계', invalid)
+                    raise GenError('REQUEST_INVALID', '검사 요청 오류(웹) — 기본 설계를 다시 등록하세요', invalid)
                 passed += [c for c in cands if c['check']['ok']]
                 failed = [c for c in cands if not c['check']['ok']]
                 need = N_CANDIDATES - len(passed)
@@ -503,10 +503,10 @@ class DesignGenerator:
                                               gen_log=fill.get('gen_log'))
             errors = chk['errors']
             if chk['service_failed']:
-                raise GenError(chk['reason'] or 'ERROR', '설계 검사를 못 했어요 → 로봇 PC 작업 관리자(검사 묶음)와 다리가 살아 있는지 → 화면 연결 표시의 로봇 PC 점, 로봇 PC 터미널 로그',
+                raise GenError(chk['reason'] or 'ERROR', '설계 검사를 못 했어요 — 로봇 PC 연결을 확인하세요',
                                [{'part': None, 'reason': chk['reason'], 'detail': chk['message'] or ''}])
             if any(e.get('reason') == 'REQUEST_INVALID' for e in errors):
-                raise GenError('REQUEST_INVALID', '검사 요청 오류(웹 쪽 잘못 — 다시 채우지 않아요) → 부모 Template 의 기본 설계(V000) 레시피가 저장소에 맞게 있는지 → backend 로그 · 화면 설계 목록의 기본 설계', errors)
+                raise GenError('REQUEST_INVALID', '검사 요청 오류(웹) — 기본 설계를 다시 등록하세요', errors)
             kinds = {e.get('kind') for e in errors}
             if not errors or not kinds <= {'ai_fields', 'template'} or attempt > SCAN_REFILLS:
                 break
@@ -599,7 +599,7 @@ class DesignGenerator:
         if deadline is not None:
             left = deadline - t0
             if left <= 0:
-                raise GenError('GEN_FAILED', f'생성 상한 {GEN_LIMIT_S // 60}분을 넘었어요 → 요청이 이 모양에서 너무 큰 변화인지 → 요청을 짧게 · 한 가지만 바꿔 다시', final=True)
+                raise GenError('GEN_FAILED', f'{GEN_LIMIT_S // 60}분 안에 못 만들었어요 — 한 가지만 바꿔 다시 요청하세요', final=True)
             kw['timeout'] = min(CALL_TIMEOUT_S, left)
         try:
             resp = self.client.chat.completions.create(model=model, temperature=0, messages=messages,
@@ -610,13 +610,13 @@ class DesignGenerator:
             log['calls'].append({'model': model, 'elapsed_s': round(self.clock() - t0, 2), 'error': f'{type(e).__name__}: {e}'})
             name, status, body = type(e).__name__, getattr(e, 'status_code', None), getattr(e, 'body', None)
             if name == 'APITimeoutError' or status == 504:   # 한 번이 1 ~ 3분이라 다시 불러도 같은 길이로 멈춘다
-                raise GenError('GEN_FAILED', '설계 AI 가 시간 안에 답하지 않았어요 → 요청이 너무 크거나 Claude 가 느린지 → 요청을 짧게 해서 다시, 계속되면 웹 PC 중계(claude_bridge) 로그', final=True) from e
+                raise GenError('GEN_FAILED', '설계 AI가 시간 안에 답하지 않았어요 — 요청을 짧게 해서 다시', final=True) from e
             if name == 'APIConnectionError':   # 중계가 안 떠 있음 — 기다려도 안 풀린다
-                raise GenError('GEN_FAILED', '설계 AI 중계(claude_bridge)가 꺼져 있어요 → 웹 PC 호스트에서 중계가 켜져 있는지 → 웹 PC 에서 python3 web/claude_bridge.py --check', final=True) from e
+                raise GenError('GEN_FAILED', '설계 AI 중계가 꺼져 있어요 — 웹 PC에서 중계를 켜세요', final=True) from e   # web/claude_bridge.py --check
             if status == 429:   # Claude 구독 사용 한도(중계가 한도 글만 429 로 — E-99 덧붙임). 'limit' 낱말로는 가르지 않는다(다른 실패를 한도로 오해)
-                raise GenError('GEN_FAILED', 'Claude 사용 한도에 걸렸어요 → 웹 PC 에 로그인된 Claude 계정의 한도 → 중계 로그의 한도 글, 그동안은 기본 · 저장 설계로 조립', final=True) from e
+                raise GenError('GEN_FAILED', 'Claude 사용 한도에 걸렸어요 — 그동안은 저장된 설계로 조립하세요', final=True) from e
             why = str(body.get('message') or '')[:200] if isinstance(body, dict) else ''
-            raise GenError('GEN_FAILED', f'설계 AI 실패({why}) → 중계 · Claude 상태 → 웹 PC 중계(claude_bridge) 로그' if why else f'설계 AI 호출 실패({name}) → 중계가 살아 있는지 → 웹 PC 에서 python3 web/claude_bridge.py --check, 잠시 뒤 다시') from e
+            raise GenError('GEN_FAILED', f'설계 AI 호출이 실패했어요 — {why or "잠시 뒤 다시"}') from e   # 예외 이름(name)은 생성 기록에만
         try:
             msg = resp.choices[0].message
             call = {'model': model, 'elapsed_s': round(self.clock() - t0, 2), 'content': msg.content,

@@ -14,7 +14,7 @@ import ScanRecommend from '@/components/ScanRecommend';
 import ThemeToggle from '@/components/ThemeToggle';
 import WristCamera from '@/components/WristCamera';
 import * as api from '@/lib/api';
-import { setDisplayNames, setTemplateNames } from '@/lib/names';
+import { readable, setDisplayNames, setTemplateNames } from '@/lib/names';
 import { useTheme } from '@/lib/theme';
 import type { Rules } from '@/lib/types';
 import { useRobot } from '@/lib/ws';
@@ -76,7 +76,7 @@ export default function Home() {
               <section className="panel">
                 <div className="panel-head">
                   <h2>추천 설계</h2>
-                  <span className="muted small">저장된 설계 중 스캔과 가장 비슷한 것 — AI 없이 바로 조립</span>
+                  <span className="muted small">스캔과 가장 비슷한 저장 설계</span>
                 </div>
                 <ScanRecommend robot={robot} onView={setPicked} onLog={addLog} />
               </section>
@@ -87,12 +87,12 @@ export default function Home() {
         <details className="panel log-panel">
           <summary>
             <h2>기록</h2>
-            <span className="muted small">{robot.log[0] ? robot.log[0].text : '아직 없음'}</span>
+            <span className="muted small">{robot.log[0] ? readable(robot.log[0].text) : '아직 없음'}</span>
           </summary>
           <ol className="log">
             {robot.log.map((l, i) => (
               <li key={`${l.t}-${i}`} className={`log-${l.kind}`}>
-                <time>{new Date(l.t).toTimeString().slice(0, 8)}</time> {l.text}
+                <time>{new Date(l.t).toTimeString().slice(0, 8)}</time> {readable(l.text)}
               </li>
             ))}
             {robot.log.length === 0 && <li className="muted">아직 없음</li>}

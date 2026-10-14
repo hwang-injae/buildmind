@@ -55,7 +55,7 @@ export default function DesignTree({ picked, onRobot, onPick }: { picked: string
   }, [path.length]);
 
   if (rows === undefined) return <div className="tree muted">설계 목록 받는 중…</div>;
-  if (rows === null) return <div className="tree bad-text">설계 목록을 못 받았어요 — 웹 서버(backend)를 확인하세요</div>;
+  if (rows === null) return <div className="tree bad-text">설계 목록을 못 받았어요 — 웹 서버 연결을 확인하세요</div>;
   if (!rows.length) return <div className="tree muted">저장된 설계가 없어요</div>;
 
   const item = (d: DesignSummary) => ({
