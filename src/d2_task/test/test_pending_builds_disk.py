@@ -5,6 +5,7 @@
 파일 쓰기는 기록 스레드가 하므로 파일을 보기 전에 flush 로 다 처리될 때까지 기다린다.
 """
 import json
+import logging
 import os
 import threading
 import time
@@ -16,14 +17,6 @@ from d2_task.task_manager import TaskManager
 from test_build_saving import OK_JSON, RETRY_S
 from test_run_logger import Warnings
 from test_task_manager import CFG, SAFE_OK, FakeIO, drive
-
-
-@pytest.fixture
-def warns():
-    """d2_task 로거 경고 글자를 모은다 — pytest caplog 대신. ROS 셸(PYTHONPATH 에 /opt/ros/jazzy)에서는 ROS pytest 플러그인이 올라와
-    caplog 가 비고 경고가 stderr 로만 나가 시험 7개가 실패했다(10/14 박진용 발견). test_run_logger.Warnings 처럼 로거에 직접 단다."""
-    with Warnings() as w:
-        yield w
 
 
 def make(tmp_path, opener=open, clock=time.monotonic):
@@ -370,7 +363,29 @@ def test_pending이_없으면_메모리_요약으로_원자적으로_보존한�
     assert m._rejected_unsaved == {}
 
 
-def test_기존_거절_자료는_다른_내용으로_덮어쓰지_않는다(tmp_path, warns):
+
+class _Warn(Warnings):
+    """test_run_logger 의 직접 핸들러(Warnings)에 caplog.text 와 같은 모음 글자를 더한다(ROS 환경은 caplog 가 비어 직접 단다)."""
+
+    @property
+    def text(self):
+        return '\n'.join(self.texts)
+
+
+@pytest.fixture
+def warn():
+    """d2_task 로거의 경고를 직접 핸들러로 모은다. 시험 뒤 핸들러 · 레벨 · propagate · disabled 를 시험 전 값으로 되돌린다."""
+    lg = logging.getLogger('d2_task')
+    saved = (lg.level, lg.propagate, lg.disabled, list(lg.handlers))
+    try:
+        with _Warn() as w:
+            yield w
+    finally:
+        lg.setLevel(saved[0])
+        lg.propagate, lg.disabled = saved[1], saved[2]
+        lg.handlers[:] = saved[3]
+
+def test_기존_거절_자료는_다른_내용으로_덮어쓰지_않는다(tmp_path, warn):
     m, io, log = make(tmp_path)
     a = assemble(m, io)
     assert log.flush(5.0)
@@ -380,14 +395,14 @@ def test_기존_거절_자료는_다른_내용으로_덮어쓰지_않는다(tmp_
     m.build_result(a, True, REJECT)
     assert log.flush(5.0)
     assert (tmp_path / 'rejected' / f'{a}.json').read_text(encoding='utf-8') == '{"old": 1}'
-    assert files(tmp_path) == [f'{a}.json'] and '덮어쓰지 않고' in ' '.join(warns.texts)
+    assert files(tmp_path) == [f'{a}.json'] and '덮어쓰지 않고' in warn.text
     assert a in m._rejected_unsaved                                 # 실제 보관은 안 됐으니 메모리 요약을 유지한다
     assert make(tmp_path)[0].pending_builds == {}                   # rejected 에 있는 run 은 다시 보내지 않는다
 
 
 @pytest.mark.parametrize('has_pending', [True, False])
 @pytest.mark.parametrize('old_text', ['DIFFERENT', '{깨진'])
-def test_기존_거절_자료가_다르거나_읽을_수_없으면_메모리_요약을_지우지_않는다(tmp_path, warns, has_pending, old_text):
+def test_기존_거절_자료가_다르거나_읽을_수_없으면_메모리_요약을_지우지_않는다(tmp_path, warn, has_pending, old_text):
     import copy
     m, io, log = make(tmp_path)
     a = assemble(m, io)
@@ -406,7 +421,7 @@ def test_기존_거절_자료가_다르거나_읽을_수_없으면_메모리_요
     assert old_path.read_text(encoding='utf-8') == old_text         # 기존 거절 자료는 그대로
     assert m._rejected_unsaved == {a: current}                      # 현재 요약은 메모리에 남는다
     assert files(tmp_path) == ([f'{a}.json'] if has_pending else [])
-    assert '덮어쓰지 않고' in ' '.join(warns.texts)
+    assert '덮어쓰지 않고' in warn.text
     assert m.builds_to_send(100.0, RETRY_S) == [] and a not in m.pending_builds   # 네트워크 재송신 없음
     m._clock = lambda: 1e9
     m.builds_to_send(100.0, RETRY_S)                                # 보관 재시도는 이어진다
@@ -452,7 +467,7 @@ def test_비표준_JSON_상수가_든_응답은_영구_거절로_오인하지_�
     assert log.flush(5.0) and rejected(tmp_path) == [] and a in m.pending_builds and m._rejected_unsaved == {}
 
 
-def test_rename이_실패하면_네트워크_재전송_없이_자료를_보존하고_복구뒤_보관한다(tmp_path, monkeypatch, warns):
+def test_rename이_실패하면_네트워크_재전송_없이_자료를_보존하고_복구뒤_보관한다(tmp_path, monkeypatch, warn):
     m, io, log = make(tmp_path)
     a = assemble(m, io)
     assert log.flush(5.0)
@@ -465,7 +480,7 @@ def test_rename이_실패하면_네트워크_재전송_없이_자료를_보존�
     m.builds_to_send(0.0, RETRY_S)
     m.build_result(a, True, REJECT)
     assert log.flush(5.0)
-    assert files(tmp_path) == [f'{a}.json'] and a in m._rejected_unsaved and '거절 보관' in ' '.join(warns.texts)
+    assert files(tmp_path) == [f'{a}.json'] and a in m._rejected_unsaved and '거절 보관' in warn.text
     assert m.builds_to_send(100.0, RETRY_S) == []                   # 보관 재시도는 하되 네트워크로는 안 보낸다
     monkeypatch.setattr(os, 'replace', real)
     m._clock = lambda: 1e9                                          # retry_s 가 지난 것으로
@@ -488,7 +503,7 @@ def test_큐가_가득해도_재전송하지_않고_복구뒤_보관한다(tmp_p
     assert log.flush(5.0) and rejected(tmp_path) == [f'{a}.json'] and m._rejected_unsaved == {}
 
 
-def test_log_dir이_비면_파일_성공이라_하지_않고_경고하며_메모리에_둔다(warns):
+def test_log_dir이_비면_파일_성공이라_하지_않고_경고하며_메모리에_둔다(warn):
     io = FakeIO()
     m = TaskManager(CFG, io, RunLogger(''))
     io.manager = m
@@ -497,5 +512,5 @@ def test_log_dir이_비면_파일_성공이라_하지_않고_경고하며_메모
     a = assemble(m, io)
     m.builds_to_send(0.0, RETRY_S)
     assert m.build_result(a, True, REJECT) is False
-    assert a in m._rejected_unsaved and '보존하지 못한다' in ' '.join(warns.texts)
+    assert a in m._rejected_unsaved and '보존하지 못한다' in warn.text
     assert m.builds_to_send(100.0, RETRY_S) == []
