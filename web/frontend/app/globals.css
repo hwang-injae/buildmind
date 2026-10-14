@@ -244,6 +244,8 @@ button.reset:hover:not(:disabled) { filter: brightness(1.08); border-color: var(
 .btn-row { display: flex; gap: 10px; }
 .btn-row > button { flex: 1; }
 .btn-row.safety { padding-top: 0; }
+/* [말로 정지(듣기 시작)] — 듣기만 시작하는 버튼이라 빨간 [정지]와 헷갈리지 않게 점선 테두리 · 보통 글자색 · 작은 높이 */
+button.voice-stop { min-height: 36px; padding: 6px 12px; font-size: 14px; border-style: dashed; background: var(--btn-bg); }
 .head-btn { margin-left: auto; min-height: 36px; padding: 6px 14px; font-size: 14px; }
 .head-btn.list-btn { border-color: var(--primary); color: var(--primary); }
 .name-btn ~ .list-btn { margin-left: 0; } /* [이름 고치기]가 오른쪽 묶음을 시작 — 목록 버튼은 그 옆에 붙음 */

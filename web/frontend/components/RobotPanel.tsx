@@ -1,6 +1,9 @@
 'use client';
 // 로봇 패널 — 상태 · 로봇 설계 · 버튼 · 그리퍼 (web/README 1 · 3장, W047). 진행도는 위쪽 가운데(ProgressTop).
-// 본문 맨 위 가로 한 줄(10/14 저녁 PL): 상태 | 로봇 설계 · 그리퍼 | 스캔 · 취소 | 정지 · 다시 시작 — 안내 · 거절 글은 그 아래 줄.
+// 본문 맨 위 가로 한 줄(10/14 저녁 PL): 상태 | 로봇 설계 · 그리퍼 | 스캔 · 취소 · 말로 정지 | 정지 · 다시 시작 — 안내 · 거절 글은 그 아래 줄.
+// [🎤 말로 정지(듣기 시작)](민범진 W046 요청 · 10/14 20시 PL '가'): 생성 칸 마이크와 같은 POST /api/voice/listen 한 번 — 로봇을 멈추지 않고
+// 듣기만 시작한다(그래서 빨간 [정지]와 이름 · 색 · 자리를 다르게). voice.py 가 '정지'를 들으면 정지 요청(STOP_VOICE)을 보내 잠금이 걸리고,
+// 다른 말이면 intent 가 오는데 이 버튼으로 들은 말은 쓰지 않는다(생성 칸도 자기가 듣는 중일 때만 받음).
 // 버튼 하나 = REST 하나(lib/api). 판단은 로봇 쪽이 한다 — 여기서는 상태표대로 보이고 켜고 끄기만 한다. 자동 재전송 없음.
 // 조립 시작은 오른쪽 설계 3D 의 [조립] 하나(보는 곳에서 보냄 — select_design + start, 10/13 PL). 여기에는 [출발]이 없다.
 // 그때만 쓰는 버튼은 그때만 보인다(10/10 황인재): [계속] = 공급 · 웹 연결을 기다릴 때, [다시 시작] = 멈췄을 때. 긴 설명은 title(마우스).
@@ -10,14 +13,15 @@
 // [그리퍼 열기] = 잠김 + 그리퍼가 쥐고 있을 때만 — 한 사람이 블록을 받쳤는지 확인한 뒤 cmd gripper_open(작업 관리자가 STOPPED 일 때만 연다).
 // 여는 동안(state/2 message_id gripper_opening — 10/13 18시 PL)은 조립 · 스캔 · 다시 열기를 막는다(lib/ws gripperOpening — 새로고침해도
 // retained 로 그대로). 여는 중 · 끝(gripper_done) 문구는 작업 관리자 message 그대로 보인다 — 실패 까닭이 거기 있다(10/13 20시 PL).
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as api from '@/lib/api';
-import { GRIP_HELD, STOP_PENDING, designName, readable, rejectText, stateName, stopReasonKo } from '@/lib/names';
-import type { CmdResult } from '@/lib/types';
+import { GRIP_HELD, STOP_PENDING, WAKE_WORD, designName, readable, rejectText, stateName, stopReasonKo } from '@/lib/names';
+import type { CmdResult, Intent } from '@/lib/types';
 import { gripperOpening, holdingBlock, type Robot } from '@/lib/ws';
 import CountUp from './CountUp';
 
 const has = (list: string[], s?: string) => !!s && list.includes(s);
+const VOICE_STOP_MS = 20000; // 말로 정지 듣는 시간 — 생성 칸 LISTEN_MS 와 같게(시동어 기다림 voice.py WAKE_WAIT_S 6초 + 말 · 받아 적기)
 
 interface Props {
   robot: Robot;
@@ -35,6 +39,9 @@ export default function RobotPanel({ robot, onLog }: Props) {
   const [clearNotice, setClearNotice] = useState(false); // 초기화 뒤 '블록을 치워 주세요' 알림(잠금 유지 — [정리 끝]까지)
   const [noticeErr, setNoticeErr] = useState('');
   const [askOpen, setAskOpen] = useState(false); // [그리퍼 열기] 확인 — 블록이 떨어지지 않게 사람이 받쳤나
+  const [vListening, setVListening] = useState(false); // [말로 정지] 듣는 중
+  const [vNote, setVNote] = useState(''); // 말로 정지가 안 됐을 때 한 줄(다른 말을 들음 · 시간 넘음)
+  const vFrom = useRef<Intent | null>(null); // 누를 때 이미 있던 음성 알림 — 그 뒤에 온 것만 본다
 
   async function send(label: string, call: () => Promise<CmdResult>, isStop = false): Promise<CmdResult> {
     isStop ? setStopping(true) : setBusy(label);
@@ -67,6 +74,32 @@ export default function RobotPanel({ robot, onLog }: Props) {
   // 잠김 중 상태 칸에 더 보일 작업 관리자 글 — 일반 정지 알림(message_id stopped — 정지 까닭 줄과 같은 뜻)만 빼고 그대로: 거절 까닭
   // (message_id 없음 + 글 — E-111 A3) · 그리퍼 열기 · 초기화 안내. 전엔 잠김 중 거절 까닭이 어디에도 안 보였다(10/14 한석형 · PL)
   const taskMsg = robot.state?.message_id !== 'stopped' ? readable(robot.state?.message) : null;
+
+  /** [말로 정지]: 듣기 한 번 시작(POST /api/voice/listen). 바깥 영향: 웹 PC 마이크가 켜짐 — 로봇은 voice.py 가 '정지'를 들었을 때만 멈춘다 */
+  async function voiceStop() {
+    setVNote('');
+    vFrom.current = robot.intent;
+    const r = await send('말로 정지 듣기', api.voiceListen);
+    if (r.success) setVListening(true);
+  }
+  const voiceStopped = locked && robot.safety?.reason === 'STOP_VOICE';
+  useEffect(() => {
+    if (!vListening) return;
+    if (voiceStopped) return setVListening(false); // 들었고 멈췄다 — 상태 칸이 '음성 "정지"로 멈췄어요'
+    const it = robot.intent;
+    if (it && it !== vFrom.current) {
+      setVListening(false); // 정지가 아닌 말 — 이 버튼으로 들은 말은 쓰지 않는다
+      setVNote(`"${it.text ?? ''}"(으)로 들었어요 — 정지가 아니에요. 다시 눌러 주세요`);
+    }
+  }, [vListening, voiceStopped, robot.intent]);
+  useEffect(() => {
+    if (!vListening) return;
+    const t = setTimeout(() => {
+      setVListening(false);
+      setVNote(`못 들었어요 — "${WAKE_WORD}" → 삑 → "정지"`);
+    }, VOICE_STOP_MS);
+    return () => clearTimeout(t);
+  }, [vListening]);
 
   /** [초기화]: cancel → 받으면 '블록을 치워 주세요'(잠금 유지). 바깥 영향: 이번 조립 기록을 닫는다(로봇은 안 움직임) */
   async function reset() {
@@ -147,6 +180,11 @@ export default function RobotPanel({ robot, onLog }: Props) {
               {label('취소', '취소')}
             </button>
           </div>
+          <button className="mic voice-stop" disabled={!!busy || vListening || locked || !robot.ws || !robot.broker}
+            title={`누른 뒤 "${WAKE_WORD}" → 삑 → "정지"라고 말하면 멈춰요 — 이 버튼은 듣기만 시작해요`}
+            onClick={voiceStop}>
+            {vListening ? '듣는 중…' : label('말로 정지 듣기', '🎤 말로 정지(듣기 시작)')}
+          </button>
         </div>
 
         <div className="btn-row safety">
@@ -170,6 +208,8 @@ export default function RobotPanel({ robot, onLog }: Props) {
         </div>
       </div>
 
+      {vListening && <p className="hint">&quot;{WAKE_WORD}&quot; → 삑 → &quot;정지&quot; ({VOICE_STOP_MS / 1000}초 안) — 급하면 빨간 [정지]</p>}
+      {vNote && !vListening && <p className="result warn">{vNote}</p>}
       {stopPending && <p className="result warn">{STOP_PENDING}</p>}
       {held && <p className="result warn">{GRIP_HELD}</p>}
 
