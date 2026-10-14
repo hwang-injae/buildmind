@@ -123,16 +123,17 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
     같은 Template 의 다른 설계는 store.list_designs 요약 + 도구 get_design(첫 차례 tool_choice required + 선택지 SKIP '안 읽음', 그다음 auto — 중계가 auto 면 도구를 버리고 바로 답해 읽기는 사실상 한 번, 10/14)으로 참고만(E-72)
     → 화면 "바탕 … · 참고한 설계 …". 도구 단계가 실패하면 examples_for(template)(바탕 설계는 뺌). 다른 설계가 없으면 도구 없이 바로
 ③  Claude 1번 호출 → 후보 3개(parts/4.0 — 부품마다 sequence · x · y · z · ori + role · group · stage · grasp, 구조화 출력 candidates[3])
-    프롬프트: 역할 · 옵션 목록(src/d2_task/d2_task/roles.json) · 잡기 규칙(SDD 6.6) · 설계 규칙 숫자(robot.yaml — 10/9 ①) · RAG 예시
+    프롬프트: 역할 · 옵션 목록(src/d2_task/d2_task/roles.json) · 잡기 규칙(SDD 6.6) · 설계 규칙 숫자(robot.yaml — 10/9 ①) · RAG 예시 · 요청 글에 [Template 규칙](그 V000 레시피 composition 의 count · revision 을 사람 말로 — 21번이 보는 것, 10/14 PL)
     칸이 빠지거나 틀리면 check_design이 CHECK_FAILED — 코드가 대신 채우지 않음(E-69 ②). OUT_OF_SCOPE → 안내, 끝
 ④  화면에 3개 3D + "디자인을 고르세요" — 동시에 check_design × 3(차례로, 각 3초 목표) → 오는 대로 합격 · min_margin / 불합격 회색 + detail
 ⑤  3개 다 불합격 → errors[].detail 피드백으로 ③부터(최대 2번) → 그래도 실패 GEN_FAILED(이유 + 기본 설계 권함)
+    생성 전체 상한 5분(GEN_LIMIT_S — 10/14 PL): 남은 시간 < 60초면 더 만들지 않음 · 호출 제한 = 남은 시간. 하나도 못 통과하면 떨어진 까닭(만들 수 없는 모양 등)을 보여 줌 — 더 만들기 호출이 시간 초과여도 그것으로 덮지 않음
 ⑥  사람이 1개 고름 → "설계도 만드는 중" → 그 후보의 check_result/3.0(recipe · placements)로 save_design
     (아직 검사 중이면 기다림) → 고른 1개만 designs(안 고른 후보는 메모리에서 버림 — E-84 ⑥, rejected 기록 없음) → "저장됨 — 위 설계 3D 에서 [조립]"
 ⑦  설계 3D 의 [조립] → hmi/command select_design → 작업 관리자가 get_design → READY → 이어서 hmi/command start(한 번 누름 — 10/13 PL)
 ```
 
-- 시간: LLM(Claude, 10/13 — 고르기 · 읽기 각 3초쯤 + 후보 작성 1 ~ 2분 반, 호출당 제한 260초 — 중계는 240초에 먼저 끊음) + 검사 3번(≈ 10초). 후보는 backend 메모리(`job_id`)에만 — 새로고침하면 사라져도 된다(저장 전).
+- 시간(생성 전체 상한 5분 — 10/14): LLM(Claude, 10/13 — 고르기 · 읽기 각 3초쯤 + 후보 작성 1 ~ 2분 반, 호출당 제한 260초 — 중계는 240초에 먼저 끊음) + 검사 3번(≈ 10초). 후보는 backend 메모리(`job_id`)에만 — 새로고침하면 사라져도 된다(저장 전).
 - `design_id` = `<Template ID>_V<3자리>`(10/10 E-84 · IRD 2장): Template = 기본 설계 4개 이름(`001_CHAIR_BENCH` …), 기본 = `_V000`, AI · 음성 · 스캔 = 같은 Template의 다음 번호(그 Template의 가장 큰 V + 1 — 부모와 상관없이 만든 차례). 부모 · 만든 방법은 `parent_id` · `made_by`에만, `version` = V 번호(`V001`). 저장 설계는 바뀌지 않는다(E-55 — 고치면 다음 번호). `gen_path` 칸 없음(E-71).
 - **ID는 검사 전에 정한다**(10/10, W111): 변환기 ①이 그 ID로 레시피 `design_id` · `part_id`를 만들기 때문. ③ 전에 `store.new_design_id(template, parent_id)`(AI = 고른 설계의 Template, 스캔 = 부모의 Template) → 후보 3개를 같은 ID로 `check_design` → 고른 1개만 `save_design`. 저장 때 다른 요청이 먼저 같은 ID를 쓰면 거절 → ID부터 다시 · 검사도 다시.
 - **연짝 잡기 = FLAT_LONG**(E-104, 10/13 PL — 설계 자체를 고침): `check_design`에 보내기 직전 `design_gen._check`가 연짝(같은 층에 긴 면을 맞댄 눕힌 블록 — `d2_task.row_grasp.row_orders`)을 찾아, 놓는 순간 손가락이 들어가는 블록(검사 묶음 `grasp_options`)만 `grasp`를 FLAT_LONG으로 바꾼다(생성 · 스캔 [저장] 둘 다). 검사 · 변환기 ①이 바뀐 잡기로 보고 placements `grasp_axis`도 LENGTH로 나온다. 안 되는 블록은 그대로(생성 기록 `row_grasp.kept`), AI가 처음 쓴 답은 생성 기록 원문에 그대로.

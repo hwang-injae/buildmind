@@ -627,3 +627,54 @@ def test_where_reads_only_part_numbers(good):
     assert DesignGenerator._where('5번 공중', by_seq, extent).startswith(' [5번 (')
     assert DesignGenerator._where('형식: 2번째 항목에 grasp 없음', by_seq, extent) == ''
     assert DesignGenerator._where('21번 범위: LEG 가운데 기준 좌우 대칭이 아니다 — 3번 부품의 맞은편 자리에 같은 부품이 없다', by_seq, extent) == ''
+
+
+def test_request_carries_template_rules(store, good):
+    """요청 글에 [Template 규칙](21번이 보는 V000 composition — 사람 말)이 들어간다(10/14 PL W108: 규칙을 모르고 떨어진 뒤에야 배워 10분 넘게 돌았다)."""
+    gen, client = make(store, [answer([good] * 3)])
+    gen.generate('벤치', BENCH)
+    request = client.calls[0]['messages'][1]['content']
+    assert '[Template 규칙' in request and '- 다리(LEG): 묶음 2개 · 놓기 = 눕혀 위로 쌓기' in request
+    assert '깊이(앞뒤) = SEAT.depth' in request and '- 좌판(SEAT): 묶음 1개' in request and '좌우 대칭' in request
+    assert '7. 사용자 메시지의 [Template 규칙]' in client.calls[0]['messages'][0]['content']
+
+
+class SlowOpenAI(FakeOpenAI):
+    """부를 때마다 가짜 시계를 step 초 앞으로(LLM 한 번이 그만큼 걸림) — 생성 상한 시험용."""
+
+    def __init__(self, replies, now, step):
+        super().__init__(replies)
+        self.now, self.step = now, step
+
+    def create(self, **kw):
+        self.now[0] += self.step
+        return super().create(**kw)
+
+
+def shape_bad(good):
+    """21번 형태에서 떨어지는 후보 — 다리 블록 하나를 다른 묶음(group 3)으로: 다리 묶음 3개 ≠ Template 2개."""
+    b = copy.deepcopy(good)
+    next(p for p in b if p['role'].startswith('LEG'))['group'] = 3
+    return b
+
+
+def test_generation_stops_at_five_minutes_and_shows_why(store, good):
+    """생성 전체 5분(GEN_LIMIT_S, 10/14 PL): 첫 후보에 250초 쓰면 남은 50초로는 더 만들지 않고, 떨어진 까닭(만들 수 없는 모양)에 상한 안내를 붙인다.
+    호출마다 시간 제한 = 남은 시간(상한 260초보다 작으면)."""
+    now = [0.0]
+    client = SlowOpenAI([answer([shape_bad(good)] * 3), answer([good] * 3)], now, 250)
+    gen = DesignGenerator(store, real_check(), RULES, client=client, clock=lambda: now[0])
+    with pytest.raises(GenError) as e:
+        gen.generate('다리를 하나 더', BENCH)
+    assert len(client.calls) == 1 and client.calls[0]['timeout'] == design_gen.CALL_TIMEOUT_S
+    assert e.value.code == 'TEMPLATE_SHAPE' and '5분' in e.value.message
+
+
+def test_regen_timeout_does_not_hide_why_candidates_failed(store, good):
+    """더 만들기 호출이 시간 초과여도 화면에는 앞 후보가 떨어진 까닭(만들 수 없는 모양)을 — '시간 안에 답하지 않았어요'로 덮지 않는다(10/14 W108)."""
+    class APITimeoutError(Exception):
+        pass
+    gen, client = make(store, [answer([shape_bad(good)] * 3), APITimeoutError('timed out')])
+    with pytest.raises(GenError) as e:
+        gen.generate('다리를 하나 더', BENCH)
+    assert e.value.code == 'TEMPLATE_SHAPE' and '더 만들기 실패' in e.value.message and len(client.calls) == 2
