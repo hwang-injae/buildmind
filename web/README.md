@@ -32,6 +32,7 @@ cd web/frontend && npm ci && npm run build            # → web/frontend/out —
 cd web/backend && MQTT_HOST=localhost python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
 # 로봇 PC 없이 시험: 가짜 로봇(MQTT) — 조립 · 정지 · 스캔 흉내
 python3 web/backend/mock_robot.py --step 1.0
+#   --timeout-at 3 = 3번째 부품 집기에서 시간 초과 · 정지 확인 대기 ERROR(stop_pending)를 한 번 흉내 — [다시 시작] 꺼짐 → [정지] → [다시 시작]
 # 화면을 고치며 개발(다시 빌드 없이): backend 를 CORS_ORIGINS=http://localhost:3000 으로 띄우고
 cd web/frontend && NEXT_PUBLIC_BACKEND=http://localhost:8000 npm run dev
 ```
@@ -70,7 +71,7 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 | 취소 | 같음 `{cmd: cancel}` | 같음 | 같음(`READY` · `ERROR` · `SCAN_REVIEW`) |
 | 초기화(정지 뒤) · 그리퍼 열기 | `STOPPED` · 잠김에서 [정지] 자리가 [초기화] → 한 번 더 확인 → `{cmd: cancel}` → 받으면 '블록을 모두 치워 주세요'(그리퍼 · 조립 자리 · 받침 위 — 10/13 20시 PL 문구, 잠금 유지) → [정리 끝] → `POST /api/robot/resume`. 잠김 + 그리퍼가 쥐고 있으면 [그리퍼 열기] → '블록을 손으로 받쳤나요?' → `{cmd: gripper_open}`(W183 · W184, 10/13 16시 PL) — 여는 중 · 끝(`gripper_opening` · `gripper_done`, 실패 까닭 포함) 문구는 작업 관리자 message 그대로 상태 칸 · 알림에 | 같음 | 작업 관리자가 STOPPED(잠김)에서 cancel 을 받아 기록만 STOPPED 로 닫고 잠금 유지(W183 한석형) → [정리 끝]의 resume 뒤 RECOVER → IDLE. gripper_open 은 STOPPED 일 때만 /d2/gripper/command(0.0865 m · 10 N). cancel 이 거절되면 잠금을 풀지 않음 |
 | 정지 | `POST /api/robot/stop` | `d2/safety/stop/req` (`source: web`, **reason 빈 값** → 정지 노드가 `STOP_WEB`) | `/d2/safety/stop` |
-| 다시 시작 | `POST /api/robot/resume` | `d2/safety/resume/req` | `/d2/safety/resume` |
+| 다시 시작 | `POST /api/robot/resume` | `d2/safety/resume/req` | `/d2/safety/resume` — 잠금 · `STOPPED` · `ERROR`에서 보임(ERROR 에서도 작업 관리자가 RECOVER 로 이어 감). 단 시간 초과 뒤 정지 확인 전 ERROR(`message_id` `stop_pending`, 10/14 PL 안 A)는 작업 관리자가 무시하므로 끄고 '[정지]를 누른 뒤 [다시 시작]' 안내 |
 | 상태 · 진행도 · 정지 · 그리퍼 · 스캔 결과 | `GET /api/robot/state`(지금 값) + `/ws` | `d2/task/state` · `progress` · `scan_result` · `d2/safety/state` · `d2/gripper/state`(retained) | 토픽 |
 | 로봇 PC 끊김 | `/ws` `{type: bridge_alive, alive}` | `d2/bridge/alive`(LWT `alive: false`) | — |
 | 버튼 기다림 시간 | `/ws` 붙을 때 `{type: timing, req_timeout_s}` — 화면은 이 값 + 3초까지 기다림(숫자를 화면 코드에 두지 않음, 10/9). 아직 못 받았으면 보내지 않고 안내 | — | — (`robot.yaml` `mqtt.req_timeout_s`) |

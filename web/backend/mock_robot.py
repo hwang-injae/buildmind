@@ -9,7 +9,9 @@
   safety/stop → 잠금 + STOPPED(reason STOP_WEB) · check_design → 진짜 검사 묶음(d2_task DesignChecker + 변환기 ① — task_node 와 같은 연결,
   ROS 없는 파일이라 웹 PC 에서도 돎) — AI 생성(W108) 을 로봇 PC 없이 실제 검사 결과로 시험한다
   safety/resume → 풀림. 진짜 작업 관리자와 같이 조립 중에 멈췄으면 RECOVER → CHECK → 놓인 블록은 건너뛰고 이어서,
-  조립 중이 아니었으면 IDLE(설계 다시 고름) — task_manager._recover · 복구 절차 문서 5장
+  조립 중이 아니었으면 IDLE(설계 다시 고름) — task_manager._recover · 복구 절차 문서 5장. 잠기지 않은 ERROR 에서도 같은 RECOVER(진짜 _error)
+- --timeout-at N: N번째 부품 집기에서 시간 초과 + 정지 요청 실패를 한 번 흉내 → ERROR(message_id stop_pending — 10/14 PL 안 A).
+  이때 [다시 시작]은 무시하고 출발 · 스캔은 STOPPED 로 거절, [정지]로 STOPPED 가 된 뒤 [다시 시작]이면 이어서(진짜 _timeout_pending 과 같음)
 - 가짜 조립 중 블록마다 가짜 손목 검출 그림(d2/vision/wrist_image, 640×480 JPEG — 진짜는 find_blocks 때 손목 비전이 그림). PIL 이 없으면 그림만 안 보냄
 - 스캔 중 자세마다 점군 미리보기(d2/vision/scan_preview JSON + scan_preview_cloud PLY — 이동 중 live · 촬영 때 capture 누적본, E-82).
 - 스캔 끝에 scan_result 바로 뒤 가짜 스캔 사진 · 점군(d2/vision/scan_image JPEG · scan_cloud PLY — 진짜는 다리가 파일을 읽어 보냄, IRD 10.5).
@@ -101,8 +103,9 @@ class MockRobot:
     입력: 화면 요청(…/req). 출력: 응답(…/res) · retained 상태 토픽. 실패: 모르는 설계 select · 모르는 명령은 success false · 빈 reason(진짜와 같게).
     """
 
-    def __init__(self, host, port, step_s):
-        """벤치 레시피를 읽어 두고(검사 응답 · 스캔 결과) MQTT 를 준비한다. step_s = 가짜 조립 · 스캔 한 단계 시간(초)."""
+    def __init__(self, host, port, step_s, timeout_at=0):
+        """벤치 레시피를 읽어 두고(검사 응답 · 스캔 결과) MQTT 를 준비한다. step_s = 가짜 조립 · 스캔 한 단계 시간(초).
+        timeout_at = 몇 번째 부품 집기에서 시간 초과를 한 번 흉내낼지(0 = 안 함)."""
         cfg = yaml.safe_load(ROBOT_YAML.read_text(encoding='utf-8'))
         self.cfg = cfg
         self.block_mm = [v * 1000 for v in cfg['block_size_m']]
@@ -118,6 +121,8 @@ class MockRobot:
         self.assembling = False       # 멈췄을 때 조립 중이었나 — 다시 시작 뒤 이어 갈지 정한다(진짜 작업 관리자와 같음)
         self.opening = False          # 그리퍼 여는 중 — 그동안 state/2 message_id 는 gripper_opening 그대로(10/13 18시 PL)
         self.placed = []              # 이번 조립(run)에서 놓은 블록 이름 — 다시 시작 뒤 건너뛴다
+        self.timeout_at = timeout_at
+        self.stop_pending = False     # 시간 초과 뒤 정지 확인 전(진짜 _timeout_pending) — stopped 를 받아야 풀림
         self.worker = None
         self.abort = threading.Event()
         self.c = make_mqtt_client('d2_mock_robot')
@@ -157,6 +162,8 @@ class MockRobot:
         with self.lock:
             if self.opening:     # 여는 동안 다른 알림으로 덮지 않는다(진짜 작업 관리자와 같게 — 화면이 이 값으로 버튼을 막음)
                 message_id = 'gripper_opening'
+            elif self.stop_pending and state == 'ERROR':   # 정지 확인 전 ERROR 동안은 거절 글이 나가도 stop_pending 그대로(화면이 [다시 시작]을 끔)
+                message_id = 'stop_pending'
             self.st.update(state=state, message=message, message_id=message_id, **kw)
             body = dict(schema='state/2', mode='auto', **self.st)
         self.pub('d2/task/state', body)
@@ -198,6 +205,10 @@ class MockRobot:
         for n, bid in enumerate(ids, 1):
             if bid in placed:
                 continue
+            if self.timeout_at == len(placed) + 1:
+                self.timeout_at = 0                    # 한 번만 — 복구 뒤엔 끝까지 간다
+                self._timeout(bid)
+                return
             jpeg = fake_wrist_jpeg(n, f'MOCK wrist  {n}/{len(ids)}  {bid}')
             if jpeg:
                 self.c.publish('d2/vision/wrist_image', jpeg, qos=0)   # 진짜와 같이 retained 아님(IRD 10.1)
@@ -209,6 +220,13 @@ class MockRobot:
             placed.append(bid)
             self._observe(planner, run_id, placed)      # 놓은 뒤 확인(VERIFY) 때마다
         self.set_state('DONE', '완성했어요', 'done', part_id=None)
+
+    def _timeout(self, bid):
+        """진짜 작업 관리자 _failed('TIMEOUT')에서 정지 요청이 실패한 경우 — ERROR + message_id stop_pending(10/14 PL 안 A, 한석형).
+        stopped 신호를 받기 전에는 [다시 시작]을 무시한다. 로봇은 움직이지 않는다(가짜)."""
+        self.stop_pending, self.assembling = True, True
+        self.set_gripper(False)
+        self.set_state('ERROR', f'{bid} 집기: TIMEOUT — 정지 상태 확인 대기(요청 실패: 가짜 로봇 --timeout-at)', 'stop_pending', part_id=bid)
 
     def _observe(self, planner, run_id, placed):
         """가짜 관측 결과를 진행표에 넣고 progress/2.0 을 보낸다 — 놓인 블록은 present(설계 높이 그대로, dz 0), 나머지는 absent.
@@ -305,6 +323,8 @@ class MockRobot:
             return True, ''
         if self.locked:
             return self._reject('STOPPED', LOCKED_TEXT.get(cmd, f'정지 중이라 {cmd} 를 받지 않는다'))
+        if self.stop_pending and cmd in ('start', 'scan'):     # 진짜 시작 점검(_precheck)과 같은 거절
+            return self._reject('STOPPED', '시간 초과 뒤 정지 상태 확인을 기다린다')
         if cmd == 'select_design':
             try:
                 self.design(design_id)
@@ -334,6 +354,7 @@ class MockRobot:
         if cmd == 'cancel':
             if state not in CANCEL_OK:
                 return self._reject('BUSY', '준비·오류·스캔 검토 상태에서만 취소할 수 있다')
+            self.assembling = False
             self.set_state('IDLE', '취소했어요', design_id=None, run_id=None)
             return True, ''
         return self._reject('', f'모르는 명령: {cmd}')     # 진짜 작업 관리자와 같게 빈 값 + 글(10/14 PL A3)
@@ -351,6 +372,7 @@ class MockRobot:
             return {'success': ok, 'reason': reason}
         if name == '/d2/safety/stop':
             self.abort.set()
+            self.stop_pending = False                 # stopped 를 받았다 — 진짜 _enter_stopped 와 같이 시간 초과 대기를 푼다
             if not self.locked:
                 self.assembling = self.st['state'] in RUN_STATES
             self.set_safety(True, b.get('reason') or 'STOP_' + (b.get('source') or 'web').upper())
@@ -359,9 +381,11 @@ class MockRobot:
         if name == '/d2/safety/resume':
             was = self.locked
             self.set_safety(False)
-            if was and self.assembling and self.st['design_id'] and self.st['run_id']:
+            # 진짜: 정지 노드는 잠기지 않았어도 받고 safety/state 를 다시 내며, 작업 관리자는 ERROR 에서 그 신호로 RECOVER(시간 초과 대기 중엔 무시)
+            recover = was or (self.st['state'] == 'ERROR' and not self.stop_pending)
+            if recover and self.assembling and self.st['design_id'] and self.st['run_id']:
                 self._run(self._assemble, self.st['design_id'], self.st['run_id'], self.placed, True)   # 같은 run_id 로 이어서
-            elif was:
+            elif recover:
                 self.set_state('IDLE', '정지가 풀렸어요. 설계를 다시 고르세요', design_id=None, run_id=None, part_id=None)
             return {'success': True, 'message': '잠금을 풀었다' if was else '잠겨 있지 않았다'}
         request = {k: v for k, v in b.items() if k != 'req_id'}   # check_design — 진짜 검사 묶음 그대로(IRD 4.2 응답 칸)
@@ -416,5 +440,6 @@ if __name__ == '__main__':
     ap.add_argument('--host', default='localhost')
     ap.add_argument('--port', type=int, default=1883)
     ap.add_argument('--step', type=float, default=1.0, help='가짜 조립 · 스캔 한 단계 시간(초)')
+    ap.add_argument('--timeout-at', type=int, default=0, help='N번째 부품 집기에서 시간 초과(정지 확인 대기 ERROR)를 한 번 흉내(0 = 안 함)')
     a = ap.parse_args()
-    MockRobot(a.host, a.port, a.step).run()
+    MockRobot(a.host, a.port, a.step, a.timeout_at).run()

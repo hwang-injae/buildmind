@@ -11,7 +11,7 @@
 // retained 로 그대로). 여는 중 · 끝(gripper_done) 문구는 작업 관리자 message 그대로 보인다 — 실패 까닭이 거기 있다(10/13 20시 PL).
 import { useState } from 'react';
 import * as api from '@/lib/api';
-import { designName, rejectText, stateName, stopReasonKo } from '@/lib/names';
+import { STOP_PENDING, designName, rejectText, stateName, stopReasonKo } from '@/lib/names';
 import type { CmdResult } from '@/lib/types';
 import { gripperOpening, type Robot } from '@/lib/ws';
 
@@ -53,6 +53,8 @@ export default function RobotPanel({ robot, onLog }: Props) {
     cancel: !busy && !locked && has(['READY', 'ERROR', 'SCAN_REVIEW'], st),
   };
   const showResume = locked || has(['STOPPED', 'ERROR'], st);
+  // 시간 초과 뒤 정지 확인 전 ERROR — 작업 관리자가 [다시 시작]을 무시하므로 끄고 [정지]부터 안내(10/14 PL 안 A · 한석형 stop_pending)
+  const stopPending = st === 'ERROR' && robot.state?.message_id === 'stop_pending';
   const stopped = locked || st === 'STOPPED';
   const label = (name: string, text: string) => (busy === name ? '보내는 중…' : text);
 
@@ -147,12 +149,15 @@ export default function RobotPanel({ robot, onLog }: Props) {
           </button>
         )}
         {showResume && (
-          <button className="resume" disabled={!!busy} title="로봇 작업 영역에서 손을 빼고 누르세요 — 놓인 블록은 건너뛰고 이어서 해요"
+          <button className="resume" disabled={!!busy || stopPending}
+            title={stopPending ? STOP_PENDING : '로봇 작업 영역에서 손을 빼고 누르세요 — 놓인 블록은 건너뛰고 이어서 해요'}
             onClick={() => send('다시 시작', api.resume)}>
             {label('다시 시작', '다시 시작')}
           </button>
         )}
       </div>
+
+      {stopPending && <p className="result warn">{STOP_PENDING}</p>}
 
       {gripperButton && !clearNotice && <div className="btn-row">{gripperButton}</div>}
 

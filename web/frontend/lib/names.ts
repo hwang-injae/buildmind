@@ -90,6 +90,9 @@ export function checkReasonKo(detail: string): string {
 // ---------- 거절 · 실패 글(10/14 PL — '무엇이 문제 → 무엇을 확인 → 어떻게 확인' 한 줄) ----------
 // 화면이 직접 만드는 글만 여기. 작업 관리자(state/2 · 응답 message)와 backend 가 보낸 글은 고치지 않고 그대로 보인다.
 export const URGENT_STOP = '급한 정지는 로봇 PC Ctrl+C · 펜던트';
+// 시간 초과 뒤 정지 확인 전 ERROR(state/2 message_id stop_pending — 10/14 PL 안 A): 작업 관리자가 stopped 신호 전엔 [다시 시작]을 무시한다.
+// [정지](또는 펜던트)로 stopped 를 받게 하면 STOPPED → 그 뒤 [다시 시작]이 된다
+export const STOP_PENDING = '정지 확인 전이라 다시 시작이 안 돼요 → 로봇이 섰는지 → [정지]를 누른 뒤 [다시 시작]';
 export const NO_WEB = `웹 서버(backend)와 연결이 안 돼요 → 웹 PC 의 web 컨테이너가 켜져 있는지 → 위 연결 표시의 '웹 서버' 점, 웹 PC 에서 docker compose ps · logs web. ${URGENT_STOP}`;
 
 /** 거절 까닭 코드 → 안내(응답에 message 가 없을 때). '' = 맞는 코드 없는 거절 — 까닭 글은 작업 관리자가 상태 칸에 보냄(E-111 A3) */
