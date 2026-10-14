@@ -28,7 +28,7 @@ def base_design(model_id):
     """레시피 두 파일(시험용 사본)을 읽어 실제 check_design 요청(parts/4.0 + base_recipe = 그 Template 의 V000 레시피 통째)으로 바꾼다. 읽기 실패는 시험에 알린다."""
     _, family, _ = DESIGNS[model_id]
     document = RecipeDocument.load(FIXTURES, model_id)
-    request = RecipeToParts(model_id, family, BLOCK_MM).convert(document.recipe, document.placements)
+    request = RecipeToParts(model_id, BLOCK_MM).convert(document.recipe, document.placements)
     return dict(request, base_recipe=copy.deepcopy(document.recipe))
 
 

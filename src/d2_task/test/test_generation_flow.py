@@ -27,7 +27,7 @@ BASE = {'001_CHAIR_BENCH_V000': 'chair', '002_CHAIR_BACK_V000': 'chair', '003_DE
 def generated_design(base_id, design_id):
     """AI 생성이 내는 parts/4.0 을 흉내 낸다: 기본 설계를 변환기 ②로 바꾸고 design_id 만 새 이름(같은 Template 의 다음 번호, IRD 2장 예시 001_CHAIR_BENCH_V001 — E-84)으로."""
     doc = RecipeDocument.load(FIXTURES, base_id)
-    blocks = RecipeToParts(base_id, BASE[base_id], BLOCK_MM).convert(doc.recipe, doc.placements)
+    blocks = RecipeToParts(base_id, BLOCK_MM).convert(doc.recipe, doc.placements)
     return dict(blocks, design_id=design_id, base_recipe=copy.deepcopy(doc.recipe))       # 실제 요청처럼 그 Template 의 V000 레시피를 통째로 싣는다
 
 
