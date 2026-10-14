@@ -71,7 +71,7 @@ export interface Intent {
   intent: string;
   design_id: string | null;
   text: string;
-  confidence: number;
+  confidence: number | null; // voice.py 는 못 잰 때 null(#171)
 }
 
 /** /ws 이벤트 — 모두 {type, data} 한 겹(web/README 2장) */
@@ -151,6 +151,8 @@ export interface Design {
   parent_id: string | null;
   made_by: string;
   display_name?: string | null; // 사람이 붙인 표시 이름(W197 — 없으면 '벤치 V001'만)
+  ai_template?: string | null; // 스캔 설계 — AI 가 고른 바탕 Template('NONE' = 못 고름) · 그 까닭(글 · 음성은 비움)
+  ai_reason?: string | null;
   parts: { schema: string; parts: DesignPart[] };
   placements: { steps: { part_id: string; sequence: number }[] };
 }

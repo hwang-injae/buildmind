@@ -158,6 +158,10 @@ export default function DesignView({ robot, viewId, rules, dark, onPick, onLog, 
           {nameErr && <p className="result bad">{nameErr}</p>}
         </form>
       )}
+      {/* 스캔 설계 — AI 가 바탕(부모)을 고른 까닭(10/14 PL · 민범진). 저장하면 곧 출발 대기라 스캔 칸이 닫혀서 여기 둔다 */}
+      {design?.made_by === 'scan' && design.ai_reason && (
+        <p className="muted small">바탕 {designName(design.parent_id)} — AI가 고른 까닭: {design.ai_reason}</p>
+      )}
       {pickerOpen && <DesignTree picked={viewId} onRobot={robotDesign} onPick={onPick} />}
       {body}
       {design && (

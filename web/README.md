@@ -78,7 +78,7 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 | 버튼 기다림 시간 | `/ws` 붙을 때 `{type: timing, req_timeout_s}` — 화면은 이 값 + 3초까지 기다림(숫자를 화면 코드에 두지 않음, 10/9). 아직 못 받았으면 보내지 않고 안내 | — | — (`robot.yaml` `mqtt.req_timeout_s`) |
 | 웹 연결 신호 | backend가 1초마다 냄 | `d2/web/alive` | 다리 → `/d2/hmi/alive` |
 | 마이크 버튼 | `POST /api/voice/listen` → `{success, reason}` | `d2/hmi/voice/listen` `{schema: voice_listen/1, stamp}`(QoS 1, retained ✗ — 웹 PC 안, 다리 안 거침) → voice.py 듣기 대기 → 시동어 'hello rokey' → 녹음 · 받아 적기(E-105 — 시동어 뒤 '멈춰'는 정지 요청) | — |
-| 음성 문장 | `/ws` `{type: intent, …}` — 화면은 마이크를 누른 뒤 온 `request_design`만 받음 | `d2/hmi/intent`(voice.py → 브로커, backend도 구독) | 다리 → `/d2/hmi/intent` |
+| 음성 문장 | `/ws` `{type: intent, …}` — 화면은 마이크를 누른 뒤 온 `request_design`만 받음. 생성은 `POST /api/designs/generate`에 `made_by: voice` · `confidence`(받아 적기 확신도, 없으면 null)를 실어 AI 가 오인식을 바로잡아 읽고, 그래도 모르면 `VOICE_UNCLEAR`('이렇게 들었어요: … — 다시 말씀해 주세요', 10/14 PL #171) | `d2/hmi/intent`(voice.py → 브로커, backend도 구독) | 다리 → `/d2/hmi/intent` |
 | 설계 규칙 숫자 | `GET /api/designs/rules` | — | — (backend가 `robot.yaml`을 읽음, 10/9 ①) |
 | 설계 생성 | `POST /api/designs/generate {text, design_id}`(design_id = 사람이 고른 설계 = 부모, 없으면 404 — 10/13 PL, 옛 `/template` 없앰) → `{job_id}`(한 번에 하나 — 409), 진행은 `/ws` `{type: gen, job_id, stage: reading · candidates · checked · retry · done · failed · saved, …}` · `GET /api/designs/generate/{job_id}` ✅(10/10 W108 — 화면은 W112) | 검사만 `d2/task/check_design/req` × 3 | `/d2/task/check_design` |
 | 후보 고르기 → 저장 | `POST /api/designs/generate/{job_id}/pick {index, made_by}` → `{design_id, version, parent_id, index}`(떨어진 후보 · 이미 저장 409) ✅ | — (검사 결과를 이미 받아 둠) | — |

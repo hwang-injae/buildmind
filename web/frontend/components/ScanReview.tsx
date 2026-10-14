@@ -91,7 +91,8 @@ export default function ScanReview({ robot, rules, dark, onSaved, onLog }: Props
     selected.current = job!.job_id;
     onSaved(id);
     api.command('select_design', id).then((r) =>
-      onLog('button', r.success ? `${designName(id)} 저장 · 조립 준비 — 구조물을 치우고 [조립]` : `조립 준비 실패 — ${r.message ?? r.reason}`),
+      onLog('button', (r.success ? `${designName(id)} 저장 · 조립 준비 — 구조물을 치우고 [조립]` : `조립 준비 실패 — ${r.message ?? r.reason}`)
+        + (job?.saved?.ai_reason ? ` · AI가 바탕 ${designName(job.saved.parent_id)}을(를) 고른 까닭: ${job.saved.ai_reason}` : '')),
     );
   }, [job, onSaved, onLog]);
 

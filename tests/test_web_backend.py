@@ -300,13 +300,14 @@ class FakeGen:
     """DesignGenerator 흉내 — 생성은 release 가 열릴 때까지 기다린다(작업이 '도는 중'인 때를 시험하려고)."""
 
     def __init__(self):
-        self.release, self.saved = threading.Event(), []
+        self.release, self.saved, self.voice = threading.Event(), [], []
 
     def templates(self):
         return {'001_CHAIR_BENCH': {'name': '벤치', 'description': '', 'label': '벤치'},
                 '002_CHAIR_BACK': {'name': '등받이 의자', 'description': '', 'label': '등받이 의자'}}
 
-    def generate(self, text, base_id, on_progress=None):
+    def generate(self, text, base_id, on_progress=None, made_by='web', confidence=None):
+        self.voice.append((made_by, confidence))
         self.release.wait(2)
         cand = {'idea': '안 0', 'parts': {'schema': 'parts/4.0', 'design_id': '001_CHAIR_BENCH_V001', 'parts': []},
                 'check': {'ok': True, 'reason': '', 'min_margin_mm': 9.0, 'errors': [], 'recipe': {'big': 1}, 'placements': {'big': 1}}}
@@ -367,6 +368,14 @@ def test_generate_routes_job_flow(store):
     assert gen.saved == [(0, 'voice')] and client.get(f'/api/designs/generate/{job}').json()['state'] == 'saved'
     assert client.post(f'/api/designs/generate/{job}/pick', json={'index': 0}).status_code == 409                      # 한 번만
     assert client.get('/api/designs/generate/nope').status_code == 404
+    # 음성 요청(10/14 PL #171) — made_by voice · 받아 적기 확신도가 generate 까지 간다. 글상자는 web · None. 모르는 made_by 는 422
+    assert client.post('/api/designs/generate', json={'text': '이자 높여', 'design_id': BASES[0], 'made_by': 'robot'}).status_code == 422
+    voice = client.post('/api/designs/generate', json={'text': '이자 높여', 'design_id': BASES[0], 'made_by': 'voice', 'confidence': 0.4}).json()
+    for _ in range(100):
+        if client.get(f"/api/designs/generate/{voice['job_id']}").json()['state'] != 'running':
+            break
+        threading.Event().wait(0.02)
+    assert gen.voice == [('web', None), ('voice', 0.4)]
 
 
 def test_gripper_open_command_passes_through(store):

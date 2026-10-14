@@ -110,8 +110,9 @@ async function postJson<T>(path: string, body: unknown, timeoutMs = AI_TIMEOUT_M
 }
 
 /** 고른 설계(= 부모)를 바탕으로 후보 3개 만들기 시작 → {job_id}(한 번에 하나 — 이미 만드는 중이면 error) */
-export const startGenerate = (text: string, designId: string) =>
-  postJson<{ job_id: string }>('/api/designs/generate', { text, design_id: designId }, 10000);
+// 음성 요청이면 made_by voice + 받아 적기 확신도(못 구하면 null) — AI 가 오인식을 바로잡아 읽는다(10/14 PL, #171)
+export const startGenerate = (text: string, designId: string, madeBy: 'web' | 'voice' = 'web', confidence: number | null = null) =>
+  postJson<{ job_id: string }>('/api/designs/generate', { text, design_id: designId, made_by: madeBy, confidence }, 10000);
 /** 생성 작업 하나의 지금 모습. 없으면 null */
 export const getGenJob = (jobId: string) => getJson<GenJob>('/api/designs/generate/' + encodeURIComponent(jobId));
 /** 고른 후보 저장 → {design_id, version, parent_id, index}. 떨어진 후보 · 이미 저장이면 error */
