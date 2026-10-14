@@ -8,7 +8,7 @@
 # 로컬에서 같은 시험:
 #   python3 -m pytest tests -q
 #   python3 -m pytest src/d2_task/test -q
-#   PYTHONPATH=src/d2_vision python3 -m pytest src/d2_vision/test -q
+#   PYTHONPATH=src/d2_vision:src/d2_robot/d2_motion:src/d2_task python3 -m pytest src/d2_vision/test -q
 #   ruff check --select E9,F63,F7,F82 src tests tools .github/scripts
 #   source /opt/ros/jazzy/setup.bash && colcon build --packages-select d2_interfaces d2_vision \
 #     && colcon test --packages-select d2_interfaces d2_vision; colcon test-result --verbose
@@ -49,10 +49,11 @@ jobs:
         # tests/ 와 conftest가 따로라 한 번에 돌리지 않는다. 의존은 tests/requirements.txt(pytest · pyyaml)로 충분하다(10/7 깨끗한 venv에서 254 통과).
         run: python -m pytest src/d2_task/test -q
       - name: pytest (src/d2_vision/test — 손목 블록 인식 계산 BlockChecker, ROS 없이)
-        # d2_vision 시험은 rclpy · d2_motion 을 import 하지 않는다. ros-build-test 의 colcon test 는 'NO TESTS RAN'으로 빠져 있었다(10/7 민범진).
+        # d2_vision 시험은 rclpy 를 import 하지 않는다. ros-build-test 의 colcon test 는 'NO TESTS RAN'으로 빠져 있었다(10/7 민범진).
         # conftest 가 없어 PYTHONPATH 로 소스 폴더를 넣는다. numpy 필요(tests/requirements.txt). 10/7 깨끗한 venv에서 8 통과.
+        # d2_motion(motion_math) · d2_task(RecipeToParts)도 넣는다 — 없으면 importorskip 로 통합 시험 6개가 늘 건너뛰었다(10/14 점검 ⑤4, 민범진).
         env:
-          PYTHONPATH: src/d2_vision
+          PYTHONPATH: src/d2_vision:src/d2_robot/d2_motion:src/d2_task
         run: python -m pytest src/d2_vision/test -q
       - name: ruff (치명 오류만 — 문법 오류 · 정의 안 된 이름)
         run: ruff check --select E9,F63,F7,F82 src tests tools .github/scripts
@@ -82,7 +83,7 @@ jobs:
           rosdep init || true        # ros 이미지는 이미 init 되어 있어 실패해도 된다
           rosdep update
           rosdep install --from-paths $(for p in $CI_PKGS; do printf 'src/%s ' "$p"; done) --ignore-src -y \
-            --skip-keys "dsr_msgs2 d2_motion"
+            --skip-keys "dsr_msgs2 d2_motion d2_bringup"   # d2_vision 이 쓰는 두산 · 우리 로봇 패키지 — CI 에서 빌드 안 함(d2_bringup 10/14 점검 ⑤4)
       - name: colcon build
         run: |
           source /opt/ros/jazzy/setup.bash
