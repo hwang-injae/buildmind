@@ -19,6 +19,7 @@ const MAX_TRIES = 3; // 처음 + 모자란 만큼 더 2번(10/11 PL N3 · A5)
 const MAX_CANDS = 3; // 후보 수(E-67)
 const FAIL_KO: Record<string, string> = {
   OUT_OF_SCOPE: '지금 만들 수 있는 모양이 아니에요',
+  VOICE_UNCLEAR: '음성을 알아듣지 못했어요',
   GEN_FAILED: '설계를 만들지 못했어요',
   TEMPLATE_SHAPE: '만들 수 없는 모양이에요', // 구성 형태 어긋남(21번) — 취소하고 다시 요청(C5)
   TEMPLATE_RANGE: '지금 만들 수 있는 범위가 아니에요', // 치수 범위 밖(21번) — backend 글에 범위가 붙음(C6)
@@ -26,7 +27,7 @@ const FAIL_KO: Record<string, string> = {
   TIMEOUT: '검사 응답이 늦어요',
   ERROR: '오류가 났어요',
 };
-const OWN_MESSAGE = new Set(['TEMPLATE_SHAPE', 'TEMPLATE_RANGE', 'REQUEST_INVALID']); // backend 글이 안내 전부라 앞 이름을 겹쳐 붙이지 않음
+const OWN_MESSAGE = new Set(['TEMPLATE_SHAPE', 'TEMPLATE_RANGE', 'REQUEST_INVALID', 'VOICE_UNCLEAR']); // backend 글이 안내 전부라 앞 이름을 겹쳐 붙이지 않음
 
 interface Props {
   robot: Robot;
@@ -62,13 +63,13 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
     return () => clearInterval(t);
   }, [running, jobId]);
 
-  const start = async (t: string, by: 'web' | 'voice') => {
+  const start = async (t: string, by: 'web' | 'voice', confidence: number | null = null) => {
     if (!baseId || !t) return;
     setBusy(true);
     setError('');
     setJob(null);
     setMadeBy(by);
-    const r = await api.startGenerate(t, baseId);
+    const r = await api.startGenerate(t, baseId, by, confidence);
     setBusy(false);
     if (!r.data) return setError(r.error ?? NO_WEB);
     setJob({ job_id: r.data.job_id, state: 'running', text: t, base_id: baseId, template: '', candidates: [] });
@@ -82,13 +83,13 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
     if (intent.intent !== 'request_design' || !intent.text?.trim()) return;
     setListening(false);
     setText(intent.text);
-    void start(intent.text.trim(), 'voice'); // start 는 deps 에 넣지 않는다 — 문장이 온 그 순간의 바탕 설계로 한 번만
+    void start(intent.text.trim(), 'voice', intent.confidence ?? null); // start 는 deps 에 넣지 않는다 — 문장이 온 그 순간의 바탕 설계로 한 번만
   }, [intent, listening]);
   useEffect(() => {
     if (!listening) return;
     const t = setTimeout(() => {
       setListening(false);
-      setError(`음성을 못 받았어요 → 시동어 '${WAKE_WORD}'를 먼저 말했는지 · 마이크와 음성 프로그램(voice.py)이 켜져 있는지 → 웹 PC 터미널의 voice.py 로그 · 마이크 연결, 확인 뒤 다시 눌러 주세요`);
+      setError(`음성을 못 받았어요 → 시동어 "${WAKE_WORD}"를 먼저 말했는지 · 마이크와 음성 프로그램(voice.py)이 켜져 있는지 → 웹 PC 터미널의 voice.py 로그 · 마이크 연결, 확인 뒤 다시 눌러 주세요`);
     }, LISTEN_MS);
     return () => clearTimeout(t);
   }, [listening]);
@@ -101,7 +102,7 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
     setBusy(false);
     if (!r.success) return setError(`마이크를 켜지 못했어요 — ${r.message ?? r.reason}`);
     setListening(true);
-    onLog('voice', `듣는 중 — '${WAKE_WORD}' → 삑 → 만들고 싶은 것을 말하세요`);
+    onLog('voice', `듣는 중 — 시동어 "${WAKE_WORD}" → 삑 → 요청`);
   };
 
   const pick = async (index: number) => {
@@ -140,14 +141,14 @@ export default function GeneratePanel({ robot, baseId, rules, dark, onSaved, onL
           disabled={blocked || !baseId}
         />
         <button className="mic" onClick={listen} disabled={blocked || !baseId} aria-label="음성으로 요청"
-          title={`누르고 '${WAKE_WORD}'라고 부른 뒤 삑 소리가 나면 만들고 싶은 것을 말하세요 — 문장이 글 창에 들어가고 바로 만들기 시작해요`}>
+          title={`누르고 시동어 "${WAKE_WORD}"를 말한 뒤 삑 소리가 나면 요청을 말하세요 — 문장이 글 창에 들어가고 바로 만들기 시작해요`}>
           {listening ? '듣는 중…' : '🎤 말하기'}
         </button>
         <button className="primary" onClick={() => start(text.trim(), 'web')} disabled={blocked || !baseId || !text.trim()}>
           {busy && !job ? '시작하는 중…' : 'AI 생성'}
         </button>
       </div>
-      {listening && <p className="hint">'{WAKE_WORD}'라고 부른 뒤 삑 소리가 나면 만들고 싶은 것을 말하세요({LISTEN_MS / 1000}초 안)</p>}
+      {listening && <p className="hint">시동어 &quot;{WAKE_WORD}&quot;를 말하세요 → 삑 뒤에 요청({LISTEN_MS / 1000}초 안)</p>}
       {error && <p className="result bad">{error}</p>}
 
       {job && <JobView job={job} rules={rules} dark={dark} canPick={job.state === 'ready' && !busy} onPick={pick} />}

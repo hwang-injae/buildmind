@@ -41,6 +41,7 @@ CALL_TIMEOUT_S = 260             # 호출당 시간 제한 — 10/13 시험 후�
 #                                  중계 RUN_TIMEOUT_S(240)보다 20초 길게(10/13 17시 PL) — 중계가 먼저 끊어야 claude 가 혼자 남지 않고 504 로 까닭이 온다
 GEN_LIMIT_S = 300                # 생성 한 번(읽기 + 후보 + 더 만들기) 전체 상한 — 10/14 PL 5분(10/14 시험: 더 만들기 2번이면 10분 넘음)
 REGEN_MIN_S = 60                 # 남은 시간이 이보다 적으면 더 만들지 않는다 — 후보 쓰기 한 번이 10/14 시험 56 ~ 214초라 못 끝냄
+VOICE_HEARD = '이렇게 들었어요'      # 음성 요청을 못 알아들었을 때 AI 가 reason 앞에 쓰는 말(prompts/design_system.txt [음성 요청]) → VOICE_UNCLEAR
 CALL_RETRIES = 0                 # 다시 안 함 — 한 번이 1 ~ 2분이라 다시 하면 화면이 너무 오래 멈춘다. 실패는 화면에 알리고 사람이 다시 누른다
 MAX_READS = 2                    # 도구 get_design 최대 횟수(E-72)
 SKIP_READ = 'SKIP'               # 도구 get_design 의 '더 안 읽음' 선택지(generate) — 설계 ID 꼴(<Template>_V###)이 아니라 겹치지 않음
@@ -168,7 +169,7 @@ class DesignGenerator:
         return {'ai_template': choice.get('template') or AI_NONE, 'ai_reason': choice.get('reason') or ''}
 
     # ---------- 후보 3개 ----------
-    def generate(self, text, base_id, on_progress=None):
+    def generate(self, text, base_id, on_progress=None, made_by='web', confidence=None):
         """요청 문장 · 사람이 고른 설계(base_id) → 검사를 통과한 후보만(최대 3개). 사람이 그중 하나를 고른다(→ save).
 
         바탕(10/13 PL): 부모 = 고른 설계(AI 가 읽은 설계가 아님), Template = base_id 앞부분. AI 에는 고른 설계의 블록 목록을
@@ -182,6 +183,8 @@ class DesignGenerator:
         'checked'(후보 하나 검사 끝 — passed = 지금까지 통과 수) · 'retry'(모자라서 더 — need). 출력: {text, base_id, template, family,
         design_id, parent_id(= base_id), reference(AI 가 읽은 설계), candidates[{idea, parts, check}](통과한 것만), attempts, elapsed_s,
         gen_log(이 생성의 AI 호출 기록 이름 — 고른 후보를 저장할 때 씀)}.
+        made_by 'voice'(음성 받아 적기 — 10/14 PL, #171): 요청 글에 '[음성 받아 적기 — 오인식 가능, 확신도 n]'(confidence 0 ~ 1, 없으면 '모름')을
+        붙여 AI 가 비슷한 소리의 말로 바로잡아 읽게 한다(AI 를 더 부르지 않음). 그래도 모르면 AI 가 '이렇게 들었어요: …' → VOICE_UNCLEAR.
         실패: GenError — 하나도 못 통과하면 code = TEMPLATE_SHAPE('만들 수 없는 모양') · TEMPLATE_RANGE('지금 만들 수 있는 범위가 아님'
         + 범위) · GEN_FAILED(그 밖), 여러 실패가 같이면 구성 형태 먼저(PL 4-2-추가). REQUEST_INVALID · OUT_OF_SCOPE · 검사 서비스 실패 ·
         고른 설계가 없음(ERROR)도 GenError.
@@ -203,8 +206,10 @@ class DesignGenerator:
         parent = base_id
         t0 = self.clock()
         deadline = t0 + GEN_LIMIT_S
-        log = self._new_log('generate', text, self.design_prompt, template=template, base_id=base_id)
-        request = self._request_text(text, template, base_row, base_parts, others)
+        voice = made_by == 'voice'
+        log = self._new_log('generate', text, self.design_prompt, template=template, base_id=base_id,
+                            **({'made_by': 'voice', 'confidence': confidence} if voice else {}))
+        request = self._request_text(text, template, base_row, base_parts, others, voice=voice, confidence=confidence)
         messages = [{'role': 'system', 'content': self.design_prompt}, {'role': 'user', 'content': request}]
         read = []
         try:
@@ -227,7 +232,10 @@ class DesignGenerator:
             for attempt in range(1, MAX_REGEN + 2):
                 data = self._parse(msg)
                 if data.get('out_of_scope') is True:
-                    raise GenError('OUT_OF_SCOPE', data.get('reason') or '지금 만들 수 있는 모양이 아니에요')
+                    reason = data.get('reason') or '지금 만들 수 있는 모양이 아니에요'
+                    if voice and reason.startswith(VOICE_HEARD):   # 음성을 못 알아들음 — 화면은 '범위 밖' 대신 이 글만(다시 말하기)
+                        raise GenError('VOICE_UNCLEAR', reason)
+                    raise GenError('OUT_OF_SCOPE', reason)
                 raw = data.get('candidates')
                 if not isinstance(raw, list) or not all(isinstance(c, dict) and isinstance(c.get('parts'), list) for c in raw):
                     raise GenError('GEN_FAILED', 'AI 답의 모양이 틀렸어요(candidates)')
@@ -758,13 +766,17 @@ class DesignGenerator:
         return text
 
     # ---------- 프롬프트 조각 ----------
-    def _request_text(self, text, template, base_row, base_parts, others):
+    def _request_text(self, text, template, base_row, base_parts, others, voice=False, confidence=None):
         """사용자 메시지: 요청 · Template · 바탕 설계(사람이 고름 — 요약 + 블록 목록) · 같은 Template 의 다른 설계 목록 요약(E-72 —
-        한 줄 = 설계 하나, 최근 조립 결과 포함. 도구 get_design 으로 참고만)."""
+        한 줄 = 설계 하나, 최근 조립 결과 포함. 도구 get_design 으로 참고만). voice 면 요청 바로 뒤에 음성 받아 적기 줄(확신도 0 ~ 1 · 없으면 모름)."""
         label = self.templates().get(template, {}).get('label', template)
         lines = [self._row_line(r) for r in others] or ['- 없음(이 Template 의 설계는 바탕 설계뿐)']
         rules = self._template_rules(template)
-        return (f'[요청] {text}\n[Template] {template} — {label}\n' + (rules + '\n' if rules else '')
+        heard = ''
+        if voice:
+            sure = f'{float(confidence):.2f}' if isinstance(confidence, (int, float)) and not isinstance(confidence, bool) else '모름'
+            heard = f'[음성 받아 적기 — 오인식 가능, 확신도 {sure}]\n'
+        return (f'[요청] {text}\n{heard}[Template] {template} — {label}\n' + (rules + '\n' if rules else '')
                 + f'[바탕 설계 — 사용자가 고름]\n{self._row_line(base_row)}\n'
                 + json.dumps(base_parts, ensure_ascii=False, separators=(',', ':'))
                 + '\n[DB 목록 — 같은 Template 의 다른 설계(참고만)]\n' + '\n'.join(lines))

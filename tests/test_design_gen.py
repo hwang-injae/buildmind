@@ -639,6 +639,28 @@ def test_request_carries_template_rules(store, good):
     assert '7. 사용자 메시지의 [Template 규칙]' in client.calls[0]['messages'][0]['content']
 
 
+def test_voice_request_marks_transcription(store, good):
+    """음성 요청(10/14 PL #171) — 요청 바로 뒤에 '[음성 받아 적기 — 오인식 가능, 확신도 n]', 확신도가 없으면 '모름'. 글상자 요청엔 없음.
+    시스템 프롬프트에 [음성 요청](비슷한 소리로 바로잡기 · 모르면 '이렇게 들었어요') — AI 를 더 부르지 않는다."""
+    gen, client = make(store, [answer([good] * 3)] * 3)
+    gen.generate('이자 다니를 한칭 노피 줘', BENCH, made_by='voice', confidence=0.62)
+    gen.generate('다리를 한 층 높여 줘', BENCH, made_by='voice')
+    gen.generate('다리를 한 층 높여 줘', BENCH)
+    voice, unknown, web = (c['messages'][1]['content'] for c in client.calls)
+    assert voice.startswith('[요청] 이자 다니를 한칭 노피 줘\n[음성 받아 적기 — 오인식 가능, 확신도 0.62]\n[Template]')
+    assert '[음성 받아 적기 — 오인식 가능, 확신도 모름]' in unknown and '[음성 받아 적기' not in web
+    assert '[음성 요청]' in client.calls[0]['messages'][0]['content'] and len(client.calls) == 3
+
+
+@pytest.mark.parametrize('made_by, code', [('voice', 'VOICE_UNCLEAR'), ('web', 'OUT_OF_SCOPE')])
+def test_voice_unclear(store, made_by, code):
+    """음성을 바로잡아도 모르겠으면 AI 가 '이렇게 들었어요: …' → VOICE_UNCLEAR(화면은 그 글만 — 다시 말하기). 글상자 요청은 그대로 OUT_OF_SCOPE."""
+    reason = '이렇게 들었어요: "부엉이 노래 틀어 줘" — 다시 말씀해 주세요'
+    gen, _ = make(store, [answer([], out=True, reason=reason)])
+    with pytest.raises(GenError) as e:
+        gen.generate('부엉이 노래 틀어 줘', BENCH, made_by=made_by, confidence=0.3)
+    assert e.value.code == code and e.value.message == reason
+
 class SlowOpenAI(FakeOpenAI):
     """부를 때마다 가짜 시계를 step 초 앞으로(LLM 한 번이 그만큼 걸림) — 생성 상한 시험용."""
 

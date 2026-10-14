@@ -40,15 +40,16 @@ class GenJobs:
         self.jobs = OrderedDict()
         self.lock = threading.Lock()
 
-    def start(self, text, base_id):
+    def start(self, text, base_id, made_by='web', confidence=None):
         """생성 하나를 뒤 스레드로 시작하고 job_id 를 돌려준다. base_id = 사람이 설계 목록에서 고른 설계(= 부모 — 10/13 PL).
+        made_by · confidence 는 generate 로 넘긴다(음성 받아 적기 바로잡기 — 10/14 PL).
         이미 도는 것이 있으면 RuntimeError(화면은 '만드는 중')."""
         with self.lock:
             if any(j['state'] == 'running' for j in self.jobs.values()):
                 raise RuntimeError('이미 설계를 만드는 중이에요')
             job_id = uuid.uuid4().hex[:8]
             self.jobs[job_id] = {'job_id': job_id, 'state': 'running', 'text': text, 'base_id': base_id,
-                                 'template': split_design_id(base_id)[0], 'candidates': []}
+                                 'template': split_design_id(base_id)[0], 'candidates': [], 'made_by': made_by, 'confidence': confidence}
             while len(self.jobs) > JOBS_KEEP:
                 self.jobs.popitem(last=False)
         threading.Thread(target=self._run, args=(job_id,), daemon=True).start()
@@ -109,7 +110,8 @@ class GenJobs:
                 data['check'] = {k: data['check'][k] for k in ('ok', 'reason', 'min_margin_mm', 'errors')}
             self.publish({'type': 'gen', 'data': {'job_id': job_id, 'stage': stage, **data}})
         try:
-            result = self.gen.generate(job['text'], job['base_id'], on_progress=progress)
+            result = self.gen.generate(job['text'], job['base_id'], on_progress=progress,
+                                       made_by=job.get('made_by', 'web'), confidence=job.get('confidence'))
             job.update(state='ready', result=result, candidates=[slim(c) for c in result['candidates']])
         except GenError as e:
             job.update(state='failed', code=e.code, message=e.message, detail=e.detail)
@@ -142,9 +144,12 @@ class GenJobs:
 
 
 class GenBody(BaseModel):
-    """요청 문장(글상자 · 음성 문장) + 사람이 설계 목록에서 고른 설계 ID(= 부모, Template 은 그 앞부분 — 10/13 PL)."""
+    """요청 문장(글상자 · 음성 문장) + 사람이 설계 목록에서 고른 설계 ID(= 부모, Template 은 그 앞부분 — 10/13 PL).
+    made_by voice 면 AI 가 받아 적기 오인식을 바로잡아 읽는다 — confidence 는 voice.py 받아 적기 확신도(0 ~ 1, 못 구하면 null · 10/14 PL #171)."""
     text: str
     design_id: str
+    made_by: Literal['web', 'voice'] = 'web'
+    confidence: Optional[float] = None
 
 
 class PickBody(BaseModel):
@@ -165,7 +170,7 @@ def generate(body: GenBody, request: Request):
     except (KeyError, ValueError):
         raise HTTPException(404, f'고른 설계가 없어요: {body.design_id}') from None
     try:
-        return {'job_id': request.app.state.jobs.start(text, body.design_id)}
+        return {'job_id': request.app.state.jobs.start(text, body.design_id, body.made_by, body.confidence)}
     except RuntimeError as e:
         raise HTTPException(409, str(e)) from None
 
