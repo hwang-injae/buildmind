@@ -232,8 +232,23 @@ class SceneManagerNode(Node):
 
         진행표에 없는 놓인 블록(앞 설계 것)도 뺀다 — 진행표는 지금 설계의 블록 전부라, 설계가 바뀌면 앞 설계 블록이
         조립 영역에 남아 새 설계의 놓기 경로를 막는다(10/7 실기: 벤치 11개가 남아 003 PLAN_FAILED).
+        빈 진행표(parts [] — 작업 관리자가 [조립] 출발 · [정리 끝] 뒤 대기로 돌아갈 때 보냄)면 내 목록(placed)이 아니라 move_group 장면에
+        실제로 있는 놓인 블록(blk_*)을 전부 지운다 — 노드를 다시 켤 때 마지막 진행표로 다시 넣은 블록이 목록에서 빠져 영영 안 지워진 적이
+        있다(10/14 실기: 앞 설계 좌판 하나가 남아 세운 다리 놓기가 PLAN_FAILED 3번).
         """
         blocks = json.loads(msg.data).get('parts', [])
+        if not blocks:
+            world, _ = self._current_objects()
+            stale = sorted(o for o in world if o.startswith('blk_'))
+            if stale:
+                sc = PlanningScene()
+                sc.world.collision_objects = [self._remove(oid) for oid in stale]
+                if not self.apply(sc):
+                    self.get_logger().warn(f'[장면] 놓인 블록 {len(stale)}개를 못 지웠다: {", ".join(stale)}')
+                    return
+                self.get_logger().info(f'[장면] 빈 진행표 — 놓인 블록 {len(stale)}개 지움')
+            self.placed.clear()
+            return
         gone = self.placed - {blk.get('part_id') for blk in blocks}
         for blk in blocks:
             bid, state = blk.get('part_id'), blk.get('state')

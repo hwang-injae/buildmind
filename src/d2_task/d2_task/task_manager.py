@@ -1141,6 +1141,10 @@ class TaskManager:
         조립 중 복구는 첫 관측 이동에 recover.speed_ratio 를 쓰며, 실패했으면 다음 시도도 저속을 유지한다.
         """
         if not self._assembling:
+            # 조립 중이 아니었다([초기화] 뒤 [정리 끝] 등) — 사람이 조립 자리를 치웠으니 장면의 놓인 블록도 비운다(빈 진행표 → 장면 관리가
+            # 장면에 있는 blk_* 전부 지움). 안 비우면 다음 설계의 놓기 길이 치운 블록에 막혔다(10/14 실기)
+            self.io.publish_progress({'schema': 'progress/2.0', 'stamp': time.time(), 'design_id': self.design_id, 'run_id': self.run_id,
+                                      'obs_stamp': time.time(), 'parts': []})
             self.planner, self.design_id, self.part_id = None, None, None
             self._clear_run()
             self._set('IDLE', None, '정지가 풀렸어요. 설계를 다시 고르세요')
