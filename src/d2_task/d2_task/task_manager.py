@@ -127,6 +127,7 @@ class TaskManager:
         self.gripper = None                       # 마지막 gripper_state/1
         self._entered_count = 0                   # STOPPED · ERROR 에 들어갈 때의 safety_count
         self._assembling = False                  # 정지됐을 때 조립 중이었나(RECOVER 가 CHECK 로 이어 갈지 정한다)
+        self._cleaned = False                     # 이번 정지에서 [초기화](정리 확인)를 받았나 — [정리 끝] 뒤 장면을 비울지(10/14 박진용)
         self._pending_start = False               # WAIT_SUPPLY 에서 받은 [계속]
         self._supply_moved = False                # WAIT_SUPPLY 에서 관측 자세에 이미 도착했나(도착해야 알림 · [계속]을 받는다)
         self._reobserved = False                  # UNKNOWN_BLOCK 재관측을 이미 한 번 했나
@@ -442,6 +443,7 @@ class TaskManager:
         self.logger.log('cleanup', None, 'STOPPED 정리 확인')     # 닫기 전에 남긴다(run 이 없으면 아무것도 안 함)
         self.planner, self.design_id, self.part_id, self.goal = None, None, None, None
         self._assembling = False
+        self._cleaned = True
         self._clear_run()
         self._publish('stopped', '정리를 확인했어요. 다 치웠으면 [정리 끝]을 누르세요 — 대기로 돌아갑니다')
         return True, ''
@@ -1141,8 +1143,13 @@ class TaskManager:
         조립 중 복구는 첫 관측 이동에 recover.speed_ratio 를 쓰며, 실패했으면 다음 시도도 저속을 유지한다.
         """
         if not self._assembling:
-            # 장면의 놓인 블록은 그대로 둔다 — 실물이 남았을 수 있다(10/14 박진용 · 석형님 #174 리뷰). 장면은 다음 [조립] 출발 때
-            # 빈 진행표로 비운다(조립 끝 DONE 에도 그대로 — DONE 뒤 [스캔]이 가구를 피해야 함, 10/14 PL)
+            # [초기화] → [정리 끝]이면 사람이 조립 자리를 치웠다고 확인했으니 장면의 놓인 블록도 비운다(빈 진행표 → 장면 관리가 blk_* 전부 지움).
+            # 그냥 정지 → [다시 시작](완성 · 대기 등)은 실물이 남았을 수 있어 그대로 둔다(10/14 석형님 #174 리뷰 ①) — 그때 장면은
+            # 다음 [조립] 출발 때 빈 진행표로 비운다(조립 끝 DONE 에도 그대로 — DONE 뒤 [스캔]이 가구를 피해야 함, 10/14 PL)
+            if self._cleaned:
+                self._cleaned = False
+                self.io.publish_progress({'schema': 'progress/2.0', 'stamp': time.time(), 'design_id': self.design_id, 'run_id': self.run_id,
+                                          'obs_stamp': time.time(), 'parts': []})
             self.planner, self.design_id, self.part_id = None, None, None
             self._clear_run()
             self._set('IDLE', None, '정지가 풀렸어요. 설계를 다시 고르세요')
@@ -1685,6 +1692,7 @@ class TaskManager:
             if self.state == 'STOPPED':
                 return
             self._assembling = self.state in RUN_STATES and not self._scan_run
+            self._cleaned = False
             self._entered_count = self.safety_count
             self._pending_start = False
             self.logger.count_stop()
