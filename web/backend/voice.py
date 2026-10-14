@@ -136,8 +136,9 @@ class VoiceListener:
         mic = self.open_mic()
         try:
             if not self._wait_wake(mic, wake):
-                return self._none('시동어를 못 들었어요', t0)
+                return self._none(f'시동어를 못 들었어요(최고 점수 {self.wake_max:.2f} / 문턱 {self.threshold})', t0)
             t_wake = time.monotonic()
+            self.log(f'[음성] 시동어 들음(점수 {self.wake_max:.2f}) — 말하세요')
             self._beep(BEEP_HIGH_HZ)
             audio, speech_s = self._record(mic)
         finally:
@@ -162,9 +163,13 @@ class VoiceListener:
         return {'kind': 'intent', 'text': text, 'why': '', 'times': times}
 
     def _wait_wake(self, mic, wake):
-        """시동어를 WAKE_WAIT_S 동안 기다린다(wake 는 누를 때마다 새 모델 — 지난 누름의 소리가 남아 바로 다시 걸리지 않게, 강의 방식)."""
+        """시동어를 WAKE_WAIT_S 동안 기다린다(wake 는 누를 때마다 새 모델 — 지난 누름의 소리가 남아 바로 다시 걸리지 않게, 강의 방식).
+        self.wake_max = 이번 누름의 최고 점수(로그 — 문턱을 사람 목소리에 맞출 때 본다)."""
+        self.wake_max = 0.0
         for _ in range(int(WAKE_WAIT_S / FRAME_S)):
-            if wake.score(mic.read()) >= self.threshold:
+            score = wake.score(mic.read())
+            self.wake_max = max(self.wake_max, score)
+            if score >= self.threshold:
                 return True
         return False
 
