@@ -111,26 +111,13 @@ def test_design_id_는_명시_입력_빈_값이면_거절():
     for design_id in ('', None):
         with pytest.raises(ValueError):
             RecipeToParts(design_id, BLOCK_MM)
-        with pytest.raises(ValueError):
-            RecipeToParts(design_id, 'chair', BLOCK_MM)             # 옛 호출도 design_id 는 본다
 
 
-@pytest.mark.parametrize('model_id', ['001_CHAIR_BENCH_V000', '002_CHAIR_BACK_V000', '003_DESK_STAND_V000', '004_DESK_PEDESTAL_V000'])
-def test_새_호출_옛_호출_빈_family_결과가_같다(model_id):
-    """10/14 PL 전환 1단계: RecipeToParts(design_id, block_mm) · (design_id, family, block_mm) · family 빈 값 — 결과가 같다(family 는 안 씀)."""
-    r, pl = load(model_id)
-    new = RecipeToParts(model_id, BLOCK_MM).convert(r, pl)
-    assert RecipeToParts(model_id, 'chair', BLOCK_MM).convert(r, pl) == new
-    assert RecipeToParts(model_id, '', BLOCK_MM).convert(r, pl) == new
-    assert RecipeToParts(model_id, None, BLOCK_MM).convert(r, pl) == new
-    assert 'family' not in new
-
-
-def test_인자_수가_틀리면_TypeError():
+def test_인자_수가_틀리면_TypeError_옛_family_호출도():
     with pytest.raises(TypeError):
         RecipeToParts('bench')
     with pytest.raises(TypeError):
-        RecipeToParts('bench', 'chair', BLOCK_MM, 'extra')
+        RecipeToParts('bench', 'chair', BLOCK_MM)                  # 옛 (design_id, family, block_mm) 호출은 10/14 PL 로 없앰
 
 
 def bad(mutate, reseal=True):
