@@ -37,6 +37,7 @@ TEST_BLOCK_PREFIX = 'GRASP_P'
 LINE_CHECK_RAD = 0.005
 TIP_MAX_TURN_DEG = 150.0    # 눕히기 이동 한 번에 어느 관절이든 이보다 많이 돌면 그 손목 방향은 안 쓴다(one_pick STAND_MAX_TURN — 10/13 가상 212° 해로 길 없음)
 TIP_SETTLE_S = 0.5          # 눕히기: 손을 연 뒤 블록이 넘어지는 동안 기다린다
+SPARE_NEAR_M = 0.02         # 놓을 블록 가운데가 받침 자리(robot.yaml spare_spots 첫 자리)에서 이 수평 거리 안이면 받침에 놓기 — 하강을 평소 속도로(10/14)
 SAFETY_QOS = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                         history=HistoryPolicy.KEEP_LAST, depth=1)   # 정지 노드와 같게 (IRD 4.1, S-26)
 
@@ -191,10 +192,11 @@ class PickPlaceNode(Node):
     def routes(self, p, part_id, grasp, open_pick, skip_slot, obstacles):
         """블록 1개의 길을 움직이기 전에 전부 계획 · 검사한다. 반환: 궤적 dict, 하나라도 안 되면 None.
 
-        approach(지금 → 집기 위) · pick_down(집기 위 → 집는 높이, 연 손가락으로 충돌 검사) · lift(pick_down 을 거꾸로)
-        · carry(쥔 블록 · 문 손가락으로 집기 위 → 놓기 위) · place_down(쥔 블록으로 충돌 검사) · retreat(place_down 을 거꾸로).
+        approach(지금 → 집기 위) · pick_down(집기 위 → 집는 높이, 연 손가락으로 충돌 검사) · lift(pick_down 과 같은 두 점 사이 직선, 평소 속도)
+        · carry(쥔 블록 · 문 손가락으로 집기 위 → 놓기 위) · place_down(쥔 블록으로 충돌 검사) · retreat(place_down 과 같은 두 점 사이 직선, 평소 속도).
         잡은 뒤에는 이 궤적을 실행만 한다 — 다시 계획하지 않으니 잡힘을 확인한 뒤 '길 없음'으로 서지 않는다(10/11 박진용:
-        잡았으면 들고 옮기고 놓기는 그냥 가면 된다). 올라오기는 내려간 길을 되짚으므로 쥔 블록 모양이 실제와 조금 달라도 막히지 않는다.
+        잡았으면 들고 옮기고 놓기는 그냥 가면 된다). 올라오기(lift · retreat)는 내려간 직선과 같은 두 점 · 같은 손목 방향을 평소 속도로 다시 계획하고(_up_line — 안 풀릴 때만
+        내려간 직선을 되짚음) 충돌 검사는 따로 하지 않는다 — 내려갈 때 검사한 길과 같아 쥔 블록 모양이 실제와 조금 달라도 막히지 않는다.
         바깥 영향: 계획만 한다(로봇 · 그리퍼 · 장면 그대로).
         """
         pk, pl = p['pick'], p['place']
@@ -211,9 +213,9 @@ class PickPlaceNode(Node):
         # 손가락이 '자기 자신'과 닿는다고 막힌다(10/12 가상: 받침 위 블록 방향이 놓은 방향과 달라 pick 수직 경로 충돌). 그 닿음은 뺀다
         if not self.line_clear(pk['down'], 'pick', finger=open_finger_angle(self.cfg, open_pick), ignore=f'blk_{part_id}'):
             return None
-        # 들기: 보통은 내려간 직선을 되짚는다. 눕히기(TIP)는 TIP_LIFT_M 만 드는 직선(_tip_targets)
-        r['pick_down'], r['lift'] = pk['down'], pk.get('lift') or self.exe.reversed_path(pk['down'])
-        lift_q = pk.get('lift_q', pk['qa'])
+        # 들기: 내려간 직선과 같은 두 점 사이를 평소 속도로(_up_line — 하강만 느리게, 10/14). 눕히기(TIP)는 TIP_LIFT_M 만 드는 직선(_tip_targets)
+        r['pick_down'], r['lift'] = pk['down'], pk.get('lift') or self._up_line(pk)
+        lift_q = pk.get('lift_q') or self.exe.positions(r['lift'])[-1]    # 옮기기는 들기가 끝난 자세에서 출발
         # 접근 때는 손가락이 넓게 벌어져 옆 블록 여유 상자 바깥을 지나가지만, 쥔 뒤에는 손가락이 닫히고 블록이 붙어
         # 여유 상자와 겹칠 수 있다 — 10/11 가상: 접근 · 집기는 됐는데 옮기기 계획이 출발 자세 충돌로 막혔다
         # 기울여 집기(TILT)는 집기 위 자세에서 공구가 이미 15° 넘게 기울어 있어 '공구 아래' 제약을 걸면 출발부터 실패한다
@@ -229,8 +231,30 @@ class PickPlaceNode(Node):
         # 같은 이름의 놓인 블록(blk_<part_id>)은 잡으면서 장면 관리가 지운다(다시 집기) — 미리 볼 때도 그것과의 닿음은 뺀다
         if not self.line_clear(pl['down'], 'place', finger=held_angle, held=p['held'], ignore=f'blk_{part_id}'):
             return None
-        r['place_down'], r['retreat'] = pl['down'], self.exe.reversed_path(pl['down'])
+        r['place_down'], r['retreat'] = pl['down'], self._up_line(pl)
         return r
+
+    def _up_line(self, part):
+        """내려간 직선 part['down'] 을 거꾸로(집는 · 놓는 높이 → 그 위 part['high']) 평소 속도(speed_scale)로 다시 계획한다.
+
+        10/14 박진용: 느리게 둘 것은 집으러 내려가기 · 조립 자리에 놓기뿐 — 들기 · 빠지기는 0.3. 같은 두 점 · 같은 손목 방향의 수직 직선이라
+        지나는 길은 내려간 직선과 같다(충돌 검사도 같은 길). 입력: part = _targets 의 'pick' · 'place'(high · quat · down).
+        반환: 궤적. 평소 속도로 안 풀리면 내려간 직선을 되짚는다(예전과 같음 — 느림). 바깥 영향 없음(계획만).
+        """
+        start = self.exe.positions(part['down'])[-1]
+        jt = self.exe.plan_line(part['high'], part['quat'], self.cfg['speed_scale'] * LINE_SCALE, start_q=start)[0]
+        if jt is None:
+            self.get_logger().info('올라오는 직선을 평소 속도로 못 만들어 내려간 직선을 되짚는다(느림)')
+            return self.exe.reversed_path(part['down'])
+        return jt
+
+    def _place_ratio(self, center):
+        """놓기 하강 속도 비율 — 놓을 블록 가운데 center(m)가 받침 자리(spare_spots 첫 자리)에서 SPARE_NEAR_M 안이면 1.0(받침에 놓기는
+        평소 속도, 10/14 박진용), 아니면 robot.yaml motion.place_speed_ratio(조립 자리에 놓기는 살살). 받침 자리가 없으면 늘 place_speed_ratio."""
+        spots = self.cfg.get('spare_spots') or []
+        if spots and math.hypot(center[0] - spots[0]['x_m'], center[1] - spots[0]['y_m']) <= SPARE_NEAR_M:
+            return 1.0
+        return self.cfg['motion'].get('place_speed_ratio', 1.0)
 
     def line_clear(self, jt, kind, finger=None, held=None, ignore=None):
         """수직 직선 궤적 jt 를 촘촘히 나눠(dense) 손가락 각 finger · 쥔 블록 held 로 부딪히는 자세가 없는지. 반환: 괜찮으면 True.
@@ -322,9 +346,10 @@ class PickPlaceNode(Node):
                 qb = self.exe.ik(high, quat, qa, avoid=True, timeout=0.2)
                 qa = qb if qb is not None and self.exe.singular(qb) is None else None
             # 움직이기 전에 위 자세에서 수직으로 내려가는 직선이 풀리는지 미리 본다 (Pilz LIN, 위 자세에서 출발)
-            # 놓기는 살살 — robot.yaml motion.place_speed_ratio(10/12 박진용: 조립할 때 절반 속도),
-            # 집기도 느리게 — motion.pick_speed_ratio(10/13 박진용: 집기 하강 너무 빠름, 0.3 → 0.15). 올라오는 직선은 같은 궤적이라 같이 느려진다
-            ratio = m.get('place_speed_ratio', 1.0) if kind == 'place' else m.get('pick_speed_ratio', 1.0)
+            # 하강만 느리게(10/14 박진용: 집으러 내려가기 · 조립 자리에 놓기만 지금 속도, 나머지는 0.3) — 집기 motion.pick_speed_ratio
+            # (10/13: 집기 하강 너무 빠름, 0.3 → 0.15) · 놓기 motion.place_speed_ratio(10/12: 조립할 때 절반). 받침에 놓기는 평소 속도.
+            # 올라오기(들기 · 빠지기)는 routes 가 평소 속도로 따로 계획한다(_up_line)
+            ratio = self._place_ratio(lc) if kind == 'place' else m.get('pick_speed_ratio', 1.0)
             down = None if qa is None else self.exe.plan_line(low, quat, self.cfg['speed_scale'] * LINE_SCALE * ratio, start_q=qa)[0]
             if down is None:
                 self.get_logger().error(f'{g.part_id}: {kind} IK·직선 실패 ({", ".join(f"{v:.3f}" for v in high)})')
@@ -375,7 +400,7 @@ class PickPlaceNode(Node):
                 if down is None:
                     continue
                 qb, quat_b = self.exe.solve(p_high, place_q, qa)
-                pdown = None if qb is None else self._tilt_line(p_low, quat_b, scale * m.get('place_speed_ratio', 1.0), qb)
+                pdown = None if qb is None else self._tilt_line(p_low, quat_b, scale * self._place_ratio(lc), qb)
                 if pdown is None:
                     continue
                 if less:
@@ -440,7 +465,7 @@ class PickPlaceNode(Node):
             if down is None:
                 why = '집기 내려가기 직선'
                 continue
-            lift = self.exe.plan_line((tcp0[0], tcp0[1], tcp0[2] + TIP_LIFT_M), q0, scale * m.get('pick_speed_ratio', 1.0),
+            lift = self.exe.plan_line((tcp0[0], tcp0[1], tcp0[2] + TIP_LIFT_M), q0, scale,       # 들기는 평소 속도(10/14 — 하강만 느리게)
                                       start_q=self.exe.positions(down)[-1])[0]
             if lift is None:
                 why = '들기 직선'
@@ -452,7 +477,7 @@ class PickPlaceNode(Node):
                 why = '기울여 놓기 위 IK'
                 continue
             qb = self._unwrap(qb, ql)
-            pdown = self._tilt_line(tcp1, q1, scale * m.get('place_speed_ratio', 1.0), qb)
+            pdown = self._tilt_line(tcp1, q1, scale * self._place_ratio(lc), qb)
             if pdown is None:
                 why = '기울여 내려가기 직선'
                 continue

@@ -25,6 +25,11 @@ RECIPE_SCHEMA = 'recipe/4.0'            # 구조(무엇을 어디에) — 10/11 
 PLACEMENTS_SCHEMA = 'placements/4.0'    # 조립 방법(순서 · 잡기 · 받침)
 CELL_M = 0.005          # 높이 지도 셀 (SDD §6.9 ②: 5 mm)
 ROI_SHRINK_M = 0.004    # 블록 자리를 사방 4 mm 줄여서 본다 — 가장자리 깊이 튐 · 1~3 mm 어긋남을 피한다
+# 바닥이 좁은 블록(위에서 본 두 변이 모두 SMALL_FOOTPRINT_M 미만 = 세움 24.8 × 14.8 mm)은 2 mm 만 줄인다 — 4 mm 면 남는 칸이
+# 2 ~ 4개라(5 mm 칸, 자리 · 방향에 따라) MIN_CELLS 를 못 채워 늘 unknown → 조립 첫 단계에서 UNKNOWN_BLOCK 으로 섰다
+# (10/14 실기 스캔 설계 세운 다리 3칸 · 박진용 — 무작위 20,000자리: 4 mm 면 66 ~ 91 % 가 6칸 미만, 2 mm 면 최소 7칸)
+ROI_SHRINK_SMALL_M = 0.002
+SMALL_FOOTPRINT_M = 0.03
 MIN_CELLS = 6           # 이보다 적은 셀이면 unknown (가려짐 · 깊이 구멍)
 TOL_FRACTION = 0.5      # 높이 허용 = 두께의 절반 (SDD §6.3 "기준 안: 두께 절반")
 
@@ -151,9 +156,12 @@ class BlockChecker:
             rot = np.asarray(b['rot'], float)
             ext = np.abs(rot) @ size / 2.0                       # base x · y · z 축 방향 반폭 (m)
             cx, cy, cz = b['center']
+            up = int(np.argmax(np.abs(rot[2])))                   # 위를 향한 블록 축(rot 열 = 블록 축의 base 방향)
+            flat_dims = [size[k] for k in range(3) if k != up]    # 위에서 본 두 변
+            shrink = ROI_SHRINK_SMALL_M if max(flat_dims) < SMALL_FOOTPRINT_M else ROI_SHRINK_M
             self.parts[b['part_id']] = {
                 'center': np.array([cx, cy, cz]), 'rot': rot, 'half': size / 2.0, 'ext': ext,
-                'top_z': cz + ext[2], 'height': 2 * ext[2], 'above_tops': [],
+                'top_z': cz + ext[2], 'height': 2 * ext[2], 'above_tops': [], 'shrink': shrink,
             }
         # 설계상 이 블록 위에 올라가는 블록들의 윗면 높이 — 가려진 블록을 '받침 있음'으로 추정할 때 쓴다
         for me in self.parts.values():
@@ -165,13 +173,14 @@ class BlockChecker:
                     me['above_tops'].append(other['top_z'])
 
     def _roi_cells(self, grid, x0, y0, blk):
-        """블록 자리(사방 ROI_SHRINK_M 줄임) 안에 들어가는 높이 지도 셀들의 z. 셀 중심을 블록 좌표로 돌려(rot 전치) 상자 안인지 본다."""
+        """블록 자리(사방 blk['shrink'] 줄임 — 보통 ROI_SHRINK_M, 바닥이 좁은 세운 블록은 ROI_SHRINK_SMALL_M) 안에 들어가는 높이 지도 셀들의 z.
+        셀 중심을 블록 좌표로 돌려(rot 전치) 상자 안인지 본다."""
         n = grid.shape[0]
         xs = x0 + (np.arange(n) + 0.5) * self.cell_m
         X, Y = np.meshgrid(xs, y0 + (np.arange(n) + 0.5) * self.cell_m, indexing='ij')
         d = np.stack([X - blk['center'][0], Y - blk['center'][1], np.zeros_like(X)], axis=-1)   # 수평 오프셋 (셀, 3)
         local = d @ blk['rot']                                    # rot^T · d (블록 축 성분)
-        inside = np.all(np.abs(local) <= blk['half'] - ROI_SHRINK_M, axis=-1)
+        inside = np.all(np.abs(local) <= blk['half'] - blk['shrink'], axis=-1)
         z = grid[inside]
         return z[~np.isnan(z)]
 

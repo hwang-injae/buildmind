@@ -634,3 +634,14 @@ def test_W144_기록_시작이_실패하면_덜_된_기록을_닫는다():
     assert m.state == 'ERROR'
     m.run_once()
     assert ('finish', False) in io.w144
+
+
+def test_조립_중이_아닐_때_정지가_풀려도_장면은_그대로_둔다():
+    """10/14 #174 리뷰 ①: 완성 · 대기에서 정지 → 다시 시작은 실물 블록이 남았을 수 있어 빈 진행표를 보내지 않는다
+    (장면은 다음 [조립] 출발 때 _clean_start 가 비운다 — 조립 끝 DONE 에도 그대로, 10/14 PL)."""
+    m, io = make()
+    io.progress.clear()
+    m.state, m._assembling = 'RECOVER', False
+    m._recover()
+    assert m.state == 'IDLE'
+    assert io.progress == []
