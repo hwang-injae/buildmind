@@ -171,7 +171,7 @@ def test_same_blocks_as_converter_2(design_id, n):
         rtb = pytest.importorskip('d2_task.recipe_to_parts')
     finally:
         sys.path.remove(str(ROOT / 'src/d2_task'))
-    want = rtb.RecipeToParts('scan_chair_01', 'chair', BLOCK_MM).convert(s, r)
+    want = rtb.RecipeToParts('scan_chair_01', BLOCK_MM).convert(s, r)
     got = structure_to_blocks(s, r, 'scan_chair_01', 'chair', 0)
     keys = ('x', 'y', 'z', 'ori')
     assert [b['scan_num'] for b in got['blocks']] == [b['sequence'] for b in want['parts']]     # 가짜 스캔 번호 = 조립 순서
