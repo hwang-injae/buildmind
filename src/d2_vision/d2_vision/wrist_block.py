@@ -34,6 +34,9 @@
             → {"ok":true,"blocks":[b]}(b = 위 칸 + "base_z_m" 받침 윗면) 또는 빈 받침 {"ok":true,"blocks":[]}. 카메라는 작업 관리자가
             먼저 받침 위로 옮겨 둔다. 컬러 · wrist_image 는 쓰지 않는다. 이때 height_map 은 받침 둘레(받침 가운데 ± 블록 길이/2 + 손가락 여유) 지도다.
       기울어진 블록(tilted true)에만 "center_top_z_m"(윗면 가운데 평면 높이 m) · "normal"(윗면 단위 법선, 위쪽)을 더한다(block_finder).
+        "area": "assembly" + "design_id" · "part_id"(10/14 W144 — 한석형 · 민범진) → 조립 자리에 방금 놓은 블록 하나를 깊이로만 잰다
+            (placed_measure.measure_placed — 설계 자리 둘레, YOLO 없음) → {"ok":true,"part_id","blocks":[b] 또는 [],"rejected","detail","measured_stamp"}.
+            못 재면(옆 블록과 붙음 · 덮임 · 세운 블록 · 기울어짐 · 점 부족 · 크기 다름 · 없음) blocks [] + rejected 코드 — 요청 오류(SCAN_FAILED)와 다르다.
   `/d2/vision/wrist_image`(sensor_msgs/CompressedImage, JPEG 품질 70, 640×480 그대로) — find_blocks 때마다 검출 결과
       (윤곽 · 번호 · up · yaw)를 그린 그림 한 장(IRD E-67 '때만 내도 됨'). 매 프레임 내지 않는다.
 
@@ -138,7 +141,8 @@ from d2_vision.block_finder import BlockFinder, base_image, draw_found, finder_c
 from d2_vision.design_cache import RunDesignCache
 # 요청 검사(run_id 를 폴더 이름으로 써도 되는지까지) · 레시피 두 파일 → blocks/2 는 가짜 노드와 같은 함수를 쓴다(ROS 없는 계산, 시험 있음)
 from d2_vision.height_grid import height_grid, spare_map_area, supply_map_area
-from d2_vision.mock_scan import find_options, load_recipe_files, parse_request, structure_to_blocks
+from d2_vision.mock_scan import assembly_target, find_options, load_recipe_files, parse_request, structure_to_blocks
+from d2_vision.placed_measure import measure_placed
 from d2_vision.spare_measure import measure_on_spare
 from d2_vision.structure_scanner import StructureScanner, family_of, save_capture, save_preview, scan_response
 from d2_vision.tcp_pose import TcpPose, camera_pose_mm, default_calib_path, load_calib, load_tilt_shift
@@ -197,6 +201,7 @@ class WristBlock(Node):
         self.scans = OrderedDict()            # run_id → {'scanner': StructureScanner, 'color': BGR 또는 None} — 추론 전 판만
         self.scan_lock = threading.Lock()
         self.find_lock = threading.Lock()     # BlockFinder 가 마지막 마스크를 들고 있어 한 번에 하나씩
+        self.design_lock = threading.Lock()   # 설계 캐시(RunDesignCache)를 check_progress · find_blocks(assembly)가 같이 쓴다 — 동시에 부르면 안전하지 않다
 
         self.cfg = self._load_robot_yaml()
         self.T_tcp2c = self._load_calib()
@@ -471,7 +476,8 @@ class WristBlock(Node):
         if not design_id:
             self.get_logger().error('check_progress 요청의 design_id 칸이 비었다(블록 %s …) — 설계를 고를 수 없다 → ERROR' % ids[:1])
             return self._fill(res, ids, reason='ERROR')
-        checker, reason = self.checker_for(design_id, req.run_id)
+        with self.design_lock:
+            checker, reason = self.checker_for(design_id, req.run_id)
         if checker is None:
             self.get_logger().error('설계 %r 를 못 읽어 답할 수 없다 → %s' % (design_id, reason))
             return self._fill(res, ids, reason=reason)
@@ -741,11 +747,14 @@ class WristBlock(Node):
         try:
             body = parse_request(req.request_json, ('run_id',))
             want_map, area = find_options(body)
+            target = assembly_target(body) if area == 'assembly' else None
         except ValueError as e:
-            return self._answer(res, 'find_blocks', self._fail(False, 'SCAN_FAILED', str(e)), t0)
+            return self._answer(res, 'find_blocks', self._fail(False, 'SCAN_FAILED', '요청 오류: %s' % e), t0)
         rid = body['run_id']
         if area == 'spare':
             return self._find_spare(res, rid, t0, want_map)
+        if area == 'assembly':
+            return self._find_assembly(res, rid, target, t0)
         snap, err = self._snapshot(self.scan_frames, need_color=True)
         if snap is None:
             return self._answer(res, 'find_blocks', err, t0)
@@ -789,6 +798,42 @@ class WristBlock(Node):
         if want_map:
             out['height_map'] = height_grid(pts, spare_map_area(self.cfg))
         return self._answer(res, 'find_blocks(spare)', (True, '', out), t0)
+
+
+    def _find_assembly(self, res, rid, target, t0):
+        """find_blocks area assembly: 조립 자리에 방금 놓은 블록 하나(design_id · part_id) → 설계 자리(check_progress 와 같은 설계 캐시)
+        둘레 깊이(scan_frames 장 평균) + TF 자세 → measure_placed. W144(한석형) 측정 입력 — 응답 꼴은 10/14 한석형 · 민범진.
+        출력: {"ok":true, "part_id", "blocks":[블록 하나] 또는 [], "rejected": null 또는 거절 코드(placed_measure.REJECTS), "detail",
+              "measured_stamp": 쓴 깊이 중 마지막 장을 받은 시각(초, 노드 시계)}. 측정 거절 · 블록 없음(NO_PART)은 ok true(이번엔 못 잼 — 다시 집지 않음).
+        실패(success false): 설계에 없는 part_id → SCAN_FAILED '요청 오류' · 설계를 못 읽음 → ERROR(get_design 시간 초과 TIMEOUT) ·
+        보정값 없음 · 계산 예외 → ERROR · TF · 깊이 시간 초과 → TIMEOUT. 바깥 영향: 로그(remote 면 get_design — 보통 check_progress 로 이미 캐시)."""
+        design_id, part_id = target
+        with self.design_lock:
+            checker, reason = self.checker_for(design_id, rid)
+        if checker is None:
+            return self._answer(res, 'find_blocks(assembly)', self._fail(False, reason, '설계 %s 를 못 읽음' % design_id), t0)
+        part = checker.parts.get(part_id)
+        if part is None:
+            return self._answer(res, 'find_blocks(assembly)', self._fail(False, 'SCAN_FAILED', '요청 오류: 설계 %s 에 없는 part_id %s' % (design_id, part_id)), t0)
+        snap, err = self._snapshot(self.scan_frames, need_color=False)
+        if snap is None:
+            return self._answer(res, 'find_blocks(assembly)', err, t0)
+        with self.lock:
+            stamp = self.last_frame_t                                     # _snapshot 이 쓴 마지막 깊이 장(바로 뒤 새 장이 왔으면 그 장 — 33 ms 안)
+        depth_mm, _, _, T = snap
+        try:
+            pts = depth_to_base_points(depth_mm / 1000.0, self.intr, T, stride=1)
+            b, why = measure_placed(pts, {'part_id': part_id, 'center': part['center'], 'rot': part['rot']}, self.cfg['block_actual_m'])
+        except Exception as e:                # 계산 예외로 노드가 죽지 않게 — 원인은 로그로
+            self.get_logger().error('find_blocks(assembly) %s %s 예외: %r' % (rid, part_id, e))
+            return self._answer(res, 'find_blocks(assembly)', self._fail(False, 'ERROR', '놓은 블록 재기 예외: %s' % e), t0)
+        out = {'ok': True, 'part_id': part_id, 'blocks': [b] if b else [], 'rejected': None if b else why[0],
+               'detail': '' if b else why[1], 'measured_stamp': round(float(stamp), 3)}
+        c = part['center']
+        self.get_logger().info('find_blocks(assembly) %s %s: 점 %d → %s' % (
+            rid, part_id, len(pts), '거절 %s — %s' % why if b is None else
+            '잼 dx %.1f · dy %.1f mm · yaw %.1f° · 윗면 %s mm' % ((b['x_m'] - c[0]) * 1000, (b['y_m'] - c[1]) * 1000, b['yaw_deg'], b['size_mm'])))
+        return self._answer(res, 'find_blocks(assembly)', (True, '', out), t0)
 
 
 def main(args=None):

@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 import yaml
 
-from d2_vision.mock_scan import (DEFAULT_FIND_BLOCK, MAX_RUNS, MockScan, blocks_to_points, find_options, load_recipe_files,
+from d2_vision.mock_scan import (DEFAULT_FIND_BLOCK, MAX_RUNS, MockScan, assembly_target, blocks_to_points, find_options, load_recipe_files,
                                   structure_to_blocks)
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -284,3 +284,36 @@ def test_find_options_bad_request_and_missing_robot(tmp_path):
     for req in ('{"run_id": "R1", "height_map": true}', '{"run_id": "R1", "area": "spare"}'):
         ok, reason, body = scanner(tmp_path).find(req)
         assert not ok and reason == 'ERROR' and body['ok'] is False
+
+
+# ---------------- find_blocks area assembly (10/14 W144 — 한석형 · 민범진) ----------------
+ASM = '{"run_id": "R1", "area": "assembly", "design_id": "001_CHAIR_BENCH_V000", "part_id": "001_CHAIR_BENCH_V000_LEG_001_01"}'
+
+
+def test_assembly_target_needs_design_and_part():
+    """area assembly 는 design_id · part_id(비지 않은 글자) 둘 다 — 없으면 ValueError(노드가 SCAN_FAILED '요청 오류')."""
+    assert find_options({'run_id': 'R1', 'area': 'assembly'}) == (False, 'assembly')
+    assert assembly_target({'design_id': 'D', 'part_id': 'D_LEG_001_01'}) == ('D', 'D_LEG_001_01')
+    for bad in ({}, {'design_id': 'D'}, {'part_id': 'P'}, {'design_id': '', 'part_id': 'P'}, {'design_id': 'D', 'part_id': 3}):
+        with pytest.raises(ValueError):
+            assembly_target(bad)
+
+
+def test_mock_assembly_default_is_rejected_not_failed(tmp_path):
+    """가짜 기본 답 = ok true · 빈 목록 · rejected FEW_POINTS(재지 않음) — 측정 거절은 요청 오류(success false)와 다르다. measured_stamp 를 붙인다."""
+    ok, reason, body = robot_scanner(tmp_path).find(ASM)
+    assert ok and reason == '' and body['ok'] is True and body['blocks'] == []
+    assert body['rejected'] == 'FEW_POINTS' and body['part_id'].endswith('LEG_001_01') and body['measured_stamp'] > 0
+
+
+def test_mock_assembly_param_gives_block_and_bad_request_is_scan_failed(tmp_path):
+    """find_assembly_json 에 블록을 주면 그 블록(+ part_id) · rejected null. design_id · part_id 가 없으면 SCAN_FAILED, 파라미터가 틀리면 ERROR."""
+    sc = robot_scanner(tmp_path)
+    ok, _, body = sc.find(ASM, assembly_json='{"blocks": [{"x_m": 0.43, "y_m": -0.07, "top_z_m": 0.015, "yaw_deg": 1.0, "up": "THICKNESS"}]}')
+    assert ok and body['rejected'] is None and body['blocks'][0]['part_id'] == '001_CHAIR_BENCH_V000_LEG_001_01'
+    ok, _, body = sc.find(ASM, assembly_json='{"blocks": [], "rejected": "NEIGHBOR_MERGED", "detail": "붙음"}')
+    assert ok and body['rejected'] == 'NEIGHBOR_MERGED' and body['detail'] == '붙음'
+    ok, reason, _ = sc.find('{"run_id": "R1", "area": "assembly", "design_id": "D"}')
+    assert not ok and reason == 'SCAN_FAILED'
+    ok, reason, _ = sc.find(ASM, assembly_json='[1, 2]')
+    assert not ok and reason == 'ERROR'

@@ -28,6 +28,7 @@
   IRD 예시 블록 하나, "[]" 면 빈 목록(WAIT_SUPPLY 시험). clear 는 gap_mm ≥ robot.yaml find.min_gap_mm 으로 다시 계산한다.
   선택 칸(10/13, wrist_block 과 같음): "height_map": true → 응답에 "height_map"(공급 영역 전체가 robot.yaml table_z_m 인 평평한 지도) ·
   "area": "spare" → 파라미터 find_spare_json 블록(비면 받침 spare_spots[0] 가운데 눕힌 블록 하나, "[]" 면 빈 받침). 칸 값이 틀리면 SCAN_FAILED.
+  "area": "assembly"(+ design_id · part_id, 10/14 W144) → 파라미터 find_assembly_json 답(비면 거절 FEW_POINTS — 재지 않음). 두 칸이 없으면 SCAN_FAILED.
   세 서비스의 계산(응답 만들기 · 파일 쓰기)은 mock_scan.MockScan(ROS 없음, pytest 로 시험). 잘못된 요청(JSON 아님 · run_id 없음)은
   success=false + 응답 {"ok":false,"reason","detail"}(reason: 요청 오류 SCAN_FAILED, find_blocks_json 파라미터 오류 ERROR).
 
@@ -44,6 +45,7 @@
   ros2 param set /mock_wrist_block scan_fail true                                                  # scan_infer ok:false SCAN_FAILED
   ros2 param set /mock_wrist_block find_blocks_json "'[]'"                                         # 공급 빔 → 작업 관리자 WAIT_SUPPLY
   ros2 param set /mock_wrist_block find_spare_json "'[]'"                                          # 받침 빔(area spare 답)
+  ros2 param set /mock_wrist_block find_assembly_json '{"blocks": [{"x_m": 0.43, "y_m": -0.07, "top_z_m": 0.015, "yaw_deg": 0.0, "up": "THICKNESS"}]}'   # 놓은 블록 잼(area assembly)
 시험 호출 (design_id 칸 + 전체 블록 이름):
   ros2 service call /d2/vision/check_progress d2_interfaces/srv/CheckProgress "{design_id: 001_CHAIR_BENCH_V000, part_ids: [001_CHAIR_BENCH_V000_LEG_001_01, 001_CHAIR_BENCH_V000_SEAT_001_03]}"
   ros2 service call /d2/vision/scan_capture d2_interfaces/srv/JsonQuery "{request_json: '{\\"pose_id\\": \\"observe_front\\", \\"run_id\\": \\"R1\\"}'}"
@@ -108,6 +110,7 @@ class MockWristBlock(Node):
         self.declare_parameter('scan_fail', False)       # True 면 scan_infer 가 ok:false SCAN_FAILED (격자 맞추기 실패 흉내)
         self.declare_parameter('find_blocks_json', '')   # find_blocks 블록 목록 JSON. 빈 값 = IRD 예시 블록 하나, "[]" = 공급 빔
         self.declare_parameter('find_spare_json', '')    # find_blocks area spare 블록 목록 JSON. 빈 값 = 받침 가운데 눕힌 블록 하나, "[]" = 빈 받침
+        self.declare_parameter('find_assembly_json', '')  # find_blocks area assembly 답 {"blocks":[…], "rejected", "detail"}. 빈 값 = 거절 FEW_POINTS(재지 않음)
 
         p = Path(get_package_share_directory('d2_bringup')) / 'config' / 'robot.yaml'
         self.cfg = yaml.safe_load(p.read_text(encoding='utf-8'))
@@ -300,7 +303,7 @@ class MockWristBlock(Node):
         """find_blocks 콜백. 입력 request_json {"run_id"[, "height_map"][, "area"]}. 출력 {"ok","blocks":[…][, "height_map"]}
         (find_blocks_json · find_spare_json 파라미터 또는 기본 블록 — MockScan.find). 바깥 영향: 로그."""
         out = self.scan.find(req.request_json, self.get_parameter('find_blocks_json').value,
-                             self.get_parameter('find_spare_json').value)
+                             self.get_parameter('find_spare_json').value, self.get_parameter('find_assembly_json').value)
         if out[0]:
             self.get_logger().info('find_blocks %s → 블록 %d개' % (req.request_json, len(out[2]['blocks'])))
         return self._answer('find_blocks', res, out)
