@@ -24,7 +24,8 @@
   blocks = 파라미터 scan_design_id 레시피 두 파일(recipe_dir)을 '스캔했다'고 흉내(설계 이름 scan_<scan_family>_<번호>,
   앞 순서 scan_inferred 개는 inferred: true). image_path · cloud_path 는 실제 파일(<임시 폴더>/d2_scan/<run_id>/color.png · cloud.ply,
   PLY 는 base_link m) — 다리가 읽어 보낼 수 있다. 그 run_id 로 촬영(scan_capture)을 안 했으면 ok:false SCAN_FAILED.
-- `/d2/vision/find_blocks`(JsonQuery): {"run_id"} → {"ok":true,"blocks":[…]}(IRD 4.2 칸). 파라미터 find_blocks_json 이 비면
+- `/d2/vision/find_blocks`(JsonQuery): {"run_id"} → {"ok":true,"blocks":[…],"image_seq":n}(IRD 4.2 칸 — image_seq 는 공급 답마다 1 늘리는 그림 번호,
+  wrist_block 과 같음. 가짜는 wrist_image 를 내지 않는다). 파라미터 find_blocks_json 이 비면
   IRD 예시 블록 하나, "[]" 면 빈 목록(WAIT_SUPPLY 시험). clear 는 gap_mm ≥ robot.yaml find.min_gap_mm 으로 다시 계산한다.
   선택 칸(10/13, wrist_block 과 같음): "height_map": true → 응답에 "height_map"(공급 영역 전체가 robot.yaml table_z_m 인 평평한 지도) ·
   "area": "spare" → 파라미터 find_spare_json 블록(비면 받침 spare_spots[0] 가운데 눕힌 블록 하나, "[]" 면 빈 받침). 칸 값이 틀리면 SCAN_FAILED.

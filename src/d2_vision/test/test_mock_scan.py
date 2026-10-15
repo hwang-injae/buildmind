@@ -195,20 +195,32 @@ def test_find_default_is_ird_example(tmp_path):
     assert b['clear'] == {'LENGTH': True, 'WIDTH': False}
     keys = ('x_m', 'y_m', 'top_z_m', 'yaw_deg', 'up', 'clear', 'gap_mm', 'overlap', 'tilted', 'confidence')
     assert set(b) == set(keys) | ({'center_top_z_m', 'normal'} if b['tilted'] else set())   # 기울어진 블록에만 두 칸(10/13)
-    assert set(body) == {'ok', 'blocks'}                                          # 선택 칸이 없으면 height_map 도 없다
+    assert set(body) == {'ok', 'blocks', 'image_seq'}                             # 선택 칸이 없으면 height_map 도 없다(image_seq 는 공급 답에 늘)
     assert 'clear' not in DEFAULT_FIND_BLOCK                                       # 기본값을 바꾸지 않는다
 
 
 def test_find_param_list_empty_and_sorted(tmp_path):
     """"[]" = 빈 목록(WAIT_SUPPLY 시험). 여러 개면 윗면 높이 높은 순, clear 는 다시 계산(파라미터 clear 를 믿지 않음)."""
     m = scanner(tmp_path)
-    assert m.find('{"run_id": "R1"}', '[]')[2] == {'ok': True, 'blocks': []}
+    assert m.find('{"run_id": "R1"}', '[]')[2] == {'ok': True, 'blocks': [], 'image_seq': 1}
     rows = [dict(DEFAULT_FIND_BLOCK, top_z_m=-0.003, gap_mm={'LENGTH': MIN_GAP, 'WIDTH': 30.0}, clear={'LENGTH': False}),
             dict(DEFAULT_FIND_BLOCK, top_z_m=0.012, up='WIDTH', gap_mm={'LENGTH': 10.0, 'THICKNESS': 40.0}, overlap='top')]
     _, _, body = m.find('{"run_id": "R1"}', json.dumps(rows))
     assert [b['top_z_m'] for b in body['blocks']] == [0.012, -0.003]
     assert body['blocks'][0]['clear'] == {'LENGTH': False, 'THICKNESS': True}
     assert body['blocks'][1]['clear'] == {'LENGTH': True, 'WIDTH': True}
+
+
+def test_find_image_seq_counts_supply_answers_only(tmp_path):
+    """image_seq(10/14 22시 PL) = 공급 답(area 없음)마다 1, 2, 3 … — 빈 목록 답에도 싣는다. 받침 · 조립 자리 답에는 없고 번호도 안 늘린다
+    (작업 관리자가 고른 블록을 state pick.image_seq 로 이 번호에 맞춘다 — wrist_block 과 같은 칸)."""
+    sc = robot_scanner(tmp_path)
+    assert sc.find('{"run_id": "R1"}')[2]['image_seq'] == 1
+    assert sc.find('{"run_id": "R1"}', '[]')[2]['image_seq'] == 2
+    assert 'image_seq' not in sc.find('{"run_id": "R1", "area": "spare"}')[2]
+    assert 'image_seq' not in sc.find(ASM)[2]
+    assert sc.find('{"run_id": "R1", "height_map": true}')[2]['image_seq'] == 3
+    assert 'image_seq' not in sc.find('{"run_id": "R1"}', '{')[2]                  # 실패 답에는 없다
 
 
 @pytest.mark.parametrize('param', ['{', '{"a": 1}', '[1]', '[{"x_m": 0.4}]'])
@@ -241,7 +253,7 @@ def test_find_height_map_is_flat_table(tmp_path):
     """height_map true → 공급 영역을 손가락 여유(가장 넓게 연 폭/2 + 손가락 두께)만큼 넓힌 영역 전체가 table_z_m 인 지도, 셀 2 mm,
     z_m 길이 = nx · ny. 블록 답은 그대로."""
     ok, _, body = robot_scanner(tmp_path).find('{"run_id": "R1", "height_map": true}')
-    assert ok and set(body) == {'ok', 'blocks', 'height_map'} and len(body['blocks']) == 1
+    assert ok and set(body) == {'ok', 'blocks', 'height_map', 'image_seq'} and len(body['blocks']) == 1
     hm = body['height_map']
     area = CFG['supply_area_m']
     m = max(CFG['grasp_open_pick_m'].values()) / 2 + CFG['finger']['thickness_m']

@@ -24,9 +24,9 @@ UPS = ('THICKNESS', 'WIDTH', 'LENGTH')
 # 위로 선 축별 수평 두 축 (축 이름, yaw 에 더하는 각 °) — scatter_pick.block_pose 규약: 눕힘 · 옆으로 섬은 yaw = 길이 방향, 세움은 yaw = 폭 방향
 HORIZ = {'THICKNESS': (('LENGTH', 0.0), ('WIDTH', 90.0)), 'WIDTH': (('LENGTH', 0.0), ('THICKNESS', 90.0)),
          'LENGTH': (('WIDTH', 0.0), ('THICKNESS', 90.0))}
-POSE_KO = {'THICKNESS': '눕힘', 'WIDTH': '옆으로 섬', 'LENGTH': '세움'}
 TILT_ABOVE_LEVEL = 1.5   # 기울어진 블록이 이 층 이상이면 실제 높이로 위층 취급, 아래면 1층(바닥에서 조금 들린 것 — 10/14 #174 리뷰 ②)
 TIER_NAMES = {1: '덮은 블록 치우기', 2: '눕힘 곧게', 3: '눕힘 틀기', 4: '기울여 집기', 5: '옆으로 선·선', 6: '큰 옮김'}
+GROUP_NAMES = {0: '눕힌 블록', 1: '선 블록', 2: '큰 옮김'}     # 줄 세우기 첫 열쇠 묶음(rank 의 group) — 꼬리표 맨 앞(10/14 22시 PL)
 
 
 def rect(cx, cy, yaw, half_a, half_b):
@@ -262,6 +262,9 @@ class PickRanker:
         실패한 시도(failed) · 기울어진 옆으로 선 · 선 블록 ·
         center_top_z_m 이 없거나 손가락 자리가 막힌 기울어진 블록 · pts 가 있으면 깊이로 손가락 자리가 막힌 후보.
         잡기 'TILT' = 기울어진 눕힌 블록을 공구를 기울여 좁은 폭으로 집기. blocks 가 목록이 아니면 ValueError(부르는 쪽 실수).
+        꼬리표 = 줄 세우는 열쇠 순서대로 '묶음 · 높이 N층 · 칸 이름 · 열림 n · 잡기 · 방법 · 틈 n mm'
+        (예 '눕힌 블록 · 높이 3층 · 눕힘 곧게 · 열림 0 · FLAT_LONG · 곧게 · 틈 99 mm'). 높이 = 반듯한 블록은 정수 층(layer_of),
+        기울어진 블록은 실제 높이 소수 한 자리(level_of — 예 '높이 2.4층').
         """
         if not isinstance(blocks, list):
             raise ValueError(f'blocks 가 목록이 아니다: {type(blocks).__name__}')
@@ -304,7 +307,12 @@ class PickRanker:
                 group = 0 if tier <= 4 else (1 if tier == 5 else 2)     # 눕힌 블록 → 선 블록 → 큰 옮김(잡을 게 없을 때만)
                 key = (group, -self.level_of(b), tier, -fr, method, 0 if grasp == 'TILT' else self.GRASP_ORDER.index(grasp), abs(dyaw), abs(s),
                        -self.gap_of(b, grasp))
-                tag = (f'{tier}칸 {TIER_NAMES[tier]} · 층{lay} · 열림{fr} · {POSE_KO[b["up"]]}{" 기울어짐" if grasp == "TILT" else ""} · {grasp} · '
+                # 꼬리표는 위 열쇠 순서대로(묶음 → 높이 → 칸 → 열림 → 잡기 → 방법 → 틈) — 화면 손목 그림 아래에서 왜 이 블록이 먼저인지
+                # 앞에서부터 읽히게(10/14 22시 PL · 박진용 ③, 글자만 — 순서는 key 가 정함). 높이는 key 의 level_of 를 그대로 보인다:
+                # 반듯한 블록은 정수 층(lay), 기울어진 블록은 소수 한 자리 — 반올림하면 2.4층 기울어진 블록이 반듯한 2층보다 먼저 집혀도
+                # 둘 다 '높이 2층'으로 보였다(10/15 PL '가' · 박진용 #183 리뷰)
+                height = f'{self.level_of(b):.1f}' if b.get('tilted') else f'{lay}'
+                tag = (f'{GROUP_NAMES[group]} · 높이 {height}층 · {TIER_NAMES[tier]} · 열림 {fr} · {grasp} · '
                        f'{"기울여 집기" if grasp == "TILT" else self.method_of(dyaw, s)} · 틈 {self.gap_of(b, grasp):.0f} mm')
                 rows.append((key, i, grasp, dyaw, s, tag))
         rows.sort(key=lambda r: r[0])

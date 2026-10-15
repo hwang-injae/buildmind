@@ -311,7 +311,9 @@ class ScatterFlow:
         세움 · 옆세움 레시피는 세우기 교시(robot.yaml standup_taught)가 있을 때만 받침으로 옮긴다(없으면 STAND_NOT_READY).
         옆으로 섬은 긴 축이 받침 방향(spot yaw_deg), 섬은 넘어지는 쪽(yaw + 90°)이 받침 긴 변(support_long_yaw)이 되게 — 짧은 변으로 넘기면
         넘기기 전 세운 자리가 받침 밖(가운데에서 44.6 mm).
-        반환 status: SPARE(request — 받침에 놓는 PickPlace 칸 + 내부 표시 'via_spare': True, attempt = failed 에 넣을 꼴, tag = 고른 이유)
+        반환 status: SPARE(request — 받침에 놓는 PickPlace 칸 + 내부 표시 'via_spare': True, attempt = failed 에 넣을 꼴, tag = 고른 이유,
+        pick = 손목 그림 집기 순위 {image_seq(응답 값 — 없거나 정수가 아니면 None), index(고른 블록의 응답 blocks 1부터 번호),
+        ranks(해 볼 순서대로 블록 번호 — 블록마다 처음 나온 자리 한 번, 후보 줄이 있는 블록만), reason(= tag)} — 작업 관리자가 state/2 pick 으로 낸다)
         · EMPTY · NO_MATCH(counts · message) · NOT_CONFIGURED · LOOKUP_FAILED · BLOCKED(값이 틀린 블록이 하나라도 있음 · 받침 자리 설정 틀림). 바깥 영향 없음.
         """
         if not self.configured:
@@ -365,8 +367,13 @@ class ScatterFlow:
         request = {'part_id': target['part_id'], 'supply_slot': '', 'grasp': grasp, 'pick_pose': pick_pose,
                    'place_pose': ((sc[0], sc[1], sc[2] + shift), sq), 'open_width_m': self.open_width_m,
                    'obstacles': obstacles, 'via_spare': True}
+        # 손목 그림에 블록마다 집기 순위 · 고른 블록을 그리게(10/14 22시 PL) — 위에서 거른 뒤의 실제 순서라 ranks 첫 번호 = 고른 블록.
+        # image_seq 는 비전이 이 응답을 만든 그림 번호(옛 · 가짜 비전은 없음 → None — 그래도 pick 은 낸다)
+        seq = response.get('image_seq')
+        pick = {'image_seq': seq if isinstance(seq, int) and not isinstance(seq, bool) else None, 'index': i + 1,
+                'ranks': list(dict.fromkeys(r[0] + 1 for r in ranked)), 'reason': tag}
         return {'status': 'SPARE', 'request': copy.deepcopy(request), 'candidate': copy.deepcopy(response['blocks'][i]), 'gap_mm': None,
-                'attempt': (b['x_m'], b['y_m'], grasp, dyaw, slide), 'tag': tag}
+                'attempt': (b['x_m'], b['y_m'], grasp, dyaw, slide), 'tag': tag, 'pick': pick}
 
     def can_stand(self, up):
         """목표 자세 up 을 받침 경유로 만들 수 있나 — 눕힘은 늘, 세움 · 옆세움은 robot.yaml standup_taught(세우기 교시)에 그 동작이 있을 때."""
