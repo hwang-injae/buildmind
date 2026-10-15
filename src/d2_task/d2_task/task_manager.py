@@ -258,6 +258,7 @@ class TaskManager:
         self._spare_on = None                     # 받침에 놓아 둔 블록의 목표 part_id(있으면 다음 SELECT 가 공급 대신 받침부터 마무리한다)
         self._w144_due = None                     # 닫을 W144 기록(조립 결과 DONE 인가) — 잠금 밖 작업 스레드가 닫는다(10/14 #152 리뷰 3)
         self._w144_starting = False               # 출발했고 W144 기록을 아직 안 열었다 — CHECK 첫 단계가 잠금 밖에서 연다(#152 리뷰 3)
+        self._w144_reopen = False                 # 조립 중 정지로 W144 녹화를 닫았다 — [다시 시작]으로 이어 가면 새로 연다(10/15 박진용)
         self._spare_centers = 0                   # 받침 위 이 블록에 받침 맞추기를 한 수 — 맞춘 뒤 다시 재서 2 mm 넘으면 다시(scatter_pick.CENTER_MAX 번까지)
         self._spare_failed = []                   # 이번 블록에서 받침으로 옮기다 안 된 시도 [(x_m, y_m, 잡기, 각도 °, 옮김 m)] — 같은 후보를 다시 고르지 않게
         self._plan_streak = 0                     # 움직이기 전 길 계산 거절이 연달아 몇 번(받침 경유) — PLAN_STREAK 번이면 사람
@@ -1383,6 +1384,8 @@ class TaskManager:
         if grip.get('grasped'):
             return self._to_error('그리퍼가 블록을 쥐고 있어 이어 갈 수 없어요 → 쥔 블록을 먼저 빼야 해요 → 블록을 받칠 사람과 함께 [정지] → [그리퍼 열기] → [다시 시작]')
         self._recover_slow = True
+        if self._w144_reopen:                      # 정지 때 닫은 W144 녹화를 CHECK 첫 단계가 새 폴더로 다시 연다(녹화 꺼짐이면 아무것도 안 함)
+            self._w144_reopen, self._w144_starting = False, True
         if self._scatter is not None and self._scatter.via_spare:
             # 받침 경유: 사람이 확인하고 [다시 시작]하면 시도 수 · 안 된 후보를 비우고 이어 간다(one_pick hold → Enter 와 같음).
             # 받침 기록(_spare_on)은 남겨 받침 위 블록부터 다시 잰다
@@ -1912,6 +1915,10 @@ class TaskManager:
                 return
             self._assembling = self.state in RUN_STATES and not self._scan_run
             self._cleaned = False
+            if self._assembling and getattr(self.io, 'w144_finish', None) is not None:
+                # 조립 중 정지면 W144 녹화를 바로 닫는다(닫으면 초당 2장으로 줄이고 원본을 지운다) — 닫지 않으면 [다시 시작] · [초기화] 전까지
+                # 원본(카메라 30 Hz)이 분당 약 2.6 GB 씩 쌓였다(10/14 V008 24 GB · V009 57 GB). [다시 시작]으로 이어 가면 RECOVER 가 새로 연다
+                self._w144_due, self._w144_reopen = False, True
             self._entered_count = self.safety_count
             self._pending_start = False
             self.logger.count_stop()
@@ -1957,6 +1964,7 @@ class TaskManager:
             self._finish_run('STOPPED')
         self.logger.clear()
         self.run_id = None
+        self._w144_reopen = False
         if self._scatter is not None:
             self._scatter.invalidate()
         self._recover_slow = False
