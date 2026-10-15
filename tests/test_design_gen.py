@@ -28,7 +28,7 @@ from design_store import DesignStore, split_design_id  # noqa: E402
 RECIPES = ROOT / 'src' / 'd2_robot' / 'd2_bringup' / 'recipes'
 CFG = yaml.safe_load((ROOT / 'src' / 'd2_robot' / 'd2_bringup' / 'config' / 'robot.yaml').read_text(encoding='utf-8'))
 RULES = {'block_size_m': CFG['block_size_m'], 'margin_mm': CFG['check']['margin_mm'], 'max_blocks': CFG['check']['max_blocks'],
-         'finger_thickness_m': CFG['finger']['thickness_m'], 'finger_width_m': CFG['finger']['width_m'],
+         'finger_thickness_m': CFG['finger']['thickness_m'], 'finger_width_m': CFG['finger']['width_m'], 'grasp_depth_m': CFG['grasp_depth_m'],
          'assembly_area_half_m': CFG['assembly_area_half_m']}      # app.load_rules 와 같은 키(E-78)
 TEMPLATE, BENCH = '001_CHAIR_BENCH', '001_CHAIR_BENCH_V000'
 

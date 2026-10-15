@@ -62,7 +62,7 @@ class FrontendFiles(StaticFiles):
 def load_rules(path=ROBOT_YAML):
     """robot.yaml 에서 웹이 쓰는 키만 읽는다(10/9 PL E-78 — 측정값 · 자세 · 원점은 안 읽음).
 
-    출력: {block_size_m, margin_mm, max_blocks, finger_thickness_m, finger_width_m, assembly_area_half_m,
+    출력: {block_size_m, margin_mm, max_blocks, finger_thickness_m, finger_width_m, grasp_depth_m, assembly_area_half_m,
            req_timeout_s, alive_s, lost_after_s}. 실패: 파일 · 키가 없으면 예외 — 다리 · 검사 묶음과 다른 값으로 돌지 않게 켜지 않는다.
     """
     with open(path, encoding='utf-8') as f:
@@ -73,6 +73,7 @@ def load_rules(path=ROBOT_YAML):
         'max_blocks': cfg['check']['max_blocks'],
         'finger_thickness_m': cfg['finger']['thickness_m'],
         'finger_width_m': cfg['finger']['width_m'],
+        'grasp_depth_m': cfg['grasp_depth_m'],           # 손가락 끝 깊이 — AI 프롬프트 손가락 자리 규칙이 검사 프로그램(_fingers_free)과 같은 값을 쓰게(W201)
         'assembly_area_half_m': cfg['assembly_area_half_m'],
         'req_timeout_s': cfg['mqtt']['req_timeout_s'],   # 다리와 같은 MQTT 시간 값(IRD 9장) — 두 PC 가 같은 숫자를 쓰게
         'alive_s': cfg['mqtt']['alive_s'],

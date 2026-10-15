@@ -28,6 +28,7 @@ from pathlib import Path
 
 import yaml
 
+from d2_task.assembly_feasibility import MIN_BEARING_MM
 from d2_task.design_checker import DesignChecker
 from d2_task.recipe_document import GRASPS
 from d2_task.recipe_to_parts import ORIS, ori_extents   # 방향 코드 · 표 정본(10/14 PL C2)
@@ -127,7 +128,8 @@ class DesignGenerator:
             L=L, W=W, T=T, area_half=round(rules['assembly_area_half_m'] * 1000), margin=rules['margin_mm'],
             edge=f"{L / 2 - rules['margin_mm']:g}", half_L=f'{L / 2:g}', two_L=2 * L,     # 받침 예시 숫자(다리 끝 안쪽 · 이어 붙이기)
             max_blocks=rules['max_blocks'], finger_t=round(rules['finger_thickness_m'] * 1000, 1),
-            finger_w=round(rules['finger_width_m'] * 1000, 1), roles='\n'.join(role_lines))
+            finger_w=round(rules['finger_width_m'] * 1000, 1), grasp_depth=round(rules['grasp_depth_m'] * 1000, 1),
+            min_bearing=f'{MIN_BEARING_MM:g}', roles='\n'.join(role_lines))     # 손가락 · 닿는 면 값은 검사 프로그램 · W201 과 같은 곳에서(W201 규칙을 AI 도 알게)
 
     @property
     def client(self):

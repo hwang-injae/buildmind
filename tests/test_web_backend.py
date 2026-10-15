@@ -334,7 +334,7 @@ class FakeMqtt:
 
 
 RULES = {'block_size_m': [0.075, 0.025, 0.015], 'margin_mm': 7, 'max_blocks': 54, 'finger_thickness_m': 0.0114,
-         'finger_width_m': 0.02, 'assembly_area_half_m': 0.15, 'req_timeout_s': 5, 'alive_s': 1, 'lost_after_s': 3}
+         'finger_width_m': 0.02, 'grasp_depth_m': 0.011, 'assembly_area_half_m': 0.15, 'req_timeout_s': 5, 'alive_s': 1, 'lost_after_s': 3}
 
 
 RECIPES = ROOT / 'src' / 'd2_robot' / 'd2_bringup' / 'recipes'
