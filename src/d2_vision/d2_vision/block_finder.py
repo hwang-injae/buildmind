@@ -737,6 +737,8 @@ TARGET_BGR = (0, 0, 255)     # 받침 목표 자리 상자 색(빨강, 10/14 22�
 UP_NAME = {'THICKNESS': 'FLAT', 'WIDTH': 'EDGE', 'LENGTH': 'STAND'}
 LABEL_SCALE = 0.4            # 글자 크기(FONT_HERSHEY_SIMPLEX 배율) — 화면을 덜 가리게 작게(10/14 20시 PL), 640×480 에서 블록 하나 폭 정도
 BADGE_SCALE = 0.5            # 우선순위 번호 동그라미 글자 크기 — 낱말(LABEL_SCALE)보다 조금 크게, 블록(640×480 에서 폭 ~40 px) 안에 들게
+BADGE_STEP_PX = 3            # 번호 동그라미 자리 후보 격자 간격(픽셀) — 블록 하나에 후보 수백 개, 가운데에서 3 px 안쪽까지 맞춤
+BADGE_OFF_PENALTY = 1000.0   # 블록 밖 후보 벌점(픽셀 거리에 더함) — 블록 안에 글자와 안 겹치는 자리가 있으면 늘 그쪽을 고르게
 PICK_ALPHA = 0.35            # 고른 블록 마스크 채우기 진하기 — 블록 결이 비쳐 보이게 반투명
 AXIS_PX = 25                 # 받침 그림 왼쪽 위 base +x · +y 방향 화살표 길이(픽셀) — 받침 관측 자세는 사진이 돌아가 있어 'dx dy' 방향을 보여 준다
 
@@ -758,7 +760,7 @@ def tilt_deg(b):
 
 def block_label(b):
     """그림 글자 한 줄: 자세 이름 + 기울었으면 ' TILT n'(기울기 각 °, normal 이 없으면 ' TILT'). 예: 'FLAT' · 'STAND TILT 8'.
-    번호는 글자에 넣지 않는다 — 고르는 우선순위는 블록 가운데 동그라미 번호로 따로(draw_found ranks, 10/14 22시 PL: 번호 = 우선순위,
+    번호는 글자에 넣지 않는다 — 고르는 우선순위는 블록 위 동그라미 번호로 따로(draw_found ranks, 10/14 22시 PL: 번호 = 우선순위,
     find_blocks 응답 순서 번호와 헷갈리지 않게). 입력: b = find_blocks 블록 dict(up · tilted · normal). 출력: ASCII 글자. 바깥 영향 없음."""
     name = UP_NAME.get(b['up'], b['up'])
     if not b.get('tilted'):
@@ -806,16 +808,47 @@ def _overlaps(a, b):
     return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
 
 
+def _badge_size(cv2, n):
+    """번호 동그라미 n 의 숫자 크기 (w, h)와 반지름 r (픽셀). 바깥 영향 없음."""
+    (w, h), _ = cv2.getTextSize(str(n), cv2.FONT_HERSHEY_SIMPLEX, BADGE_SCALE, 2)
+    return w, h, max(w, h) // 2 + 5
+
+
+def _badge_spot(cv2, img, n, m, avoid):
+    """번호 동그라미 n 을 놓을 가운데 (x, y) 픽셀 — 블록 마스크 m 의 가운데에서 가장 가까우면서 avoid 상자(글자 · 먼저 놓은 동그라미,
+    (x0, y0, x1, y1))와 안 겹치는 자리. 10/15 PL '가'(박진용 실기): 늘 가운데에 두면 얇은 · 기울어진 블록에서 윤곽 바로 위
+    'FLAT TILT n' 글자를 덮어 읽기 어려웠다. 후보 = 블록 둘레(지름 + 여유만큼 넓힌 상자)의 BADGE_STEP_PX 격자 점을 영상 안으로 당긴 것,
+    블록 밖 점은 BADGE_OFF_PENALTY 를 더해 블록 안 자리가 있으면 그쪽을 고른다. 안 겹치는 자리가 없으면 가운데. 바깥 영향 없음."""
+    m = np.asarray(m, bool)
+    _, _, r = _badge_size(cv2, n)
+    H, W = m.shape
+    vs, us = np.nonzero(m)
+    cx, cy = us.mean(), vs.mean()
+    pad = 2 * r + 6
+    X, Y = np.meshgrid(np.arange(max(us.min() - pad, 0), min(us.max() + pad, W - 1) + 1, BADGE_STEP_PX),
+                       np.arange(max(vs.min() - pad, 0), min(vs.max() + pad, H - 1) + 1, BADGE_STEP_PX))
+    X, Y = np.clip(X.ravel(), r + 1, W - r - 2), np.clip(Y.ravel(), r + 1, H - r - 2)   # _put_badge 와 같은 당김
+    ok = np.ones(X.shape, bool)
+    for a in avoid:                              # 동그라미 상자 = 가운데 ± (r + 테 굵기 반)
+        ok &= ~((X - r - 1 < a[2]) & (a[0] < X + r + 1) & (Y - r - 1 < a[3]) & (a[1] < Y + r + 1))
+    if not ok.any():
+        return cx, cy
+    cost = np.hypot(X - cx, Y - cy) + np.where(m[Y, X], 0.0, BADGE_OFF_PENALTY)
+    cost[~ok] = np.inf
+    i = int(np.argmin(cost))
+    return int(X[i]), int(Y[i])
+
+
 def _put_badge(cv2, img, n, center):
-    """우선순위 번호 동그라미(흰 바탕 · 검은 숫자 · 검은 테)를 center(픽셀)에 — 영상 밖으로 나가지 않게 당긴다. 바깥 영향: img 를 고친다."""
-    txt = str(n)
-    (w, h), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, BADGE_SCALE, 2)
-    r = max(w, h) // 2 + 5
+    """우선순위 번호 동그라미(흰 바탕 · 검은 숫자 · 검은 테)를 center(픽셀)에 — 영상 밖으로 나가지 않게 당긴다.
+    반환: 그린 동그라미 상자 (x0, y0, x1, y1). 바깥 영향: img 를 고친다."""
+    w, h, r = _badge_size(cv2, n)
     x = min(max(int(center[0]), r + 1), img.shape[1] - r - 2)
     y = min(max(int(center[1]), r + 1), img.shape[0] - r - 2)
     cv2.circle(img, (x, y), r, (255, 255, 255), -1)
     cv2.circle(img, (x, y), r, (0, 0, 0), 2)
-    cv2.putText(img, txt, (x - w // 2, y + h // 2), cv2.FONT_HERSHEY_SIMPLEX, BADGE_SCALE, (0, 0, 0), 2)
+    cv2.putText(img, str(n), (x - w // 2, y + h // 2), cv2.FONT_HERSHEY_SIMPLEX, BADGE_SCALE, (0, 0, 0), 2)
+    return x - r - 1, y - r - 1, x + r + 1, y + r + 1
 
 
 def draw_found(color, blocks, masks, mask_index, ranks=None, pick=None):
@@ -827,12 +860,14 @@ def draw_found(color, blocks, masks, mask_index, ranks=None, pick=None):
           pick = 고른 블록 번호(1부터, pick.index) — 그 블록만 마스크를 칠하고 테두리를 굵게.
     출력: 같은 크기 BGR 새 그림(자르거나 줄이지 않음).
     블록마다 윤곽(overlap 색) + block_label 글자('FLAT' · 'STAND TILT 8')를 윤곽 위쪽 가운데에 작게(블록을 덜 가리게, 10/14 20시 PL) +
-    순위가 있으면 가운데에 번호 동그라미(1 = 먼저 집을 블록, 10/14 22시 PL — 순위 없는 블록은 동그라미 없음). find 직후(순위 전)
-    그림에는 번호가 없다. 글자 · 동그라미는 영상 테두리 블록이어도 영상 안에 둔다. 바깥 영향 없음. 실패: cv2 가 없으면 ImportError."""
+    순위가 있으면 번호 동그라미(1 = 먼저 집을 블록, 10/14 22시 PL — 순위 없는 블록은 동그라미 없음)를 블록 가운데에 — 어느 글자와
+    겹치면 가운데에서 가장 가까운 안 겹치는 자리로 비킨다(_badge_spot, 10/15 PL '가'). find 직후(순위 전) 그림에는 번호가 없다.
+    글자 · 동그라미는 영상 테두리 블록이어도 영상 안에 둔다. 바깥 영향 없음. 실패: cv2 가 없으면 ImportError."""
     import cv2
     img = np.ascontiguousarray(color).copy()
     rank_of = {int(n): r for r, n in enumerate(ranks or [], 1)}
     used = []                                    # 이미 그린 글자 상자 — 겹친 블록 글자가 서로 덮지 않게(10/14 시안: 'FLAT' 둘이 겹쳐 'FLATLAT')
+    badges = []                                  # (순위, 마스크) — 글자를 다 그린 뒤에 놓아 뒤 블록 글자와도 안 겹치게
     for k, (b, mi) in enumerate(zip(blocks, mask_index)):
         m = np.asarray(masks[mi], np.uint8)
         bgr = OVERLAP_BGR.get(b['overlap'], (255, 255, 255))
@@ -849,7 +884,9 @@ def draw_found(color, blocks, masks, mask_index, ranks=None, pick=None):
             org = (org[0], int(vs.max()) + h + 6)
         used.append(_put_label(cv2, img, txt, org, center=True))
         if k + 1 in rank_of and len(us):
-            _put_badge(cv2, img, rank_of[k + 1], (us.mean(), vs.mean()))
+            badges.append((rank_of[k + 1], m))
+    for n, m in sorted(badges, key=lambda t: t[0]):     # 1번부터 — 먼저 집을 블록이 가운데 자리를 먼저 갖게
+        used.append(_put_badge(cv2, img, n, _badge_spot(cv2, img, n, m, used)))
     return img
 
 

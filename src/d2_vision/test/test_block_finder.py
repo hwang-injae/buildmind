@@ -503,6 +503,24 @@ def test_draw_found_rank_badges_and_pick_fill():
     assert ranked[core2][0][1] > 60                                          # 초록(none) 쪽으로 물듦
 
 
+def test_draw_found_badge_moves_off_label():
+    """10/15 PL '가'(박진용 실기): 얇은 기울어진 블록은 가운데 동그라미가 윤곽 바로 위 'FLAT TILT n' 글자를 덮었다 — 동그라미는
+    글자와 안 겹치는 블록 안 자리로 비킨다(글자 자리 · 순서는 그대로)."""
+    pytest.importorskip('cv2')
+    color = np.full((H, W, 3), 60, np.uint8)
+    m = np.zeros((H, W), bool)
+    m[200:212, 260:380] = True                    # 높이 12 px — 가운데(206)에 두면 동그라미(반지름 ~10)가 윗변 위 글자까지 닿는다
+    t = math.radians(12)
+    blk = {'up': 'THICKNESS', 'overlap': 'none', 'tilted': True, 'normal': [0.0, math.sin(t), math.cos(t)]}
+    plain = draw_found(color, [blk], [m], [0])
+    ranked = draw_found(color, [blk], [m], [0], ranks=[1])
+    lv, lu = np.nonzero((plain != 60).any(axis=2) & (np.arange(H)[:, None] < 198))   # 글자 픽셀(윗변 윤곽 테는 뺌)
+    bv, bu = np.nonzero((ranked != plain).any(axis=2))                                # 동그라미 픽셀
+    assert len(lv) and len(bv)
+    assert not ((bu >= lu.min()) & (bu <= lu.max()) & (bv >= lv.min()) & (bv <= lv.max())).any()   # 글자 상자와 안 겹침
+    assert m[int(round(bv.mean())), int(round(bu.mean()))]                             # 동그라미 가운데는 블록 안
+
+
 @pytest.mark.parametrize('k', [0, 11])
 def test_draw_found_label_inside_image_at_border(k):
     """오른쪽 아래 테두리에 닿은 블록도 긴 글자('STAND TILT')가 영상 밖으로 나가지 않는다(옛 고정 90 px 당김은 잘렸다)."""
