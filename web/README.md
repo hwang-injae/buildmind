@@ -43,7 +43,7 @@ cd web/frontend && NEXT_PUBLIC_BACKEND=http://localhost:8000 npm run dev
 
 설계 생성(`design_gen`)은 **웹 PC에 로그인된 Claude Code**로 부른다. 컨테이너 안에는 Claude 로그인이 없으므로 웹 PC **호스트**에서 중계 `web/claude_bridge.py`를 띄우고,
 `design_gen`은 OpenAI 라이브러리 그대로 주소(`D2_LLM_URL`)만 중계로 돌린다(키는 보내지 않음). 중계는 OpenAI 형식 요청을 `claude -p --json-schema`로 바꾼다
-(도구 · MCP · 파일 접근 없이, 빈 임시 폴더에서). 음성 STT(Whisper)는 그대로 OpenAI 키를 쓴다.
+(도구 · MCP · 파일 접근 없이, 빈 임시 폴더에서). 음성 받아 적기(gpt-4o-mini-transcribe, 안 되면 whisper-1)는 그대로 OpenAI 키를 쓴다.
 
 ```bash
 # 0) 한 번: 웹 PC 에서 Claude Code 로그인(데스크톱 앱 또는 claude 명령) — 중계는 그 계정의 구독 한도를 쓴다
@@ -190,7 +190,7 @@ web/backend/
 │   │                 (스캔 사진 · 점군 · 손목 영상은 W127 나머지 뒤)
 │   ├── designs.py    /api/designs 목록 · 상세 · 규칙 숫자(W111 최소형 ✅) · 생성 · 고르기 · 스캔 저장(W108 · W112 · W116) → DesignGenerator · DesignStore
 │   ├── ws.py         /ws(W126 ✅) {"type", "data"} 한 겹 — 붙으면 들고 있는 값 먼저, 그 뒤 바뀔 때마다(밀리면 오래된 것부터 버림)
-│   └── voice.py      /api/voice — 화면 마이크 → d2/hmi/voice/listen → 호스트 voice(Whisper → 의도 → MQTT d2/hmi/intent). 음성은 HMI 밖(10/13 PL)
+│   └── voice.py      /api/voice — 화면 마이크 → d2/hmi/voice/listen → 호스트 voice(받아 적기 gpt-4o-mini-transcribe → 안 되면 whisper-1 → 받아 적은 문장 그대로 MQTT d2/hmi/intent request_design — 의도 고르기 없음, E-96). 음성은 HMI 밖(10/13 PL)
 ├── mqtt_client.py    MqttClient(W126 ✅) — 브로커와 통신 한 곳: req/res(req_id · req_timeout_s, 자동 재전송 없음) · 상태 마지막 값 ·
 │                     d2/web/alive 1초(LWT false) · 다리 연결 신호 3초 끊김 · serve()로 등록한 함수가 get_design · save_build 답함
 │                     (토픽 이름 · req/res 짝은 d2_bridge/bridge_codec.py 를 같이 씀)
