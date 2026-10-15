@@ -201,7 +201,7 @@ export default function DesignView({ robot, viewId, rules, dark, onPick, onLog, 
                   ? '그리퍼에 블록이 있어요 — 왼쪽 안내를 보세요'
                 : !robot.bridge
                   ? '로봇 PC 연결 끊김'
-                  : `지금은 조립할 수 없어요(${stateName(st?.state) || '연결 전'})`}
+                  : `지금은 조립할 수 없어요(${stateName(st?.state, st?.message_id) || '연결 전'})`}
           </small>
           {sent && !sent.success && (
             <span className="result bad">{rejectText('조립', sent)}</span>
