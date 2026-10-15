@@ -1,0 +1,8 @@
+# 로봇 PC — ROS 2 노드(d2_vision · d2_task · d2_bridge)가 쓰는 파이썬 꾸러미 중 pip 로 까는 것
+# ROS 2 Jazzy · rclpy · cv_bridge · python3-opencv · python3-scipy · python3-yaml · python3-paho-mqtt 는 apt(package.xml)로 깐다.
+# 웹 PC 컨테이너 = web/backend/requirements.txt · 음성 voice.py(웹 PC 호스트) = README '의존성 설치' · 시험 = tests/requirements.txt
+ultralytics      # 손목 비전 YOLO seg — 모델 src/d2_vision/models/block_seg_26s_e150_261008.pt(못 읽으면 노드가 안 켜짐, E-86)
+numpy<2          # ROS 2 Jazzy cv_bridge 와 맞춤 — ultralytics 가 2.x 로 올리지 않게 같이 적는다
+scipy            # 스캔 추론기 LayerSolver(층 지도 + 정수계획 scipy.optimize.milp)
+paho-mqtt        # MQTT 다리 d2_bridge(apt python3-paho-mqtt 가 없을 때)
+pyyaml           # robot.yaml 읽기

@@ -1,221 +1,289 @@
-# AI가 설계하고 로봇이 조립하는 젠가 가구 — 요청 → 생성 → 검사 → 세대 관리 → 자동 조립
+# 🧱 BuildMind — AI가 설계하고 로봇이 조립하는 젠가 가구 (ROS 2 Jazzy + MoveIt2 + YOLO seg + Claude)
 
-사람이 설계 목록에서 바탕 설계를 고르고 글이나 말로 가구를 요청하면 **AI(Claude — 10/13 E-99)가 고른 설계와 같은 Template의 설계를 참고해 젠가 설계도를 직접 쓰고**, 무너지지 않는지 · 로봇이 잡을 수 있는지 **검사**한 설계를 **DB에 세대별로 저장**한 뒤, 협동로봇이 **MoveIt2로 블록을 하나씩 집어 조립**한다. 사람이 완성한 구조물을 **스캔해 설계도로 만들어 똑같이 조립**할 수도 있다(10/6 주제 개편).
+이 프로젝트는 **ROS 2 Jazzy**와 두산 협동로봇 **M0609 + OnRobot RG2** 환경에서 동작하는 젠가 가구 설계 · 조립 시스템입니다.
+사람이 글이나 말로 가구를 요청하면 **AI(Claude)가 젠가 설계도를 직접 쓰고**, 무너지지 않는지 · 로봇이 지을 수 있는지 **검사**한 설계를 **DB에 세대별로 저장**합니다. 그다음 로봇이 흩어진 블록을 손목 카메라(**YOLO seg + 깊이**)로 찾아 **MoveIt2로 하나씩 집어 조립**합니다. 사람이 쌓은 구조물을 **스캔해 설계도로 복원하고 똑같이 복제**할 수도 있습니다.
 
-> 두산 ROKEY Boot Camp 9기 · 협동-2 · **D2팀**: 박진용 · 한세교 · 민범진 · 한석형 · 황인재(PL) · 2026-10-01 ~ 10-16
-
-| 항목 | 내용 |
-|---|---|
-| 하드웨어 | Doosan M0609(6축 협동로봇) + OnRobot RG2 그리퍼 + 손목 카메라 Intel RealSense D435i(깊이) + 마이크 |
-| 소프트웨어 | Ubuntu 24.04 · ROS 2 Jazzy · MoveIt2 · CycloneDDS(로봇 PC 안) · **MQTT(Mosquitto, PC 사이)** · Docker compose · DB(PostgreSQL 16) · 웹(frontend Next.js · three.js / backend FastAPI) · 설계 AI Claude(Claude Code — 웹 PC 호스트 중계 `claude_bridge`, 10/13 E-99) · 음성 받아 적기 OpenAI `gpt-4o-mini-transcribe`(안 되면 `whisper-1`, 10/14 E-118) · GitHub Actions CI |
-| 상태 | **기능 동결 뒤 리허설 · 시연 준비(10/15)** — 1차(자동 조립 + 정지)는 실기 기록으로 채움: 벤치 11/11(10/6 337초 · 230초, 10/7 200.8초) · 정지 실기(10/7 W059), 1차 판정 회의는 없앰(E-50) → 10/7~13 핵심(AI 생성 · 검사 · DB · 스캔 복제 · 흩어진 블록 집기) → **10/14 18시 기능 동결**(E-109 — 그 뒤는 PL이 정한 예외만: W144 A4 E-119 · W201 E-121 · HMI 화면) → 10/14 1 ~ 8차 통합(main 2d74462) → 리허설 1(14일 저녁 ~ 15일 오전) · 리허설 2(15일 오후) → **10/16 시연**. 15일 통합 대기: W201 검사기 연결 · PR #182 · #183 · AI 프롬프트 조립 규칙([주요 기능](#주요-기능) 끝) |
-| 차별점 | 설계도를 **AI가 만들고 검사하고 세대로 관리**하며, 로봇은 그 설계도를 그대로 쌓는다. 실물을 스캔해 설계도로 복원 · 복제한다 → [선행 프로젝트와 차별점](docs/research/README.md) |
+> 두산 로보틱스 ROKEY Boot Camp 9기 · 협동-2 · **D2팀** — 한석형 · 황인재(PL) · 민범진 · 박진용 · 한세교 · 2026-10-01 ~ 10-16
 
 ## 목차
 
-1. [주요 기능](#주요-기능)
-2. [시스템 구성](#시스템-구성) — 아키텍처 · 동작 흐름 · 예외 처리
-3. [결과](#결과)
-4. [실행 방법](#실행-방법)
-5. [개발 환경 · 사용 장비](#개발-환경--사용-장비)
-6. [프로젝트 구조](#프로젝트-구조)
-7. [팀 · 역할](#팀--역할)
-8. [협업 규칙](#협업-규칙)
+1. [📌 주요 기능](#-주요-기능-key-features)
+2. [🛠️ 시스템 설계](#️-시스템-설계-system-architecture) · [🔄 알고리즘 플로우 차트](#-알고리즘-플로우-차트-logic-flow)
+3. [💻 개발 환경](#-개발-환경-environment)
+4. [⚙️ 사용 장비](#️-사용-장비-hardware-setup)
+5. [📦 의존성 설치](#-의존성-설치-installation)
+6. [🚀 실행 순서](#-실행-순서-how-to-run)
+7. [📊 결과 · 👥 팀 · 📁 문서](#-결과-요약)
 
-## 주요 기능
+---
 
-- **요청 → AI 설계 생성** — 설계 목록에서 바탕 설계를 고르고 글 창 [AI 생성]이나 마이크 버튼(시동어 "hello rokey" 뒤 "등받이 높은 의자 만들어 줘" — 받아 적은 문장이 글 창에 들어가 바로 생성, 10/13 E-96 · E-105. 음성 요청이면 받아 적기 확신도를 같이 보내 AI가 오인식을 바로잡아 읽고, 모르면 '이렇게 들었어요'로 다시 묻는다 — E-118 ⑤)으로 요청하면, **AI(Claude — 웹 PC 호스트 중계 `claude_bridge`, E-99)가 고른 설계와 같은 Template의 다른 설계를 참고해 설계도를 직접 쓴다** — 부품마다 위치 · 방향 · 역할 · 그룹 · 순서 · 단계 · 잡기(`parts/4.0`, 후보 3개 — 10/8 E-69, 템플릿 튜닝 길은 없앴다). 구조화 출력(JSON Schema)으로 형식 오류를 없앤다. 생성 전체는 5분 안에 끝낸다(못 통과하면 떨어진 까닭을 그대로 보임).
-- **생성 직후 검사** — 무게중심 여유 ≥ 7 mm(쌓는 도중 포함) · 받침 · 손가락 틈 · 양쪽 막힌 칸 · 작업영역 · 21번 Template 검사(E-84 · E-90)를 규칙으로 검사하고, 통과한 후보만 남기고 모자라면 실패 이유를 AI에 돌려줘 더 만든다(최대 2번 더). **변환기 ①**은 부품 번호 · 중심 · 회전 · 받침 · 닫힘 축만 계산해 채우고 검사한다 — AI가 칸을 빠뜨리면 `CHECK_FAILED`로 돌려보내고 대신 채우지 않는다. 통과한 설계만 레시피 파일(`<모델ID>_recipe.json` 구조 `recipe/4.0` + `<모델ID>_placements.csv` 조립 방법, E-69)로 바꿔 로봇에 준다. **AI가 만든 설계는 사람이 미리보기를 보고 [조립]을 눌러야 로봇이 움직인다**([조립] 한 번 = 설계 선택 + 출발 — 10/13 E-96). 기본 설계 4개의 Template 범위는 좌판 · 상판 폭 · 깊이 [75, 150](10/14 E-122 — E-116 좁힘을 되돌림).
-- **DB 세대 관리(RAG)** — 저장소는 PostgreSQL 16 `db` 컨테이너(W088 — 웹 PC `.env`에 `COMPOSE_PROFILES=db` · `DATABASE_URL`이 있을 때, 없으면 JSON 파일 폴더 · 화면 연결 줄에 '저장소: DB / JSON 폴더')다. 기본 설계 4개(의자 · 벤치 · 책상 2종)는 CAD로 미리 넣고(웹이 켜질 때 레시피 파일에서 다시 등록 — E-112 P5), 생성본은 AI 후보 3개 중 사람이 고른 것을 부모 설계(사람이 고른 바탕 설계)와 같은 Template의 다음 번호(`001_CHAIR_BENCH_V000` → `V001`, 10/10 E-84)로 저장한다. 조립 결과(성공 · 오차 · 시간)도 기록하고, 생성 때 AI가 같은 Template의 다른 설계 목록을 보고 도구(`get_design`)로 골라 참고만 읽는다(10/9 E-72 → 10/13 E-96 — 부모는 사람이 고른 설계, 도구 단계가 실패하면 예시를 코드가 넣음). 사람이 보는 **표시 이름**('이름 · 벤치 V001' — 설계 3D [이름 고치기], `design_id` · 레시피는 그대로, 바꿀 때마다 기록 — 10/14 E-115)도 붙일 수 있다.
-- **CAD · 생성 설계 → 블록 하나씩 집기 · 놓기** — 레시피대로 흩뿌린 공급 영역에서 집어 받침에 한 번 놓고 다시 재어 집은 뒤(받침 경유, 10/13 E-103) 조립 원점에 쌓는다. **모든 이동을 MoveIt2로**(쌓인 블록 · 쥔 블록을 피함). 블록마다 손목 카메라로 있음 · 없음 + 높이를 확인하고 오차 측정값을 기록한다. 10/6 실기: 벤치 11개 11/11 · 337초. 놓은 블록을 다시 재서 어긋나면 다시 집는 W144 A4(`find_blocks` `area: "assembly"` · 축별 2 mm 이상이면 같은 블록 최대 2번, 10/14 E-119)는 **기본 켬**(`w144_regrasp` true (10/15 저녁 PL · #194 — 다시 집기가 켜지면 재기도 켜짐, 끄려면 `-p w144_regrasp:=false`)) · 재는 방법 기본 = YOLO 마스크(손목 비전 `placed_method` mask — 실패하면 깊이 결과, 10/15 저녁 PL · 민범진 #196).
-- **스캔 복제** — 사람이 완성한 구조물을 촬영 자세 5곳(`robot.yaml` `scan.poses`, E-88 판정)에서 깊이 촬영 → 점군을 **15 · 25 · 75 mm 격자에 맞춰** 블록 자리 · 방향으로 복원(가려진 블록은 '받침이 있어야 한다' 규칙으로 추정) → 사람이 스캔 칸(최종 점군 + 추론 설계)에서 [그대로 저장] → AI(Claude)가 역할 · 그룹 · 순서 · 단계 · 잡기를 채움(E-69 · E-79) → 검사 → 설계도로 저장(또는 저장된 설계 중 추천 설계를 바로 [조립] — E-97) → 사람이 치우면 로봇이 똑같이 조립한다. 젠가 블록 크기가 하나라서 가능한 방법이다.
-- **언제나 멈춤** — 정지 입력(화면 정지 버튼 · Ctrl+C · 로봇 알람 · 작업 관리자 시간 초과 — 로봇 PC '키 정지'는 보내는 프로그램이 없어 안 씀, 10/14 PL) + 펜던트 비상정지 + 보조로 음성 '정지'(시동어 뒤 — '멈춰' · '스톱' · '그만'도 받음, 로봇 패널 [말로 정지]로 듣기 시작, E-105 ② · E-118 ⑥). 늘 켜 둔 **정지 노드**가 '지금 자리에 서기' 궤적을 제어기에 직접 보내고(토픽), 잠근 뒤 화면 '다시 시작' 또는 [초기화] 뒤 [정리 끝]으로만 푼다(E-98 — [정리 끝]이면 MoveIt 장면의 놓인 블록도 비움, E-120). 다시 시작은 항상 진행 확인부터. 시간 초과 뒤 정지 확인을 기다리는 동안(`stop_pending`)은 [다시 시작]을 끄고 [정지]부터 안내한다(E-117).
-- **흩어진 블록 집기 · 공급 채우기** — 공급 영역에 흩뿌린 블록을 공급 관측 자세에서 손목 카메라로 찾고(`find_blocks` — YOLO seg, 예비 = 엣지 + 깊이), 다음에 놓을 자세와 같고 손가락 틈(≥ 22.2 mm)이 넓고 겹치거나 기울지 않은 **가장 잡기 쉬운 블록**을 골라 집는다(E-36 · E-46 · E-47 · E-49). 집은 블록은 받침에 놓고 다시 재어(세운 블록은 눕히고, 세울 블록은 받침에서 `STANDUP_*`로 세움 — E-110) 레시피 잡기로 다시 집는다. **공급 칸은 없앴다 — 10/13부로 흩뿌림 + 받침 경유만**(E-103). 블록이 하나도 안 보이면 로봇이 멈추고 "공급 채워 주세요"를 띄운다. 기울어진 블록만 남으면 "바로 놓아 주세요"(E-43), 그 밖에 맞는 블록이 없으면 "맞는 블록이 없어요"(`no_match_block`, 10/9 E-73). 사람이 채우거나 정리하고 [계속]을 누른다. (사람과 번갈아 쌓는 협동 모드는 챌린지 후보 — 저장, E-64.)
+## 📌 주요 기능 (Key Features)
 
-**main(2d74462)에 아직 없는 것 — 15일 시험 · 통합 대기:** ① W201 로봇 조립 가능 검사(어떤 순서로든 그리퍼로 지을 수 있나 — 같은 층 2 × 2 등, E-121)는 계산 파일 `src/d2_task/d2_task/assembly_feasibility.py`만 들어왔고 `DesignChecker` 연결 · 결과 칸은 15일 시험 뒤 PL이 정한다 ② PR #182(A4 못 잰 · 기울어진 · 자세 다른 경우도 기록하고 다음 블록, E-119 ⑩ — 민범진 측정 고침과 같이) ③ PR #183(손목 그림 집기 순위 — `state/2` `pick` 칸) ④ AI 프롬프트 조립 규칙(한세교 브랜치).
+### 1. AI 설계 생성 → 검사 → 레시피
+- **요청:** 설계 목록에서 바탕 설계를 고르고 글 창 [AI 생성], 또는 마이크 버튼 → 시동어 "hello rokey" → 말(받아 적은 문장이 글 창에 들어가 바로 생성)로 요청합니다.
+- **생성:** Claude(웹 PC에 로그인된 Claude Code를 호스트 중계 `claude_bridge`로 부름 — API 키 없음)가 고른 설계와 같은 Template의 다른 설계를 참고해, 부품마다 **위치 · 방향 · 역할 · 그룹 · 순서 · 단계 · 잡기**를 쓴 설계도 후보 3개(`parts/4.0`)를 만듭니다. JSON Schema 구조화 출력이라 형식 오류가 없고, 생성 전체는 5분 안에 끝냅니다.
+- **검사:** 무게중심 여유 ≥ 7 mm(쌓는 도중 포함) · 받침 · 손가락 틈 · 작업영역 · Template 범위 + **로봇 조립 가능 검사(W201)** — 어떤 순서로든 그리퍼로 지을 수 있는지(한 층 1.5초 상한). 떨어지면 까닭을 AI에 돌려줘 최대 2번 더 만듭니다. 통과한 설계만 레시피 파일(`_recipe.json` + `_placements.csv`)이 되고, **사람이 미리보기를 보고 [조립]을 눌러야 로봇이 움직입니다.**
 
-## 시스템 구성
+### 2. 설계 DB 세대 관리 (PLM + RAG)
+- PostgreSQL 16(`designs` · `builds` · `gen_logs`)에 기본 설계 4개(벤치 · 등받이 의자 · 세운 다리 책상 · 가운데 기둥 책상, `_V000`)와 생성본(`_V001`, `_V002` …)을 **부모 설계와 이어서** 저장합니다. 버전 트리 · 조립 결과(성공 · 오차 · 시간) · AI 호출 기록이 남습니다.
+- 생성 때 AI가 같은 Template의 설계 목록을 보고 도구(`get_design`)로 골라 참고합니다(RAG). 사람이 보는 표시 이름도 붙일 수 있습니다.
 
-### 아키텍처
+### 3. 흩어진 블록 집기
+- 공급 영역에 흩뿌린 블록을 손목 카메라 D435i로 찍어 **YOLO seg(자체 학습 모델) 윤곽 + 깊이**로 자세 · yaw · 손가락 틈 · 겹침 · 기울어짐을 판정하고, **PickRanker**가 가장 잡기 쉬운 블록을 고릅니다.
+- 집은 블록은 받침에 한 번 놓고 다시 재어(세운 블록은 눕히고, 세울 블록은 `STANDUP_HIGH` · `STANDUP_SIDE`로 세움) 레시피 잡기로 다시 집습니다(**받침 경유**). 모든 이동은 MoveIt2로, 쌓인 블록과 쥔 블록을 피합니다.
+
+### 4. 놓은 블록 다시 재기 · 다시 집기 + 놓기 보정
+- 블록을 놓을 때마다 손목 카메라로 있음 · 없음 + 높이를 확인하고, 방금 놓은 블록을 **YOLO 마스크 + 카메라 광선**으로 다시 잽니다. 축별 2 mm 이상 어긋나면 같은 블록을 최대 2번 다시 집어 놓습니다(기본 켬). 못 재면 까닭만 기록하고 다음 블록으로 갑니다.
+- `FLAT_SHORT`로 놓는 블록은 놓기 위치를 블록 긴 축으로 +2.4 mm 보정합니다(`robot.yaml` `motion.place_offset_flat_short_m`).
+
+### 5. 스캔 복제
+- 사람이 쌓은 구조물을 촬영 자세 5곳에서 깊이 촬영 → **층 지도 + 정수계획(SciPy milp)** 으로 블록 자리 · 방향 · 가려진 블록까지 복원합니다(젠가 블록 크기가 하나라 15 · 25 · 75 mm 격자에 맞출 수 있음).
+- [그대로 저장] → Claude가 역할 · 순서 · 잡기를 채움 → 검사 → 설계로 저장 → 사람이 치우면 로봇이 같은 자리에 복제합니다. 저장이 검사에 막히면 저장된 설계 중 **추천 설계(일치율 상위)** 로 바로 조립합니다.
+
+### 6. 언제나 멈춤 · 복구
+- 화면 [정지] · Ctrl+C · 로봇 알람 · 작업 관리자 시간 초과 · 음성 '정지' + 펜던트 비상정지 → 늘 켜 둔 **정지 노드**가 '지금 자리에 서기' 궤적을 제어기에 직접 보내고 잠급니다.
+- 화면 [다시 시작] — 항상 진행 확인부터 — 또는 [초기화] → 치우고 [정리 끝]으로만 풉니다. 블록이 없으면 "공급 채워 주세요", 맞는 블록이 없으면 "맞는 블록이 없어요"를 띄우고 사람이 [계속]을 누릅니다.
+
+### 7. 웹 화면 · 음성
+- 설계 목록 · three.js 3D 미리보기 · 버전 트리 · 진행표 · 손목 검출 영상(고른 블록과 까닭) · 스캔 점군 비교를 한 화면에서 봅니다.
+- 음성은 마이크 버튼 → 시동어(openWakeWord) → 받아 적기(OpenAI `gpt-4o-mini-transcribe`, 안 되면 `whisper-1`) → 요청 문장, 또는 '정지'입니다.
+
+---
+
+## 🛠️ 시스템 설계 (System Architecture)
+
+### 전체 구조
+
+시스템은 **PC 2대**로 나뉩니다. **로봇 PC**에는 ROS 2 노드가 모두 있고, **웹 PC**에는 ROS가 없습니다. 둘은 **MQTT 다리(`d2_bridge`)** 한 곳으로만 이어집니다.
+
+1. **Perception(인식):** 손목 카메라 D435i → `wrist_block`(배치 확인 · 흩어진 블록 찾기 YOLO seg · 놓은 블록 다시 재기 · 스캔 추론기) · `scan_live_preview`(스캔 중 점군 미리보기)
+2. **Decision(판단):** `task` — 작업 관리자(상태표) · 작업 판단(다음 부품) · PickRanker(집을 블록) · **검사 묶음 `DesignChecker`**(안정성 · 받침 · 잡기 · W201 조립 가능) · 변환기
+3. **Control(동작):** `pick_place`(집기 · 놓기 + MoveIt2 실행기) · `scene_manager`(MoveIt2 장면) · `gripper`(RG2) · `safety_stop`(정지 노드 — 서기 궤적 · 잠금)
+4. **HMI(웹 PC):** docker compose `mosquitto`(MQTT 브로커) · `db`(PostgreSQL) · `web`(FastAPI backend + Next.js 화면) + 호스트 `claude_bridge`(설계 AI 중계) · `voice.py`(음성)
 
 <p align="center">
   <img src="docs/images/시스템아키텍처_v7_101320.png" width="900" alt="시스템 아키텍처 v7 — 노드 카드: 입력 → 처리 → 출력"><br>
-  <sub>시스템 아키텍처 v7 (main 2d74462 기준 — 실선 = 지금 코드 · 점선 = 정했지만 아직 main에 없음) · 따라 읽는 법: <a href="docs/guides/시스템아키텍처_설명_v4_101608.md">시스템 아키텍처 설명</a></sub>
+  <sub>시스템 아키텍처 v7(main c0d5c71 — 노드 카드마다 입력 → 처리 → 출력, 화살표 색 = 데이터 갈래) · 따라 읽는 법: <a href="docs/guides/시스템아키텍처_설명_v4_101608.md">시스템 아키텍처 설명</a> · 인터랙티브 그림(브라우저로 열기): <a href="docs/images/archify/시스템아키텍처_노드토픽_v1_101519.html">노드 · 토픽</a> · <a href="docs/images/archify/DB_ERD_v1_101519.html">DB ERD</a> · <a href="docs/images/archify/MQTT토픽흐름_v1_101519.html">MQTT 토픽 흐름</a></sub>
 </p>
 
-**PC 2대(10/6 18시 E-26~E-31).** **로봇 PC**에 ROS 2 노드 전부(브링업 · MoveIt2 · 정지 · 손목 비전 · 스캔 추론기 · **task** · **다리 `bridge`**)가 호스트로 돈다. **웹 PC**에는 ROS가 없다 — docker compose로 `mosquitto`(MQTT 브로커) · `db`(DB) · `web`(backend FastAPI — 설계 생성 · 저장소 + frontend 화면 정적 파일)을 띄우고, 설계 AI 중계 `claude_bridge`(E-99) · 음성은 호스트. 화면(frontend)은 사람의 브라우저에서 돌고 backend와 REST · WebSocket으로만 주고받는다(10/7 E-41). 두 PC는 **MQTT**로 잇는다(다리 노드가 ROS ↔ MQTT 변환). 두 PC는 Wi-Fi — 브로커는 웹 PC Wi-Fi IPv4에서 DOCKER-USER로 로봇 PC만 받고(인증 없음), 화면은 웹 PC localhost(`127.0.0.1:8000`)에서만 연다(E-92 · #136, [web/README](web/README.md) '두 PC Wi-Fi 연결').
-
-| 위치 | 구성 | 실행 |
+| 위치 | 노드 · 프로그램 | 하는 일 |
 |---|---|---|
-| 로봇 PC(로봇과 유선) | 두산 드라이버 · MoveIt2 `move_group`(브링업) · 집기 · 놓기 + 실행기 · 장면 관리 · 그리퍼 노드 · **정지 노드(고정)** · 손목 블록 인식 + **스캔 추론기** · **task(작업 관리자 · 작업 판단 · 검사 묶음 · 변환기 ②)** · **다리 `bridge`(ROS ↔ MQTT)** | 호스트(ROS 2 · CycloneDDS 60) |
-| 웹 PC — 컨테이너(compose) | `mosquitto`: MQTT 브로커(1883) / `db`: DB(`designs` · `builds`) / `web`: **backend**(FastAPI :8000 — REST · WebSocket · **AI 설계 생성(Claude — 호스트 중계를 부름, E-99)** · **저장소 인터페이스**) 한 프로세스 + **frontend**(Next.js 정적 + three.js — 브라우저에서 실행), ROS 없음 | Docker compose |
-| 웹 PC — 호스트 | **설계 AI 중계 `claude_bridge`**(로그인된 Claude Code `claude -p` — 키 없음, E-99) · 음성 `web/backend/voice.py`(마이크 버튼 → 시동어 'hello rokey' → 받아 적기(OpenAI) → MQTT `d2/hmi/intent` · 정지 낱말이면 `d2/safety/stop/req` — 민범진 #171, E-105 · E-118) | 호스트(코드가 바뀌면 사람이 다시 켬) |
+| 로봇 PC | `task` | 조립 · 스캔 상태표, 다음 부품 고르기, 검사 묶음(`/d2/task/check_design`), 정지 · 다시 시작 처리 |
+| 로봇 PC | `wrist_block` · `scan_live_preview` | 배치 확인 · 흩어진 블록 찾기 · 놓은 블록 재기 · 스캔 촬영 · 추론 / 스캔 중 점군 미리보기 |
+| 로봇 PC | `pick_place` · `scene_manager` · `gripper` · `safety_stop` | 집기 · 놓기(MoveIt2) · 장면 · 그리퍼 · 정지(서기 궤적 · 잠금) |
+| 로봇 PC | `bridge` | ROS ↔ MQTT 변환(토픽 `d2/…`, 요청 `…/req` · `…/res`) |
+| 웹 PC(컨테이너) | `mosquitto` · `db` · `web` | MQTT 브로커 · PostgreSQL · backend(REST · WebSocket · AI 생성 · 저장소) + 화면 정적 파일 |
+| 웹 PC(호스트) | `claude_bridge` · `voice.py` | 설계 AI 중계(Claude Code) · 음성(시동어 · 받아 적기 · '정지') |
 
+이름 · 칸의 정본은 [인터페이스 문서(IRD)](docs/02_인터페이스_IRD_v4_101608.md), 패키지 · 상태표 · 절차는 [설계 문서(SDD)](docs/03_설계_SDD_v4_101608.md)입니다. 좌표 · 그리퍼 값 · 시간 기준은 설정 파일 하나(`src/d2_robot/d2_bringup/config/robot.yaml`)에 둡니다.
 
-ROS 노드는 **6개**(`task` · `wrist_block` · `pick_place` · `scene_manager` · `gripper` · `safety_stop`) + 다리 `bridge`다. 이름은 모두 `/d2/` 아래, 요청-결과는 전용 메시지(`d2_interfaces` 7개 + JSON 공용 `JsonQuery`), 상태는 JSON 토픽이다. 웹 PC와는 MQTT 토픽 `d2/…`(요청은 `…/req` · `…/res`)로 다리가 잇는다. 새 인터페이스는 10/7 13시 W121에서 '임시 정함' → **10/8 '정함'**(E-57 — 바꿀 것은 PL 확인 PR)으로 했다(브로커 인증은 두지 않음 — Wi-Fi IPv4 + DOCKER-USER로 로봇 PC만, #136. 역할 목록 = `src/d2_task/d2_task/roles.json`(#99) · 세우기 = `PickPlace` 그대로(10/9 E-77 → 10/14 E-110 잡기 `STANDUP_HIGH` · `STANDUP_SIDE`) · 다리 담당 = 황인재(E-56) · 촬영 · 공급 관측 자세 = W134 교시값 — 10/7 PL 정함).
+### 🔄 알고리즘 플로우 차트 (Logic Flow)
 
-| 통신 | 종류 | 방향 | 내용 |
-|---|---|---|---|
-| `/d2/hmi/command` · `/d2/hmi/intent` | 서비스 · 토픽 | 화면 · 음성 → 작업 관리자(· 화면) | 설계 선택 · 출발 · 스캔 · 취소 · 그리퍼 열기 / 음성 요청 문장(`request_design` — 화면이 글 창에 넣고 바로 생성, E-96) |
-| `/d2/task/check_design` | 서비스(JsonQuery) | 화면(생성) → task(검사 묶음) | 부품 JSON `parts/4.0`(+ `base_recipe`) → 통과 · 이유 · 레시피(`recipe` · `placements`) |
-| `/d2/hmi/get_design` | 서비스(JsonQuery) | task → 화면(저장소) | design_id → `design/4.0`(레시피 · 조립 방법 · 부품 JSON) |
-| `/d2/vision/scan_capture` · `scan_infer` | 서비스(JsonQuery) | 작업 관리자 → 스캔 추론기 | 촬영 자세별 점군 모으기 → 블록 위치 · 방향(`blocks/2`) |
-| `/d2/vision/check_progress` | 서비스 | 작업 관리자 → 손목 블록 인식 | 블록마다 있음 · 없음 · 높이 · 오차 측정값 |
-| `/d2/vision/find_blocks` | 서비스(JsonQuery) | 작업 관리자 → 손목 블록 인식 | 흩뿌린 블록마다 위치 · yaw · 자세 · 틈 · 겹침 · 기울어짐 → 작업 판단이 고름. `area: "spare"` = 받침 다시 재기 · `area: "assembly"` = 놓은 블록 다시 재기(W144 A4 — 기본 꺼짐, E-119) |
-| `/d2/hmi/save_build` | 서비스(JsonQuery) | task → 화면(저장소) | 조립 결과(`build/2`) → DB `builds` |
-| `/d2/motion/move_to` · `/d2/motion/pick_place` | 서비스 · 액션 | 작업 관리자 → 집기 · 놓기 | 관측 · 홈 · 촬영 자세 이동 / 블록 1개 전체 |
-| `/d2/task/progress` · `/d2/task/state` · `/d2/task/scan_result` | 토픽(JSON) | task → 장면 관리 · 화면 | 진행표 · 상태 · 알림 · 스캔 추론 결과 |
-| `/d2/safety/stop` · `/d2/safety/resume` · `/d2/safety/state` | 서비스 · 토픽 | 화면 · 음성('정지') · 작업 관리자(시간 초과) → 정지 노드 → 모두 | 정지 요청 · 다시 시작 · 멈춤 · 잠금 |
-| 서기 궤적 | 토픽 `/dsr_moveit_controller/joint_trajectory` | 정지 노드 → 두산 제어기 | 지금 관절값 0.3초 — 제어기에 직접 |
-| `/d2/gripper/command` · `/d2/gripper/state` | 서비스 · 토픽 | 집기 · 놓기 → 그리퍼 → 모두 | 폭 · 힘 → 잡힘 · 폭 |
+**① 요청 → AI 설계 생성 → 검사 → 저장**
 
-좌표 · 그리퍼 값 · 시간 기준은 설정 파일 하나(`src/d2_robot/d2_bringup/config/robot.yaml`)에 둔다. 이름 · 칸 · 단위의 정본은 [인터페이스 문서](docs/02_인터페이스_IRD_v4_101608.md), 패키지 · 절차는 [설계 문서](docs/03_설계_SDD_v4_101608.md).
-
-### 동작 흐름
-
-**설계 생성 → 조립** ([그림 설명](docs/guides/시스템아키텍처_설명_v4_101608.md))
-
-```
-① 요청        설계 목록에서 바탕 설계를 고름 → 글 창 "2인용 벤치 만들어 줘" [AI 생성]  /  마이크 버튼 → 시동어 → 말 → 받아 적은 문장이 글 창에 들어가 바로 생성(E-96 · E-105)
-② 생성        Claude(웹 PC 호스트 중계 claude_bridge, E-99)가 고른 설계 + 같은 Template의 다른 설계(도구 get_design으로 참고만, E-72 · E-96)를 보고 설계도를 직접 씀 — 부품마다 위치·방향·역할·그룹·순서·단계·잡기(parts/4.0, 후보 3개)
-③ 검사        변환기 ①이 부품 번호·중심·회전·받침·닫힘 축을 계산해 채움(AI 칸은 받기만) + 무게중심 여유 7 mm(쌓는 도중) · 받침 · 손가락 틈 · 막힌 칸 · 작업영역 · 칸 빠짐 · 21번 Template → 통과 후보만 남기고 모자라면 실패 이유를 돌려줘 더 만듦(최대 2번 더)
-④ 저장        사람이 후보 1개를 고름 → 레시피 파일(_recipe.json 구조 + _placements.csv 조립 방법) → DB(부모 = 고른 바탕 설계 · 다음 V 번호) → 화면에 미리보기·검사 결과·버전 트리
-⑤ 출발        사람이 설계 3D의 [조립] 한 번(select_design → start — 이 누름이 출발 확인, E-96) → 시작 점검(로봇·그리퍼·카메라·다리 연결·조립 자리)
-⑥ 조립        관측 → 진행 확인 → 다음 부품(sequence 첫 미배치) → 공급 관측 · 블록 찾기 → 가장 잡기 쉬운 블록 → 집기(10 N) → 받침에 놓고 다시 재어 레시피 잡기로 집기(E-103) → MoveIt2 옮기기 → 위치 제어 놓기 → 부품마다 배치 확인 → 반복
-⑦ 기록        완성 → 조립 결과(성공·오차·시간)를 DB에 → 다음 생성의 재료
+```mermaid
+flowchart TD
+    A["설계 목록에서 바탕 설계 고름"] --> B["글 · 음성으로 요청"]
+    B --> C["Claude가 설계도 후보 3개 작성<br/>parts/4.0 — 위치 · 방향 · 역할 · 순서 · 잡기"]
+    C --> D{"검사 묶음 통과?<br/>안정성 · 받침 · 손가락 틈 · 작업영역<br/>W201 로봇 조립 가능 · Template"}
+    D -- "모자람 (최대 2번 더 · 5분 상한)" --> E["떨어진 까닭을 AI에 돌려줌"]
+    E --> C
+    D -- "통과" --> F["사람이 후보 고름 → DB 저장<br/>부모 설계 · 다음 V 번호"]
+    F --> G["설계 3D 미리보기 → 사람이 [조립]"]
 ```
 
-**스캔 복제**
+**② 로봇 조립 (작업 관리자 `task` 상태표)**
 
-```
-① 사람이 완성한 구조물을 조립 작업영역에 두고 나감 → [스캔]
-② 로봇이 촬영 자세 5곳(robot.yaml scan.poses)에서 깊이 촬영 → 점군 → 15·25·75 mm 격자에 맞춰 블록 자리·방향 → 가려진 블록은 받침 규칙으로 추정(blocks/2, 위치·방향만)
-③ 화면 스캔 칸에 최종 점군 + 추론 설계 → 사람이 [그대로 저장] → Claude가 역할·그룹·순서·단계·잡기를 채움(parts/4.0) → 검사 통과면 저장(made_by scan, E-56·E-69 — 21번은 건너뜀 E-106)  /  또는 추천 설계(저장된 설계 중 일치율 1등)를 바로 [조립] (E-97)
-④ 사람이 구조물을 치움 → [조립] → 같은 자리에 복제 조립
-```
-
-### 예외 처리
-
-판단은 한 곳에서 한다 — 멈출지는 **정지 노드**, 진행표는 **작업 판단**, **설계가 쌓을 만한지는 검사 묶음**, **무엇을 쌓을지는 사람**, 장면은 **장면 관리**, DB는 **HMI 저장소**가 정한다.
-
-| 상황(실패 코드) | 로봇 · 시스템 | 사람 |
-|---|---|---|
-| 검사 실패 · AI 칸 빠짐(`CHECK_FAILED`) · 재생성 2번 뒤 실패(`GEN_FAILED`) | 이유를 AI에 돌려 다시 생성 → 끝내 실패면 화면에 이유 + 기본 설계 권함 | 요청을 바꾸거나 기본 설계 선택 |
-| 가구 2종 밖 · 범위 밖(`OUT_OF_SCOPE`) | "책상 · 의자만 만들 수 있어요" | — |
-| 경로 계획 실패(`PLAN_FAILED`) · 잡기 실패(`GRASP_FAILED`) | 다시 계획 1번 / 팔이 움직인 실패는 블록당 3번까지(`scatter.max_attempts`, E-103) → 사람 호출 | 원인 치우고 다시 시작 |
-| 공급 영역에 블록 없음 · 맞는 블록 없음(공급 칸 `SLOT_EMPTY`는 안 씀 — E-103) | 멈추고(`WAIT_SUPPLY`) "공급 채워 주세요" · 기울어진 블록만 남으면 "바로 놓아 주세요" · 그 밖에 맞는 블록이 없으면 "맞는 블록이 없어요"(`no_match_block`, 10/9 E-73) | 채우거나 바로 놓거나 정리하고 [계속] |
-| 웹 끊김(연결 신호 3초) | 지금 블록까지 놓고 멈춤(`WAIT_HMI`) — 정지 아님 | 웹이 다시 붙으면 [계속] |
-| 블록 없음 · 높이 다름(`OFFSET_OVER`) | 멈추고 사람 호출 | 블록 바로 놓기 |
-| 스캔 실패(`SCAN_FAILED`) | 다시 스캔 안내 | 구조물 위치 · 조명 확인 |
-| 정지 입력 · 로봇 알람 · 시간 초과(`STOP_WEB` · `STOP_VOICE` · `CTRL_C` · `ROBOT_ALARM:<상태>` · `TIMEOUT` — 10/8 E-62 · 음성 E-105. 키 정지 `STOP_KEY`는 보내는 프로그램이 없어 안 씀, 10/14 PL) | 정지 노드가 서기 궤적 → 잠금 | 원인 확인 → '다시 시작' → 진행 확인부터, 또는 [초기화] → 치우고 [정리 끝] — E-98. 시간 초과 뒤 정지 확인 전(`stop_pending`)이면 [정지]를 먼저 — E-117 |
-| 그리퍼 응답 없음 · 피드백 없음 · 예상 못 한 오류(`GRIPPER_NO_RESPONSE` · `NO_FEEDBACK` · `ERROR`) | 작업 관리자가 재시도 없이 `ERROR`로 멈춤 — 정지 노드 잠금 없음, 그리퍼는 자동으로 안 엶(10/9 E-74) | 사람 호출 — 원인 확인, 쥔 블록이 있으면 사람이 뺌 |
-
-## 결과
-
-**시연(10/16) 전이라 최종 판정은 시연 뒤에 채운다.** 아래는 주제 확정 때 쓴 10/3 사전 검증 값과 10/4 ~ 10/14 실기 기록이다. 근거는 [결과표](docs/04_결과_결과표_v2_101608.md) · [시험 기록](docs/test-reports/README.md).
-
-| 항목 | 결과 | 판정 |
-|---|---|---|
-| V-01 설계가 서는가 | 설계 6종(최대 27개 책장) 모두 섬 | ✅ |
-| V-02 구조 유지 한계 | **7 mm**(세운 다리 위 보). 무너지는 경계 — 검사기 규칙값. 로봇 배치 목표는 ±2 mm | ✅ |
-| V-17 손목 카메라 블록 위치 | 놓기 전후 **±0.5 mm**, 중심 흔들림 0.1~0.2 mm — 스캔 격자(15 · 25 mm)에 비해 작음 | ✅ 참고 |
-| V-07 · V-24 MoveIt2 실기 · 쥔 채 계획 | 사람 팔 피해 감 · 끊김 없음 · 쥔 채 계획 6/6 | ✅ |
-| R-01 실기 정지 | Ctrl+C 즉시 정지 실기 확인(10/4). 서기 궤적은 토픽으로(10/6) | ✅ |
-| **10/6 벤치 11개 자동 조립** | **11/11 · 337초 · 중단 없음**(시제품, 속도 0.1) → 밤 팀 노드 **11/11 · 230초**(속도 0.3) — AC-1 결과로 씀(E-50) | ✅ 참고 |
-| V-18 음성 받아 적기 | STT 1.8초 · 짧은 말 5/10 → 그때는 '문장 확인 뒤 생성'으로 정했고, 10/13 E-96에서 글 창에 넣고 바로 생성으로 바꿈(로봇은 [조립]을 눌러야 움직임) | ⚠️ |
-| AI 설계 생성(Claude opus, 10/13) | 벤치 · 책상 후보 3/3 검사 합격(46초 · 136초 — NFR-04 '≤ 60초'를 넘음), 스캔 [저장] 채우기 002(16블록) 18.4초 · 003(9블록) 25.7초 합격(E-99). W108 요청 15개 시험은 일정표 기준 | ⚠️ |
-| 받침 경유 흩뿌림 조립(10/13 — E-103 근거) | 정식 흐름 2번 합격 — 벤치 001 11/11 · 가운데 기둥 책상 004 11/11 | ✅ 참고 |
-| 세우기(10/13 003, #156 — E-110) | 받침 경유로 다리 4개 높게세움(`STANDUP_HIGH`) 모두 끝까지 · 보 2 · 상판 2 놓음 → 8/9에서 손목 카메라 USB 끊김으로 정지(결과표 AC-9) | ⚠️ 기록 |
-| 스캔 복제(10/13 W116) | 사람이 쌓은 벤치 일치율 **100 %**(V-48) → [그대로 저장] — Claude 약 16초, `001_CHAIR_BENCH_V001` → 받침 경유 [조립] 다리 7블록 뒤 [정지] — 결과표 AC-7 | ✅ 일치 · 조립은 기록 |
-| W201 로봇 조립 가능 검사 실물 스캔(10/14, 8번) | 계산이 실물 스캔에서도 같은 층 2 × 2(손가락 자리 없음)를 맞게 잡음. 아래층이 스캔에서 반 칸(12.5 mm) 밀리면 다른 규칙(R0 · R2 · R3)으로 먼저 '조립 불가'([시험 기록](docs/test-reports/W201조립가능검사_스캔실기_박진용_v1_101420.md)) | 기록(검사기 연결 전) |
-| W144 A4 놓은 블록 다시 재기 · 다시 집기(10/14 밤) | 다시 집기 동작 3번 모두 성공(dy 2.17 → 0.73 mm). 쌓은 블록 측정이 자주 거절돼(깊이 10장 중 4장만 · 가장자리 튀는 점) 기본 꺼짐 — 측정 고친 뒤 켬(E-119 ⑧ ~ ⑪) | ⚠️ 기본 꺼짐 |
-
-1차 기준: 자동 조립 벤치 11개 **3번 중 2번** + 정지 입력 4개(10/7 판정 회의는 없앰 — E-50, 결과는 실기 기록으로). 핵심(10/13): 변형 요청 3개 중 2개 검사 통과 · 생성 설계 조립 2종 · 스캔 복제 일치율 ≥ 90 % · 1회 · DB 트리 · 컨테이너 2개 이상 · PC 2대 MQTT 통신 · 흩어진 블록 집기 10개 중 8개(AC-9).
-
-## 실행 방법
-
-- 로봇 PC: 빌드 · 실행은 [src/README](src/README.md) '빌드 · 시험'과 [d2_robot/ 안내](src/d2_robot/README.md), 환경은 [docs/env/README.md](docs/env/README.md).
-- 웹 PC: [web/README.md](web/README.md) 1-B(실행) · 1-C(설계 AI 중계 `claude_bridge`) · '두 PC Wi-Fi 연결'.
-- 멈춘 뒤 다시 시작: [복구 절차](docs/ops/복구절차_정지뒤다시시작_v1_101608.md).
-
-```bash
-git clone https://github.com/hwang-injae/rokey_9_pjt2_D2.git
-cd rokey_9_pjt2_D2
+```mermaid
+flowchart TD
+    S(["[조립] = 설계 선택 + 출발"]) --> CK["CHECK — 시작 점검 · 진행 확인"]
+    CK --> SEL{"SELECT — 다음 부품?"}
+    SEL -- "다 놓임" --> DONE(["DONE — 조립 기록 저장"])
+    SEL -- "있음" --> FB["공급 관측 · find_blocks<br/>YOLO seg + 깊이"]
+    FB -- "맞는 블록 없음" --> WS["WAIT_SUPPLY — 사람이 채우고 [계속]"]
+    WS --> FB
+    FB --> PR["PickRanker — 가장 잡기 쉬운 블록"]
+    PR --> SP["집어서 받침에 놓고 다시 재기<br/>필요하면 눕히기 · 세우기"]
+    SP --> PP["레시피 잡기로 집기 → MoveIt2 이동<br/>→ 조립 자리에 놓기"]
+    PP --> VF["VERIFY — 있음 · 높이 확인"]
+    VF --> A4{"놓은 블록 다시 재기<br/>축별 2 mm 이상?"}
+    A4 -- "예 (같은 블록 2번까지)" --> RG["다시 집어 놓기"]
+    RG --> VF
+    A4 -- "아니오 · 못 잼(기록)" --> SEL
+    X[["정지 입력 · 로봇 알람 · 시간 초과"]] -.-> ST["STOPPED — 서기 궤적 · 잠금"]
+    ST -. "[다시 시작]" .-> CK
 ```
 
-**main을 받은 뒤 PC별 반영 순서**(두 PC 모두 `git pull` 뒤):
+**③ 스캔 복제**
 
-| PC | 무엇이 바뀌었나 | 할 일 |
-|---|---|---|
-| 웹 PC | 화면 `web/frontend/` | `cd web/frontend && npm ci && npm run build` — 화면은 호스트에서 만든 `web/frontend/out`을 컨테이너가 읽기 전용으로 연결해 쓴다(이미지에 넣지 않음) |
-| 웹 PC | backend · 레시피 · `robot.yaml` · `d2_task` · `d2_bridge`(컨테이너가 연결해 읽는 코드) | `D2_WEB_IPV4=<웹 PC Wi-Fi IP> WEB_UID=$(id -u) WEB_GID=$(id -g) docker compose -f web/compose.yaml restart web` — 코드는 바인드 마운트이고 uvicorn `--reload`가 없어서 `up -d`로는 바뀐 코드를 안 읽는다(설정이 같으면 컨테이너를 그대로 둠). 다시 켜질 때 기본 설계 4개를 다시 등록한다(E-112 P5). `requirements.txt` · `Dockerfile` · `compose.yaml`이 바뀌었을 때만 `up -d --build` |
-| 웹 PC | 호스트 프로그램 `web/claude_bridge.py` · `web/backend/voice.py` | 컨테이너 밖이라 compose가 다시 켜 주지 않는다 — 켜 둔 터미널에서 끄고 다시 켠다(`python3 web/claude_bridge.py --host 172.17.0.1` · `python3 web/backend/voice.py --host <웹 PC Wi-Fi IP>`, 둘 다 `--check`로 먼저 점검) |
-| 로봇 PC | `src/` 아래 바뀐 패키지 | 바뀐 패키지를 **전부** `colcon build --symlink-install --packages-select <패키지 …>` → `source install/setup.bash` → 노드 다시 켜기. `robot.yaml` · 설치 레시피는 `d2_bringup` 설치 폴더에서 읽으므로 **`d2_bringup`도 꼭 넣는다**(안 하면 옛 값 · 옛 레시피가 남음 — E-112 덧붙임 ① · E-113). `d2_interfaces`가 바뀌면 그것부터 빌드하고 나머지 전부 |
+```mermaid
+flowchart LR
+    A["사람이 쌓은 구조물"] --> B["촬영 자세 5곳<br/>깊이 촬영"]
+    B --> C["층 지도 + 정수계획<br/>블록 자리 · 방향 · 가려진 블록"]
+    C --> D{"[그대로 저장]<br/>Claude가 역할 · 순서 · 잡기 → 검사"}
+    D -- "통과" --> E["설계로 저장 → [조립] 복제"]
+    D -- "막힘 (예: 로봇 조립 불가)" --> F["다시 스캔 또는<br/>추천 설계로 [조립]"]
+```
 
-> 로봇을 움직이는 코드는 반드시 정지 처리(서기 궤적)를 넣는다. 새 코드 첫 실행은 저속으로, 펜던트를 든 짝과 함께. [조립] · [스캔] · [계속]을 누르기 전에 사람이 로봇 작업 영역 밖인지 누르는 사람이 확인한다(웹캠 사람 감지는 없다). 급할 때는 **펜던트 비상정지**.
+---
 
-## 개발 환경 · 사용 장비
+## 💻 개발 환경 (Environment)
 
-| 항목 | 값 |
-|---|---|
-| OS · ROS | Ubuntu 24.04 LTS · ROS 2 Jazzy · CycloneDDS(로봇 PC 안) · PC 사이 MQTT(Mosquitto) |
-| 동작 계획 | MoveIt2 2.12 · OMPL BiTRRT · `dsr_moveit_controller` · 브링업 `real_moveit.launch.py` |
-| 로봇 드라이버 | 교육 과정 배포본 `doosan-robot2` · RG2 그리퍼 드라이버 — 저장소 밖 |
-| 비전 | RealSense D435i 깊이 — 배치 확인 · 스캔 점군(격자 맞추기). GPU 없이 CPU |
-| AI · 음성 | 설계 AI = Claude(웹 PC에 로그인된 Claude Code를 호스트 중계 `claude_bridge`로 부름 — 설계도 직접 작성 · 스캔 설계의 역할 · 그룹 · 순서 · 단계 · 잡기 채움, 구조화 출력, 학습 없음, 키 없음 — 10/13 E-99) · 받아 적기(OpenAI `gpt-4o-mini-transcribe`, 권한이 없으면 `whisper-1` — 10/14 E-118 · E-120 ④, 키는 웹 PC `web/.env`에만) · 시동어 "hello rokey"(마이크 버튼 뒤, E-105) |
-| 화면 · DB | 웹 = frontend(Next.js 정적 + three.js 3D 미리보기 — 유일한 미리보기, 브라우저에서 실행) + backend(FastAPI :8000 · REST · WebSocket `/ws` · paho-mqtt) · DB(`designs` · `builds` · `gen_logs`, PostgreSQL 16 — 10/6 21시 PL 확정 E-39, `db` 컨테이너 W088 — `.env` `COMPOSE_PROFILES=db`일 때만 뜨고, `DATABASE_URL`이 비면 JSON 파일 폴더) |
-| 실행 환경 | 로봇 PC = 호스트(ROS 노드 전부 + 다리) · 웹 PC = docker compose `mosquitto` · `db` · `web`(ROS 없음) + 호스트 `claude_bridge` · 음성. PC 2대 Wi-Fi(브로커는 웹 PC Wi-Fi IPv4에서 로봇 PC만 받음 · 화면은 웹 PC localhost, #136) |
-| 언어 · 도구 | Python 3.12 · colcon · pytest(ROS 없는 계산 파일 · `tests/`) · GitHub Actions CI(토큰 없음) |
+- **OS:** Ubuntu 24.04 LTS (로봇 PC · 웹 PC)
+- **Middleware:** ROS 2 Jazzy · CycloneDDS(로봇 PC 안, `ROS_DOMAIN_ID` 60) · MQTT Mosquitto 2(PC 사이)
+- **Motion:** MoveIt2(OMPL BiTRRT → RRTConnect) · 두산 `doosan-robot2`(Jazzy, `dsr_moveit_controller`) · OnRobot RG2 드라이버(`onrobot_rg_control`)
+- **Vision:** Intel RealSense `realsense2_camera` · Ultralytics YOLO seg(자체 학습 모델 `block_seg_26s_e150_261008.pt`) · OpenCV · NumPy(< 2) · SciPy
+- **AI · 음성:** Claude(Claude Code `claude -p`, 기본 opus — 웹 PC 호스트 중계) · OpenAI `gpt-4o-mini-transcribe`(→ `whisper-1`) · openWakeWord("hello rokey")
+- **Web · DB:** FastAPI · uvicorn · paho-mqtt · psycopg 3 · PostgreSQL 16 · Next.js 16 · React 19 · three.js 0.186 · Node 24
+- **Language:** Python 3.12 · TypeScript
+- **Infra:** Docker compose(웹 PC 컨테이너 3개) · GitHub Actions CI(pytest · colcon · ruff)
 
-| 장비 | 모델명 · 사양 | 수량 | 용도 |
+---
+
+## ⚙️ 사용 장비 (Hardware Setup)
+
+| 장비 | 모델 · 사양 | 수량 | 용도 |
 |---|---|---|---|
 | 협동로봇 | Doosan M0609(6축 · 가반 6 kg · 도달 900 mm) + 제어기 · 펜던트 | 1 | 집기 · 옮기기 · 놓기 · 스캔 촬영 자세 |
-| 그리퍼 | OnRobot RG2(0~110 mm · 3~40 N) · 10 N | 1 | 블록 잡기 · 폭으로 잡힘 확인 |
-| 손목 카메라 | Intel RealSense D435i(깊이 · 최소 거리 약 28 cm) | 1 | 배치 확인 · 스캔 점군 |
-| 마이크 | — | 1 | 시동어 · 음성 요청 · '정지'(E-105 · E-118) |
-| 블록 | 표준 젠가 75 × 25 × 15 mm(실측 두께 14.7 mm) · 1세트 54개 | 1 | 기본 설계 9~16개 + 공급 여분 |
-| 작업대 | 1200 × 650 mm · 맨 작업대 | 1 | 조립 작업영역 · 흩뿌린 공급 영역 · 받침 상자(`spare_base_m` — 공급 칸은 10/13 E-103으로 없앰) |
-| PC | Ubuntu 24.04 · (로봇 PC만 ROS 2 Jazzy) | 2 | 로봇 PC · 웹 PC |
+| 그리퍼 | OnRobot RG2(0 ~ 110 mm · 3 ~ 40 N, 잡는 힘 10 N) | 1 | 블록 잡기 · 폭으로 잡힘 확인 |
+| 손목 카메라 | Intel RealSense D435i(컬러 + 깊이 640 × 480) | 1 | 흩어진 블록 찾기 · 배치 확인 · 놓은 블록 재기 · 스캔 |
+| 마이크 · 스피커 | 웹 PC에 연결 | 1 | 시동어 · 음성 요청 · '정지' |
+| 블록 | 표준 젠가 75 × 25 × 15 mm(실측 두께 14.7 mm) · 1세트 54개 | 1 | 기본 설계 9 ~ 16개 + 공급 |
+| 작업대 | 1200 × 650 mm | 1 | 조립 작업영역 · 흩뿌린 공급 영역 · 받침 상자 |
+| PC | 노트북 2대 — 로봇 PC(ROS 2 Jazzy, 로봇과 유선 192.168.1.x) · 웹 PC(Docker, ROS 없음) · 둘 다 Ubuntu 24.04 | 2 | 로봇 PC · 웹 PC(Wi-Fi로 MQTT) |
 
-<p align="center">
-  <img src="docs/images/작업대_배치_v5_100719.png" width="640" alt="작업대 배치 v5"><br>
-  <sub>작업대 배치 v5(위에서 본 그림, robot.yaml · W134 값) · 조립 원점 (426.1, −72.5) mm · 흩뿌릴 영역 x 183~586 · y 142~337 mm(핵심) · 공급 칸 6개(그림의 옛 대비책 — 10/13 E-103으로 없앰) · 관측 · 촬영 자세 · 공급 관측 자세(W134)</sub>
-</p>
+| Component | Type | Topic / Spec |
+|---|---|---|
+| Robot | Doosan M0609 + RG2 | `/dsr01/...` · MoveIt2 `move_group` · `/dsr_moveit_controller/joint_trajectory`(서기 궤적) |
+| Vision | RealSense D435i | `/camera/camera/color/image_raw` · `/camera/camera/aligned_depth_to_color/image_raw` · `camera_info` |
+| 작업 | 우리 노드 | `/d2/task/state` · `/d2/task/progress` · `/d2/vision/find_blocks` · `/d2/motion/pick_place` · `/d2/safety/state` |
+| PC 사이 | MQTT | `d2/task/state` · `d2/hmi/command/req` · `d2/safety/stop/req` · `d2/bridge/alive` … (전체는 IRD 10장) |
 
-## 프로젝트 구조
+---
+
+## 📦 의존성 설치 (Installation)
+
+### 1. Python 필수 라이브러리 (`requirements.txt`)
+
+```bash
+# 로봇 PC — ROS 2 노드가 쓰는 pip 꾸러미(YOLO · 스캔 추론기 · 다리)
+pip install -r requirements.txt
+# 웹 PC 음성(호스트) — 가상 환경 하나에
+pip install sounddevice openwakeword openai paho-mqtt "numpy<2"
+```
+
+웹 PC backend 꾸러미(`web/backend/requirements.txt`)는 `web` 컨테이너 이미지가 깝니다. 자동 시험 꾸러미는 `tests/requirements.txt`입니다.
+
+### 2. ROS 2 패키지 (로봇 PC)
+
+```bash
+sudo apt update
+sudo apt install ros-jazzy-desktop ros-jazzy-moveit ros-jazzy-realsense2-camera ros-jazzy-rmw-cyclonedds-cpp python3-paho-mqtt
+# 두산 드라이버(doosan-robot2, Jazzy) · 브링업 바탕(m0609_rg2_integration) · OnRobot RG2 드라이버는 교육 과정 배포본 — 저장소 밖에서 colcon build
+cd <이 저장소> && colcon build --symlink-install && source install/setup.bash
+```
+
+판(커밋)과 환경 변수(`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` · `ROS_DOMAIN_ID=60`)는 [환경 문서](docs/env/README.md)를 따릅니다.
+
+### 3. 웹 PC
+
+```bash
+sudo apt install docker.io docker-compose-v2 libportaudio2
+# 화면 빌드용 Node 24(nvm) · Claude Code 설치 후 이 PC에서 로그인(설계 AI — 키 없음)
+cd web && cp .env.example .env    # OpenAI 키(음성 받아 적기) · DB 비밀번호는 .env 에만 — 커밋하지 않음
+```
+
+---
+
+## 🚀 실행 순서 (How to Run)
+
+전체 시스템은 아래 순서대로 터미널을 열어 실행합니다. 로봇을 움직이기 전에 **펜던트를 든 사람이 옆에 있고, 사람이 작업 영역 밖인지** 확인합니다.
+
+### 1. 웹 PC — 화면 · 브로커 · DB · 설계 AI · 음성
+
+```bash
+# 터미널 1 — 화면 빌드(처음 · 화면이 바뀐 때) → 방화벽(브로커는 로봇 PC만) → 컨테이너 3개
+(cd web/frontend && npm ci && npm run build)
+mkdir -p web/backend/data
+sudo bash tools/install_mqtt_access.sh <로봇 PC IP> <웹 PC IP>
+D2_WEB_IPV4=<웹 PC IP> WEB_UID=$(id -u) WEB_GID=$(id -g) docker compose -f web/compose.yaml up -d
+
+# 터미널 2 — 설계 AI 중계(점검 → 실행)
+python3 web/claude_bridge.py --check --host 172.17.0.1
+python3 web/claude_bridge.py --host 172.17.0.1
+
+# 터미널 3 — 음성(점검 → 실행)
+python3 web/backend/voice.py --check --host <웹 PC IP>
+python3 web/backend/voice.py --host <웹 PC IP>
+```
+
+화면은 웹 PC 브라우저에서 `http://127.0.0.1:8000`을 엽니다(다른 PC에서는 안 열림 — 보안).
+
+### 2. 로봇 PC — 브링업 · 카메라 · 노드
+
+```bash
+# 모든 터미널: source /opt/ros/jazzy/setup.bash && source <두산 워크스페이스>/install/setup.bash && source install/setup.bash
+# 터미널 1 — 브링업(두산 드라이버 · MoveIt2 · 그리퍼 드라이버)
+ros2 launch d2_bringup real_moveit.launch.py mode:=real host:=192.168.1.100
+# 터미널 2 — 손목 카메라(정렬 깊이)
+ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true
+# 터미널 3 — 정지 노드 · 그리퍼 · 장면 · 집기 놓기(노드 4개)
+ros2 launch d2_bringup robot_nodes.launch.py mode:=real
+# 터미널 4 · 5 · 6 — 손목 비전 · 작업 관리자 · MQTT 다리
+ros2 run d2_vision wrist_block
+ros2 run d2_task task
+ros2 run d2_bridge bridge --ros-args -p mqtt_host:=<웹 PC IP>
+# (선택) 터미널 7 — 스캔 중 점군 미리보기
+ros2 run d2_vision scan_live_preview
+```
+
+### 3. 화면에서 조립 · 스캔
+
+1. 화면 위 연결 줄에서 웹 서버 · 브로커 · 로봇 PC 연결이 모두 정상인지 봅니다.
+2. 설계 목록에서 설계를 고르고 → (원하면) [AI 생성] → 설계 3D에서 **[조립]**.
+3. 스캔 복제는 구조물을 두고 **[스캔]** → 스캔 칸에서 [그대로 저장] 또는 추천 설계 [조립].
+4. 멈추면 [다시 시작] 또는 [초기화] → [정리 끝] — 자세한 것은 [복구 절차](docs/ops/복구절차_정지뒤다시시작_v1_101608.md).
+
+로봇 없이 돌려 보기(개발 PC)는 `ros2 run d2_bridge mock_bridge` · `ros2 run d2_vision mock_wrist_block` · `python3 web/backend/mock_robot.py` — [설계 문서](docs/03_설계_SDD_v4_101608.md) 3.5. main을 받은 뒤 PC별 반영(웹 PC `restart web` · 로봇 PC 바뀐 패키지 빌드)은 [web/README](web/README.md) · [src/README](src/README.md).
+
+---
+
+## 📊 결과 요약
+
+시연(10/16) 판정은 [결과표](docs/04_결과_결과표_v2_101608.md)에 채웁니다. 아래는 10/15까지 실기 기록입니다.
+
+| 항목 | 결과 |
+|---|---|
+| 자동 조립(벤치 11개) | 11/11 — 10/6 230초(속도 0.3) · 10/7 200.8초 · 10/15 9차 통합 테스트(받침 경유 · 다시 재기 켬) 14분 36초 · 집기 시도 35번 실패 0 |
+| 흩어진 블록 집기 · 받침 경유 | 10/13 정식 흐름 벤치 11/11(37번 중 35번) · 가운데 기둥 책상 11/11(37번 중 36번) · 세운 다리 책상 9/9(10/14) |
+| AI 설계 생성 | 10/14 실제 Claude — 글 요청 후보 3/3 검사 합격 165초 · 음성 요청 3/3 합격 115초 |
+| 생성 설계 조립 | 음성으로 만든 설계 2종 실제 조립 DONE(`003_DESK_STAND_V002` · `004_DESK_PEDESTAL_V001`) |
+| 스캔 복제 | 사람이 쌓은 벤치 일치율 100 %(10/13) · 사진 판정 62/65 = 95 % |
+| 놓은 블록 다시 집기 | 다시 집기 뒤 어긋남 dy 2.17 → 0.73 mm(10/14) |
+| 정지 | Ctrl+C · 펜던트 비상정지 즉시 정지 · 로봇 알람 → 잠금(10/7) · 음성 '멈춰' 정상(10/15) |
+| 자동 시험 | pytest — `src/d2_task/test` 1,442 · `tests/` 503 · `src/d2_vision/test` 306 통과(CI가 PR마다) |
+
+## 👥 팀 · 역할
+
+| 파트 | 담당 | 맡은 것 |
+|---|---|---|
+| 로봇 동작 | 박진용 · 한세교 | 로봇 셀 · MoveIt2 집기 · 놓기 · 정지 · 장면 · 세우기 · CAD · 레시피 · 변환기 ① |
+| 비전 | 민범진 · 한석형 · 황인재 | 손목 보정 · 블록 인식 · 배치 확인 · 흩어진 블록 찾기 · 고르기 · 작업 관리자 · 검사 묶음 · 스캔 추론기 · 음성(민범진) |
+| HMI | 황인재(PL) | 웹 화면 · AI 설계 생성 · DB · MQTT 다리 · 웹 PC compose · 일정 · 발표 |
+
+## 📁 프로젝트 구조 · 문서
 
 | 경로 | 내용 |
 |---|---|
-| [`src/`](src/README.md) | ROS 2 패키지. `d2_interfaces`(전용 메시지 7개 + `JsonQuery`) · **`d2_robot/`**(로봇 패키지 4개 — `d2_bringup`(브링업 · `robot.yaml`) · `d2_motion`(집기 · 놓기 + 실행기 · 장면 관리) · `d2_gripper` · `d2_safety`(정지 노드), 10/7 PR #51) · `d2_vision`(손목 블록 인식 · 스캔 추론기) · `d2_task`(작업 관리자 · 작업 판단 · 검사 묶음 · 변환기 ① · ② · W201 조립 가능 계산 `assembly_feasibility.py` — 검사기 연결 전) · **`d2_bridge`(MQTT 다리 `bridge` · 가짜 `mock_bridge`)** · `recipe_manager`(레시피 도구 — CAD → `_recipe.json`(`recipe/4.0`) + `_placements.csv`, E-69) |
-| [`web/`](web/README.md)(E-32) | 웹 PC 코드(ROS 아님) — `backend/`(FastAPI · paho-mqtt · WebSocket · AI 설계 생성 · 저장소(JSON 폴더 · PostgreSQL) · 마이크 버튼 REST · 호스트 음성 `voice.py` — 민범진) · `claude_bridge.py`(호스트 설계 AI 중계, E-99) · `frontend/`(Next.js 정적 + three.js — 브라우저에서 실행) · `compose.yaml`(`mosquitto` · `db` · `web`) · `db/init/001_schema.sql`(표) · `mosquitto/` — 황인재 |
-| [`tests/`](tests/) | ROS 없는 자동 시험(pytest) — `motion_math` · `robot.yaml` 형식 · srv/action 형식 · 문서 이름 · 링크 · 키 모양 · 개인 경로 · 여러 파트가 따로 든 같은 표(`test_shared_tables.py`, E-111) · 다리 변환 · 웹 backend · 설계 생성 · 설계 AI 중계 · 음성 `voice.py` · 스캔 추천 · 브로커 방화벽 규칙 · PostgreSQL 저장소(시험 DB가 있을 때만). CI가 PR마다 돈다. 규칙은 [tests/README.md](tests/README.md) |
-| `src/d2_robot/d2_bringup/config/robot.yaml` | 설정 파일 하나 — 작업면 · 조립 원점 · 받침(`spare_spots` · `spare_base_m`) · 관측 · 촬영 자세 · TCP · 그리퍼 값 · 검사 · 스캔 격자. 키는 [IRD 9장](docs/02_인터페이스_IRD_v4_101608.md) |
-| `docs/` | 문서 지도는 [docs/README.md](docs/README.md) — 요구사항 · 인터페이스 · 설계 · 결과표 · 작업 분류 · 팀 규칙 · 결정 기록 · 시험 기록 · 트러블슈팅 · 환경 · 조사 · 그림 · 에이전트 프롬프트 |
-| `docs/research/ref_1003/작업4/` | 10/3 검증 코드 — **`prompt_v09.txt` · `run_v09.py`(AI 설계 생성 · 재생성) · `jenga_check.py`(안정성 검사 계산 참고)** → `web/backend` · `d2_task`의 바탕. `prompt_v09_fallback.txt`(옛 튜닝 길) · `jenga_check`의 템플릿 생성기는 E-69로, 그림(PNG)은 E-40으로 안 씀 |
-| `tools/` | `docver.py`(문서 파일 이름 `이름_v버전_MMDDHH`과 링크를 한 번에 바꿈 — 10/16 시연까지는 쓰지 않는다, E-109 문서 이름 멈춤) · `sched.py`(일정표 보기) · `mqtt_access.sh` · `install_mqtt_access.sh`(웹 PC 브로커를 로봇 PC만 받게, #136) · `check_web_ports.py`(웹 PC 포트 확인) · `w144_capture/`(W144 기록) |
-| `.github/` | 협업 규칙 · PR 양식 · CODEOWNERS · PR 자동 검사(`pr_check.yml`) · **CI(`ci.yml`: pytest · colcon · ruff, 토큰 없음)** · Claude 검토·자동 승인·auto-merge(팀원 PR 전부, 10/7) |
-| `AGENTS.md` · `CHANGES.md` | AI 에이전트 읽기 규칙 · 날마다 파트별 변경 한 줄 |
-| `LICENSE` | Apache-2.0 |
+| [`src/`](src/README.md) | ROS 2 패키지 — `d2_interfaces` · `d2_robot/`(`d2_bringup` · `d2_motion` · `d2_gripper` · `d2_safety`) · `d2_vision` · `d2_task` · `d2_bridge` · `recipe_manager`(레시피 도구) |
+| [`web/`](web/README.md) | 웹 PC — `backend/`(FastAPI · AI 생성 · 저장소 · 음성) · `frontend/`(Next.js + three.js) · `claude_bridge.py` · `compose.yaml` · `db/` |
+| [`docs/`](docs/README.md) | 정본 01 요구사항 · 02 인터페이스 · 03 설계 · 04 결과 · 05 작업 분류 · 06 [팀 협업 규칙](docs/06_팀협업규칙_v1_101608.md) · `decisions/`(결정 기록) · `guides/` · `ops/` · `test-reports/` · `env/` · `images/` |
+| [`tests/`](tests/README.md) | ROS 없는 자동 시험(pytest) — CI가 PR마다 돈다 |
+| `tools/` | 문서 이름 도구 `docver.py` · 웹 PC 브로커 방화벽 `install_mqtt_access.sh` · 포트 확인 등 |
+| `.github/` | 협업 규칙 · PR 양식 · PR 검사 · CI · Claude 검토 · auto-merge |
 
-## 팀 · 역할
+협업 규칙은 [팀 협업 규칙](docs/06_팀협업규칙_v1_101608.md) · [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) · [AGENTS.md](AGENTS.md)(AI 에이전트 규칙)에 있습니다. 날마다 바뀐 것은 [CHANGES.md](CHANGES.md)입니다.
 
-**로봇 동작 2명 · 비전 3명 · HMI 1명**(10/4 확정, 10/6 묶음 변경, **10/7 황인재가 비전도 맡음** — E-42). 파트 안의 일은 파트 사람이 같이 맡는다. 10/8~11 비전은 스캔 추론기 · 흩어진 블록 찾기 = 민범진, YOLO 학습 · 집을 블록 고르기 = 한석형, 황인재는 라벨링 · YOLO 학습만 돕는다(E-51 — 부딪히면 스캔 추론기 먼저).
+## 라이선스
 
-| 파트 | 담당 | 맡는 것 |
-|---|---|---|
-| 로봇 동작 | 박진용 · 한세교 | 로봇 셀 · MoveIt 실행기 · 정지 · 장면 · 집기 · 놓기 · 안전 감시(정지 노드) · 인프라 · 통합 · **CAD · 레시피 · 변환기 ①(부품 JSON `parts/4.0` → 레시피 파일 — 계산 값 + 검사)** · 스캔 촬영 자세 · 세우기 동작(E-37 → E-110) |
-| 비전 | 민범진 · 한석형 · 황인재 | 손목 보정 · 블록 인식 · 배치 확인 · 작업 판단 · 작업 관리자 · **검사 묶음(안정성 · 받침 · 잡기) · 변환기 ② · 스캔 추론기 ③(점군 → 블록 JSON)** · 흩어진 블록 찾기 · 고르기(E-36) |
-| HMI | 황인재(PL, 비전 겸함) | 웹 화면 · 마이크 버튼(음성 `voice.py` W045 · W120 · W046은 민범진 — 10/13 E-105 ④) · **글상자 · AI 설계 생성(Claude — 호스트 중계 `claude_bridge`, E-99 · 설계도 직접 작성) · DB(`designs` · `builds`) · 미리보기 · 버전 트리 · 스캔 비교 화면** · 웹 PC compose(`mosquitto` · `db` · `web`) · MQTT 다리(`d2_bridge`, E-56) · PL(일정 · 회의 · 강사 확인 · 발표) |
-
-- **PR 승인:** 팀원 PR은 Claude 검토(①~⑧)에 '막음'이 없으면 자동 승인 → auto-merge(10/7). 사람 승인(황인재 @hwang-injae · 한세교 @hansaekyo)은 검토가 못 돌았거나 PL 확인 · IRD · `d2_interfaces` 변경 때만. `main`에는 PR로만(황인재만 예외 — 바로 push). **10/14 ~ 시연(지금):** 팀원 PR은 draft로 두고 auto-merge는 잠시 끔 — PL이 PR을 통합 브랜치에 합쳐 시험한 뒤 main에 push한다(10/14 1 ~ 8차 통합, E-112 덧붙임 ⑤ · [팀 협업 규칙](docs/06_팀협업규칙_v1_101608.md) 3-2-0).
-- **백업:** 박진용(10/10 없음) → 한세교 · 비전 세 사람은 서로 백업 · HMI는 **황인재 혼자**(팀 규칙 ③의 예외).
-
-[Apache License 2.0](LICENSE). 두산 · OnRobot 드라이버(저장소 밖)는 각 제공자의 라이선스를 따른다.
-
-## 협업 규칙
-
-- [팀 협업 규칙](docs/06_팀협업규칙_v1_101608.md) — 팀 규칙 10개 · 브랜치 · 커밋 · PR · 보안 · 컨테이너 · 로봇 안전 · 문서 파일 이름
-- [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) — GitHub에서 일하는 순서
-- [AGENTS.md](AGENTS.md) — AI 에이전트 읽기 규칙
-- [팀원별 에이전트 프롬프트](docs/에이전트_프롬프트/) — v4(10/15 판 — '지금 유효한 결정'에 E-112 ~ E-122를 더함, 다시 복사)를 저장소 맨 위 `CLAUDE.local.md`로 복사
-- 작업을 끝내면 PR 본문 '완료한 일정표 작업'에 `완료: W번호` → merge 뒤 문서담당이 일정표(공유 드라이브)에 반영한다
+[Apache License 2.0](LICENSE). 두산 · OnRobot 드라이버(저장소 밖)는 각 제공자의 라이선스를 따릅니다.
