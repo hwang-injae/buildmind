@@ -177,7 +177,7 @@ docker --version
 | 호스트에서 바로 | 이유 |
 |---|---|
 | 설계 AI 중계 `web/claude_bridge.py` (웹 PC) | 컨테이너 안에는 Claude 로그인이 없다 — 웹 PC에 로그인된 Claude Code(`claude -p`)를 부른다(키 없음 · 구독 한도). `python3 web/claude_bridge.py --host 172.17.0.1`(docker0 — `web` 컨테이너만 부름), 준비 점검 `--check`(10/13 E-99, [web/README](../../web/README.md) 1-C) |
-| 음성 (웹 PC) | 마이크 장치를 컨테이너에 넘기기가 번거롭다. `web/backend/voice.py`(담당 민범진 — 10/13 E-105, #171 10/14 main): 마이크 버튼(`d2/hmi/voice/listen`) → 시동어 "hello rokey" → 받아 적기(Whisper STT — OpenAI, E-118) → MQTT `d2/hmi/intent` · 정지 낱말('정지' · '멈춰' · '스톱' · '그만')이면 `d2/safety/stop/req`. 실행 `python3 web/backend/voice.py --host <웹 PC Wi-Fi IP>`(브로커가 Wi-Fi IPv4에만 열려 있음), 준비 점검 `--check`(마이크 · 스피커 · 시동어 모델 · 키 · 브로커). 설치(라이브러리 · 마이크 · 스피커)는 웹 PC에서 한석형 · 민범진(E-118 ③) |
+| 음성 (웹 PC) | 마이크 장치를 컨테이너에 넘기기가 번거롭다. `web/backend/voice.py`(담당 민범진 — 10/13 E-105, #171 10/14 main): 마이크 버튼(`d2/hmi/voice/listen`) → 시동어 "hello rokey" → 받아 적기(OpenAI `gpt-4o-mini-transcribe`, 안 되면 `whisper-1` — E-118 · E-120 ④) → MQTT `d2/hmi/intent` · 정지 낱말('정지' · '멈춰' · '스톱' · '그만')이면 `d2/safety/stop/req`. 실행 `python3 web/backend/voice.py --host <웹 PC Wi-Fi IP>`(브로커가 Wi-Fi IPv4에만 열려 있음), 준비 점검 `--check`(마이크 · 스피커 · 시동어 모델 · 키 · 브로커). 설치(라이브러리 · 마이크 · 스피커)는 웹 PC에서 한석형 · 민범진(E-118 ③) |
 | 로봇 PC 전부(브링업 · 동작 · 그리퍼 · 정지 · 비전 · task · 다리) | 10/3에 시험한 호스트 환경(두산 드라이버 · MoveIt2 · RealSense)을 그대로 쓴다. 다리는 paho-mqtt만 더 깐다 |
 
 **컨테이너는 그 안에 넣는 것의 담당이 만든다(10/5 S-17).** 브로커는 W102로 먼저 띄워 쓰고, 두 PC 연결 확인은 W129(일정표). 1시간 넘게 막히면 일단 호스트로 돌리고 compose(10/12) 때 마저 한다.
@@ -217,7 +217,7 @@ docker compose logs -f web    # 키 읽힘(값은 안 찍음) · 브로커 연�
 
 ## 8. 키 (`.env`)
 
-- OpenAI 키는 **PC마다 `.env` 파일에만** 둔다. 코드는 환경 변수로 읽는다. 이 키는 음성 STT(Whisper)만 쓴다 — 설계 AI Claude는 키 없이 웹 PC에 로그인된 Claude Code를 쓴다(10/13 E-99).
+- OpenAI 키는 **PC마다 `.env` 파일에만** 둔다. 코드는 환경 변수로 읽는다. 이 키는 음성 받아 적기(`gpt-4o-mini-transcribe` → `whisper-1`)만 쓴다 — 설계 AI Claude는 키 없이 웹 PC에 로그인된 Claude Code를 쓴다(10/13 E-99).
 - `.env`는 `.gitignore`에 들어 있다. 커밋 전에 `git status`로 `.env`가 없는지 본다. PR 검사도 키 모양 글자와 `.env`를 막는다.
 - 키를 코드·설정·커밋 메시지·이슈·노션·채팅에 붙이지 않는다. 실수로 올렸으면 바로 PL에게 알리고 그 키를 폐기한다([팀 협업 규칙](../06_팀협업규칙_v1_101321.md)).
 
