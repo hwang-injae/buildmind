@@ -12,6 +12,9 @@ import { gripperOpening, holdingBlock, type Robot } from '@/lib/ws';
 import CountUp from './CountUp';
 
 const GOOD_RATE = 0.9; // V-48 기준(일치율 ≥ 90 %) — 이보다 낮으면 '많이 달라요'(새 모양인지 스캔 실수인지 사람이 3D 로 확인 → [그대로 저장] · [다시 스캔], 10/14 PL)
+// 추천을 못 받으면 이만큼 자동으로 다시 받는다(10/15 PL — 첫 스캔에서 한 번 실패한 채 남아 일치율 · [조립]이 안 보였다). 다 실패하면 까닭 + [다시 찾기]
+const RETRY_N = 3;
+const RETRY_MS = 2000;
 
 interface Props {
   robot: Robot;
@@ -21,26 +24,52 @@ interface Props {
 
 export default function ScanRecommend({ robot, onView, onLog }: Props) {
   const runId = robot.scan?.run_id ?? null;
-  const [list, setList] = useState<ScanMatch[] | null | 'fail'>(null);
+  const [list, setList] = useState<ScanMatch[] | null>(null);
+  const [why, setWhy] = useState<string | null>(null); // 마지막으로 못 받은 까닭(backend 글 그대로)
+  const [tries, setTries] = useState(0); // 이번 스캔에서 못 받은 횟수
+  const [again, setAgain] = useState(0); // [다시 찾기] — 바뀌면 처음부터 다시 받는다
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<CmdResult | null>(null);
 
   useEffect(() => {
-    // 새 스캔마다 다시 받는다 — 옛 스캔의 추천이 남지 않게
+    // 새 스캔마다 다시 받는다 — 옛 스캔의 추천이 남지 않게. SCAN_REVIEW 가 scan_result 보다 먼저 와 옛 스캔으로 물으면 409 지만
+    // 새 scan_result 가 오면 runId 가 바뀌어 여기서 다시 받는다
     setList(null);
+    setWhy(null);
+    setTries(0);
     setSent(null);
     if (!runId) return;
     let alive = true;
-    api.getScanRecommend(runId).then((r) => alive && setList(r ? r.candidates : 'fail'));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = (n: number) =>
+      api.getScanRecommend(runId).then((r) => {
+        if (!alive) return;
+        if (r.data) return setList(r.data.candidates);
+        setWhy(r.error ?? '');
+        setTries(n + 1);
+        if (n + 1 < RETRY_N) timer = setTimeout(() => load(n + 1), RETRY_MS);
+      });
+    load(0);
     return () => {
       alive = false;
+      clearTimeout(timer);
     };
-  }, [runId]);
+  }, [runId, again]);
 
   if (!runId) return null;
-  if (list === null) return <p className="hint">비슷한 저장 설계를 찾는 중…</p>;
-  if (list === 'fail' || list.length === 0)
-    return <p className="hint">비슷한 저장 설계가 없어요 — [그대로 저장] 또는 [다시 스캔]</p>;
+  if (list === null) {
+    if (why === null) return <p className="hint">비슷한 저장 설계를 찾는 중…</p>;
+    if (tries < RETRY_N) return <p className="hint">추천을 못 받았어요 — {why} · 다시 찾는 중({tries}/{RETRY_N})…</p>;
+    return (
+      <>
+        <p className="result bad">추천을 못 받았어요 — {why}</p>
+        <button className="secondary" onClick={() => setAgain((a) => a + 1)} title="지금 스캔으로 비슷한 저장 설계를 다시 찾아요">
+          다시 찾기
+        </button>
+      </>
+    );
+  }
+  if (list.length === 0) return <p className="hint">비슷한 저장 설계가 없어요 — [그대로 저장] 또는 [다시 스캔]</p>;
 
   const best = list[0];
   const st = robot.state;

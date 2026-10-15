@@ -74,9 +74,22 @@ export const renameDesign = (id: string, name: string) =>
   postJson<{ design_id: string; display_name: string | null }>('/api/designs/' + encodeURIComponent(id) + '/name', { name }, AI_TIMEOUT_MS, 'PUT');
 /** 설계 규칙 숫자 — 3D 블록 크기(robot.yaml block_size_m 한 곳, 10/9 PL E-78) */
 export const getRules = () => getJson<Rules>('/api/designs/rules');
-/** 스캔 '추천 설계' — 지금 스캔(run_id)과 저장된 설계 전부의 일치율 높은 순 3개. 옛 스캔 · 못 받음은 null */
+/** GET 하나 — 실패면 {error}(backend detail 글 · 응답 코드 · 연결 안 됨). 화면이 '못 받음'과 '빈 결과'를 갈라 까닭을 보여야 할 때 */
+async function getJsonWhy<T>(path: string): Promise<{ data?: T; error?: string }> {
+  try {
+    const res = await fetch(BASE + path);
+    const json = await res.json().catch(() => null);
+    if (!res.ok) return { error: (json && typeof json.detail === 'string' ? json.detail : null) ?? `웹 서버 응답 ${res.status}` };
+    return { data: json as T };
+  } catch {
+    return { error: NO_WEB };
+  }
+}
+
+/** 스캔 '추천 설계' — 지금 스캔(run_id)과 저장된 설계 전부의 일치율 높은 순 3개. 못 받으면 {error}(옛 스캔 409 · 스캔 모양 409 · 연결 —
+ *  10/15 PL: 전엔 실패도 '비슷한 설계 없음'으로 보여 첫 스캔 일치율이 왜 안 떴는지 알 수 없었다) */
 export const getScanRecommend = (runId: string) =>
-  getJson<{ run_id: string; candidates: ScanMatch[] }>('/api/designs/scan/recommend?run_id=' + encodeURIComponent(runId));
+  getJsonWhy<{ run_id: string; candidates: ScanMatch[] }>('/api/designs/scan/recommend?run_id=' + encodeURIComponent(runId));
 /** 손목 검출 그림 주소 — seq 가 바뀔 때마다 새로 받는다(브라우저가 옛 그림을 다시 쓰지 않게) */
 export const wristUrl = (seq: number) => `${BASE}/api/robot/wrist.jpg?seq=${seq}`;
 /** 마지막 스캔 사진(JPEG) · 점군(PLY) 주소 — seq 가 바뀔 때마다 새로 받는다 */

@@ -168,6 +168,10 @@ export default function ScanReview({ robot, rules, dark, onSaved, onLog }: Props
         </figure>
       </div>
       <p className={`result ${failed ? 'bad' : job?.state === 'saved' ? 'ok' : ''}`}>{status}</p>
+      {/* 저장이 막혀도(예: 로봇 조립 불가) 스캔 확인 상태가 남아 있으면 추천 설계로 복제를 이어 갈 수 있다 — 길을 알려 준다(10/15 PL) */}
+      {failed && st?.state === 'SCAN_REVIEW' && (
+        <p className="hint">아래 &apos;추천 설계&apos;에 후보가 있으면 [조립]으로 비슷한 저장 설계를 쌓을 수 있어요</p>
+      )}
       {error && <p className="bad-text">{error}</p>}
       {!live && scan && job?.state !== 'saved' && (
         <div className="send-row">
