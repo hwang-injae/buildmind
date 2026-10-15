@@ -238,9 +238,9 @@ def _tilted(axis, deg=7.0):
     return scene([box(pt['center'], pt['rot'] @ rot_axis(axis, deg))]), pt
 
 
-def _lifted(axis, h_mm):
+def _lifted(axis, h_mm, yaw=0.0):
     """한쪽 모서리를 h_mm 들어 올린 블록(그 모서리 밑에 무언가가 끼어 걸친 모양). axis 0 = 긴 모서리(폭 방향으로 기욺) · 1 = 짧은 끝(길이 방향)."""
-    pt = part(0.0)
+    pt = part(yaw)
     span = W if axis == 0 else L
     c = np.array(pt['center'], float)
     c[2] += h_mm / 2000.0                      # 한쪽이 바닥에 닿은 채 다른 쪽이 h 만큼 들리면 가운데는 h/2 올라간다
@@ -293,6 +293,23 @@ def test_side_tilt_below_wide_limit_is_ok():
     """폭 방향(긴 축 둘레) 7° 는 놓은 블록 전용 문턱(TILT_WIDE_DEG 10°) 아래라 정상으로 잰다(10/15 — 깊이 가장자리 처짐으로
     반듯한 블록도 폭 방향 4 ~ 6° 로 재지는 것을 막으려고). 예전(5°)에는 TILTED 였다."""
     pts, pt = _tilted(0, 7.0)
+    blk, rej = measure_placed(pts, pt, SIZE)
+    assert rej is None and blk['tilted'] is False, rej
+
+
+@pytest.mark.parametrize('yaw', [0.0, 30.0, 90.0])
+@pytest.mark.parametrize('h_mm', [5.0, 8.0])
+def test_end_lift_along_length_is_tilted(h_mm, yaw):
+    """짧은 끝이 길이 방향으로 5 · 8 mm 들린 블록은 TILTED(10/15 PL — 들린 끝이 높이 띠 밖으로 잘려 평면 기울기로는 못 잡던 것).
+    10 mm 는 들린 끝이 설계 자리 위 8 mm 를 넘어 먼저 COVERED 로 거절될 수 있어 여기서는 뺀다(거절이면 다시 집지 않음은 같다)."""
+    pts, pt = _lifted(1, h_mm, yaw)
+    check_reject(measure_placed(pts, pt, SIZE), 'TILTED')
+
+
+@pytest.mark.parametrize('yaw', [0.0, 30.0, 90.0])
+def test_small_end_lift_is_measured(yaw):
+    """3 mm 들림(양 끝 차가 TILT_MM 5 mm 아래)은 끝 들림 조건에 안 걸리고 정상으로 잰다."""
+    pts, pt = _lifted(1, 3.0, yaw)
     blk, rej = measure_placed(pts, pt, SIZE)
     assert rej is None and blk['tilted'] is False, rej
 
