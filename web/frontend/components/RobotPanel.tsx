@@ -15,7 +15,7 @@
 // retained 로 그대로). 여는 중 · 끝(gripper_done) 문구는 작업 관리자 message 그대로 보인다 — 실패 까닭이 거기 있다(10/13 20시 PL).
 import { useEffect, useRef, useState } from 'react';
 import * as api from '@/lib/api';
-import { GRIP_HELD, STOP_PENDING, WAKE_WORD, designName, readable, rejectText, stateName, stopReasonKo } from '@/lib/names';
+import { GRIP_HELD, PLACED_CHECK_ID, STOP_PENDING, WAKE_WORD, designName, readable, rejectText, stateName, stopReasonKo } from '@/lib/names';
 import type { CmdResult, Intent } from '@/lib/types';
 import { gripperOpening, holdingBlock, type Robot } from '@/lib/ws';
 import CountUp from './CountUp';
@@ -57,6 +57,8 @@ export default function RobotPanel({ robot, onLog }: Props) {
   const opening = gripperOpening(robot); // 그리퍼 여는 중 — 조립 · 스캔 · 다시 열기를 막는다(10/13 18시 PL)
   const held = holdingBlock(robot); // 정지 아닌데 블록을 쥠 — 작업 관리자가 스캔을 거절하므로 막고 푸는 길 안내
   const waiting = has(['WAIT_SUPPLY', 'WAIT_HMI'], st);
+  // A4 놓은 블록 확인 대기(WAIT_SUPPLY + message_id placed_check — 10/15 PL '가'): [계속] 글을 공급 말 대신 '고쳤어요'로
+  const placedCheck = st === 'WAIT_SUPPLY' && robot.state?.message_id === PLACED_CHECK_ID;
   const can = {
     cont: !busy && !locked && bridge && waiting,
     scan: !busy && !locked && !opening && !held && bridge && has(['IDLE', 'DONE', 'SCAN_REVIEW'], st),
@@ -135,7 +137,7 @@ export default function RobotPanel({ robot, onLog }: Props) {
       <div className="robot-row">
         <div className={`status ${locked ? 'locked' : st === 'ERROR' ? 'error' : st === 'DONE' ? 'done' : waiting ? 'wait' : ''}`}>
           <div className="status-title">
-            {st ? stateName(st) : '로봇 상태를 기다리는 중'}
+            {st ? stateName(st, robot.state?.message_id) : '로봇 상태를 기다리는 중'}
             {st && !bridge && <span className="tag">마지막으로 받은 상태</span>}
           </div>
           {locked ? (
@@ -145,7 +147,7 @@ export default function RobotPanel({ robot, onLog }: Props) {
             </>
           ) : (
             // 제목과 같은 글(예: '대기')은 두 번 쓰지 않는다
-            robot.state?.message && robot.state.message !== stateName(st) && <div className="status-msg">{readable(robot.state.message)}</div>
+            robot.state?.message && robot.state.message !== stateName(st, robot.state.message_id) && <div className="status-msg">{readable(robot.state.message)}</div>
           )}
         </div>
 
@@ -165,9 +167,10 @@ export default function RobotPanel({ robot, onLog }: Props) {
         <div className="btn-stack">
           {waiting && (
             <button className="warn big" disabled={!can.cont}
-              title={st === 'WAIT_SUPPLY' ? '공급 영역에 블록을 채운 뒤 누르세요' : '웹이 다시 붙었으면 누르세요 — 진행 확인부터 이어 가요'}
+              title={placedCheck ? '놓은 블록을 손으로 바로 놓은 뒤 누르세요 — 다시 확인하고 이어 가요'
+                : st === 'WAIT_SUPPLY' ? '공급 영역에 블록을 채운 뒤 누르세요' : '웹이 다시 붙었으면 누르세요 — 진행 확인부터 이어 가요'}
               onClick={() => send('계속', () => api.command('start', robotDesign ?? ''))}>
-              {label('계속', st === 'WAIT_SUPPLY' ? '블록 채웠어요 · 계속' : '계속')}
+              {label('계속', placedCheck ? '고쳤어요 · 계속' : st === 'WAIT_SUPPLY' ? '블록 채웠어요 · 계속' : '계속')}
             </button>
           )}
           <div className="btn-row">

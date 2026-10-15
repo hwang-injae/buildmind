@@ -10,6 +10,8 @@ import numpy as np
 import pytest
 import yaml
 
+from d2_vision.block_finder import (OFFSET_SCALE, TARGET_BGR, _ray_to_edge, base_axes_px, draw_spare, project_to_image, spare_label,
+                                    spare_offset_big, spare_offset_text, top_face_corners)
 from d2_vision.spare_measure import OPEN_GAP_MM, ideal_spare_block, measure_on_spare
 
 ROBOT = yaml.safe_load((Path(__file__).resolve().parents[2] / 'd2_robot' / 'd2_bringup' / 'config' / 'robot.yaml').read_text(encoding='utf-8'))
@@ -83,3 +85,116 @@ def test_ideal_block_matches_measure_fields():
     assert b['yaw_deg'] == (SPOT['yaw_deg'] + 90.0) % 180.0 - 90.0 and b['top_z_m'] == round(SZ + T, 4)
     with pytest.raises(KeyError):
         measure_on_spare(np.zeros((0, 3)), {'x_m': 0.3}, SIZE)
+
+
+# 받침 바로 위 카메라(관측 자세처럼 카메라 z 가 아래로): 카메라 축 = base (x, −y, −z), 받침 가운데에서 x −20 · y +10 mm 비킨 높이 0.40 m
+DRAW_INTR = (600.0, 600.0, 320.0, 240.0)
+DRAW_CAM = (SX - 0.020, SY + 0.010, 0.40)
+DRAW_T = np.array([[1.0, 0.0, 0.0, DRAW_CAM[0]],
+                   [0.0, -1.0, 0.0, DRAW_CAM[1]],
+                   [0.0, 0.0, -1.0, DRAW_CAM[2]],
+                   [0.0, 0.0, 0.0, 1.0]])
+
+
+def _hand_pixel(x, y, z):
+    """손 계산: 카메라 좌표 = (x − cx, −(y − cy), cz − z) → u = fx·X/Z + ppx, v = fy·Y/Z + ppy."""
+    fx, fy, ppx, ppy = DRAW_INTR
+    X, Y, Z = x - DRAW_CAM[0], -(y - DRAW_CAM[1]), DRAW_CAM[2] - z
+    return fx * X / Z + ppx, fy * Y / Z + ppy
+
+
+def test_project_to_image_matches_hand():
+    """base 점 → 픽셀이 손 계산과 같다(받침 목표 윗면 가운데: u ≈ 359.3 · v ≈ 259.7)."""
+    z = SZ + T
+    uv = project_to_image([[SX, SY, z]], DRAW_INTR, DRAW_T)[0]
+    assert np.allclose(uv, _hand_pixel(SX, SY, z), atol=1e-6)
+    assert project_to_image([[SX, SY, 0.5]], DRAW_INTR, DRAW_T) is None      # 카메라보다 높은 점(카메라 뒤)은 None
+
+
+def test_draw_spare_target_box_center_and_copy():
+    """목표 자리 상자(빨강)의 가운데가 손 계산 픽셀 ±2 px · 긴 변(yaw 90 → base y)이 영상 세로 · 크기 그대로 · 입력은 안 고침 · 잰 블록 없어도 그린다."""
+    pytest.importorskip('cv2')
+    color = np.full((480, 640, 3), 90, np.uint8)
+    target = ideal_spare_block(SPOT, SIZE)
+    img = draw_spare(color, None, target, DRAW_INTR, DRAW_T, SIZE)
+    assert img.shape == color.shape and img.dtype == color.dtype and (color == 90).all()
+    vs, us = np.nonzero((img == TARGET_BGR).all(axis=2))
+    assert len(us)
+    cu, cv = (us.min() + us.max()) / 2, (vs.min() + vs.max()) / 2
+    hu, hv = _hand_pixel(SX, SY, SZ + T)
+    assert abs(cu - hu) <= 2 and abs(cv - hv) <= 2
+    assert (vs.max() - vs.min()) > 2 * (us.max() - us.min())        # 74.45 × 24.8 mm 눕힘 — 긴 변이 세로
+
+
+def test_draw_spare_measured_and_offset():
+    """잰 블록이 있으면 초록 윤곽이 더 그려지고 목표 상자도 남는다. 둘 다 None 이면 그림은 원본과 같다(빈 그림 아님 — 바탕 그대로)."""
+    pytest.importorskip('cv2')
+    color = np.full((480, 640, 3), 90, np.uint8)
+    target = ideal_spare_block(SPOT, SIZE)
+    meas = {**target, 'x_m': SX + 0.0021, 'y_m': SY - 0.0008, 'yaw_deg': -87.0}
+    img = draw_spare(color, meas, target, DRAW_INTR, DRAW_T, SIZE)
+    assert (img == (0, 200, 0)).all(axis=2).any() and (img == TARGET_BGR).all(axis=2).any()
+    assert (draw_spare(color, None, None, DRAW_INTR, DRAW_T, SIZE) == color).all()
+
+
+def test_draw_spare_exact_fit_keeps_both_outlines():
+    """잰 블록이 목표와 딱 맞아도 빨간 목표 테(굵게 먼저)와 초록 윤곽(가늘게 위)이 둘 다 보인다."""
+    pytest.importorskip('cv2')
+    color = np.full((480, 640, 3), 90, np.uint8)
+    target = ideal_spare_block(SPOT, SIZE)
+    img = draw_spare(color, dict(target), target, DRAW_INTR, DRAW_T, SIZE)
+    assert (img == (0, 200, 0)).all(axis=2).any() and (img == TARGET_BGR).all(axis=2).any()
+
+
+def test_spare_texts_dyaw_and_base_offset():
+    """잰 블록 글자는 목표와의 yaw 차이(90° 경계에서 +90 · −90 이 번갈지 않게) · TARGET 아래 큰 글자는 dx · dy(mm) 한 줄
+    (spare_offset_text 는 작업대 다시 재기 글자 placed_note 가 그대로 씀)."""
+    target = ideal_spare_block(SPOT, SIZE)
+    for yaw in (89.6, -89.6):                                  # 같은 자세(180° 대칭) — 목표 −90 과 차이는 ±0.4
+        assert spare_label({**target, 'yaw_deg': yaw}, target) == 'SPARE FLAT dyaw +0'
+    assert spare_label({**target, 'up': 'WIDTH', 'yaw_deg': target['yaw_deg'] + 3.2}, target) == 'SPARE EDGE dyaw +3'
+    assert spare_label({**target, 'yaw_deg': 12.0}, None) == 'SPARE FLAT +12'
+    meas = {**target, 'x_m': target['x_m'] + 0.0021, 'y_m': target['y_m'] - 0.0008}
+    assert spare_offset_text(meas, target) == 'base dx +2.1 dy -0.8 mm'
+    assert spare_offset_big(meas, target) == 'dx +2.1  dy -0.8 mm'
+
+
+def test_draw_spare_offset_below_target_and_axes_inside_box():
+    """10/15 PL '나': 어긋난 거리는 TARGET 아래 큰 한 줄(왼쪽 위 작은 글자 · 화살표는 없앰), base x · y 화살표는 목표 상자 안 —
+    잰 블록이 축에서 얼마나 틀어졌는지 상자 안에서 보이게."""
+    cv2 = pytest.importorskip('cv2')
+    color = np.full((480, 640, 3), 90, np.uint8)
+    target = ideal_spare_block(SPOT, SIZE)
+    meas = {**target, 'x_m': SX + 0.0021, 'y_m': SY - 0.0008, 'yaw_deg': target['yaw_deg'] + 3.0}
+    img = draw_spare(color, meas, target, DRAW_INTR, DRAW_T, SIZE)
+    white = (img == 255).all(axis=2)
+    assert not white[:80, :120].any()                                       # 왼쪽 위(옛 글자 · 화살표 자리)는 비었다
+    box = project_to_image(top_face_corners(target, SIZE), DRAW_INTR, DRAW_T)
+    inside = np.zeros(white.shape, np.uint8)
+    cv2.fillConvexPoly(inside, np.round(box).astype(np.int32), 1)
+    assert (white & inside.astype(bool)).any()                              # 상자 안 흰 화살표 · 'x' 'y'
+    vs, us = np.nonzero(white & (np.arange(480)[:, None] > box[:, 1].max() + 20))   # TARGET 글자보다 아래
+    (tw, _), _ = cv2.getTextSize(spare_offset_big(meas, target), cv2.FONT_HERSHEY_SIMPLEX, OFFSET_SCALE, 6)
+    assert len(us) and us.max() - us.min() + 1 >= 0.8 * tw                  # 큰 한 줄이 거의 다 그려짐
+    assert abs((us.min() + us.max()) / 2 - box[:, 0].mean()) <= 6           # 상자와 가로 가운데가 같다(글자 모양 치우침 몇 px)
+
+
+def test_ray_to_edge_in_box():
+    """상자 가운데에서 방향 따라 가장자리까지 거리 — 축 화살표 길이(상자 안에 들게)."""
+    sq = np.array([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
+    c = np.array([5.0, 5.0])
+    assert _ray_to_edge(sq, c, np.array([1.0, 0.0])) == pytest.approx(5.0)
+    assert _ray_to_edge(sq, c, np.array([0.0, -1.0])) == pytest.approx(5.0)
+    assert _ray_to_edge(sq, c, np.array([1.0, 1.0]) / np.sqrt(2)) == pytest.approx(5.0 * np.sqrt(2))
+
+
+def test_base_axes_px_follows_camera_rotation():
+    """화살표 방향 = base +x · +y 가 사진에서 가는 쪽. 시험 카메라(x 같음)면 → · ↑, 받침 관측 자세처럼 돌아간 카메라면 ↑ · ←(10/14 검토)."""
+    target = ideal_spare_block(SPOT, SIZE)
+    dx, dy = base_axes_px(target, DRAW_INTR, DRAW_T)
+    assert np.allclose(dx, [1, 0], atol=1e-6) and np.allclose(dy, [0, -1], atol=1e-6)
+    rot = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])   # 카메라 x = base −y · y = base −x · z 아래
+    T = np.eye(4)
+    T[:3, :3], T[:3, 3] = rot, DRAW_CAM
+    dx, dy = base_axes_px(target, DRAW_INTR, T)
+    assert np.allclose(dx, [0, -1], atol=1e-6) and np.allclose(dy, [-1, 0], atol=1e-6)

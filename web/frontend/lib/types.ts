@@ -13,6 +13,16 @@ export interface TaskState {
   part_id: string | null;
   message_id: string | null;
   message: string;
+  pick?: PickInfo; // 공급 구역에서 고른 블록(10/14 22시 PL — 고른 뒤 그 블록을 놓을 때까지만 실림, 없으면 칸이 없음)
+}
+
+/** state/2 pick — 작업 관리자가 공급 구역 블록을 고른 까닭(손목 비전이 같은 그림에 순위 번호 · 고른 블록 칠하기를 다시 그림).
+ *  index · ranks = 그 그림의 find_blocks 블록 차례(1부터), ranks = 고르는 우선순위대로, reason = 고른 까닭 한 줄(PickRanker) */
+export interface PickInfo {
+  image_seq: number | null;
+  index: number;
+  ranks: number[];
+  reason: string;
 }
 
 /** safety_state/1 — 정지 노드. reason = STOP_WEB · STOP_KEY · STOP_TASK · ROBOT_ALARM:<상태> · CTRL_C · TIMEOUT (IRD 7장) */
@@ -78,13 +88,13 @@ export interface Intent {
 export type WsEvent =
   | { type: 'state'; data: TaskState }
   | { type: 'safety'; data: SafetyState }
-  | { type: 'progress'; data: Progress }
+  | { type: 'progress'; data: Progress | null } // null = backend 가 지난 조립 진행표를 지움(10/15 PL '가++')
   | { type: 'gripper'; data: GripperState }
   | { type: 'scan_result'; data: ScanResult }
   | { type: 'intent'; data: Intent }
   | { type: 'bridge_alive'; data: { alive: boolean } }
   | { type: 'broker'; data: { connected: boolean } }
-  | { type: 'wrist_image'; data: { seq: number; stamp: number } }
+  | { type: 'wrist_image'; data: { seq: number; stamp: number; run_id?: string | null } } // run_id = backend 가 받을 때의 state run_id
   | { type: 'scan_image' | 'scan_cloud'; data: BlobInfo }
   | { type: 'scan_preview'; data: ScanPreview }
   | { type: 'timing'; data: { req_timeout_s: number } }

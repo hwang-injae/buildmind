@@ -24,7 +24,7 @@ run_id 는 조립 출발(READY → CHECK) 또는 스캔 시작(SCAN_MOVE) 때 �
 답이 오면 어떻게 할지(build_result)만 정한다. 저장이 확인된 run_id 만 목록에서 지운다 — 실패 · 시간 초과 · 잘못된 답은 요약을 남긴다.
 WAIT_SUPPLY(공급 채우기 · [계속])는 05 작업분류 W119 ②의 일부지만 SDD 5장 상태표에 있어 W044 에서 먼저 구현했다 — **W119 완료가 아니다**
 (W119 는 스캔 흐름이 더 남아 있다).
-복구(RECOVER) 뒤 첫 성공한 move_to 는 robot.yaml recover.speed_ratio(0.5)로 움직인다. 조립 중이 아닐 때(IDLE · READY · DONE)
+복구(RECOVER) 뒤 첫 성공한 move_to 는 robot.yaml recover.speed_ratio(0.4)로 움직인다. 조립 중이 아닐 때(IDLE · READY · DONE)
 정지됐다 풀린 뒤 돌아갈 곳은 SDD 에
 없어서 가장 가까운 규칙(비조립 RECOVER → IDLE)만 따른다(IRD 12장 W121 다시 확인 대상).
 """
@@ -111,12 +111,17 @@ def placed_offset(center_m, part_id, ok, why, body):
         return unmeasured('BAD_RESPONSE', 'x_m · y_m 이 유한하지 않음', stamp)
     up = b.get('up') if b.get('up') in ('THICKNESS', 'WIDTH', 'LENGTH') else None
     tilted = b.get('tilted') if isinstance(b.get('tilted'), bool) else None
+    corners = b.get('corners_z_m')
     # top_z_m = #177 윗면 점 가운데 값(잰 값). 다시 집기 높이는 이것과 자세 치수로 구한다(regrasp_decision) — 설계 z 로 대신하지 않음
     # MEASURED = 'x · y 를 기록할 수 있음'일 뿐 — 다시 집기 판정은 regrasp_decision(대상 · 자세 · 기울기 · 시각 · 횟수)이 따로 한다
     return {'status': 'MEASURED', 'x_m': round(x, 5), 'y_m': round(y, 5), 'target_x_m': round(float(center_m[0]), 5),
             'target_y_m': round(float(center_m[1]), 5), 'dx_mm': dx, 'dy_mm': dy, 'dx_raw_mm': dx_raw, 'dy_raw_mm': dy_raw,
             'yaw_deg': _finite(b.get('yaw_deg')), 'up': up,
-            'tilted': tilted, 'top_z_m': _finite(b.get('top_z_m')), 'measured_stamp': stamp}
+            'tilted': tilted, 'top_z_m': _finite(b.get('top_z_m')), 'measured_stamp': stamp,
+            # 모서리 안쪽 칸 높이 4곳(m, CORNER_SIGNS 순서, 못 잰 곳 None — 꼭짓점이 아님) — 응답에 칸이 있을 때만 싣는다(지금 비전 응답의 기록은 그대로).
+            # 칸 이름 · 순서는 민범진과 맞출 제안(아직 계약 아님). 꼴이 다르면(4개 목록 아님) None
+            **({'corners_z_m': [_finite(v) for v in corners] if isinstance(corners, list) and len(corners) == 4 else None}
+               if 'corners_z_m' in b else {})}
 
 
 A4_TOL_MM = 2.0            # 축별 이 값 이상이면 다시 집어 놓는다(10/14 20:37 PL 승인 — 일정표 W144 · E-119 의 3 mm 초과를 바꿈)
@@ -124,6 +129,9 @@ FLOAT_EPS_MM = 1e-9        # 부동소수 표현 오차만 흡수(예 0.402 − 
 A4_MAX_TRIES = 2           # 같은 블록 다시 집기 최대 횟수(W144 '최대 2번') — 다 쓰고도 크면 남은 오차를 적고 다음 블록으로(10/14 19:47 사용자 확정)
 STAMP_ROUND_S = 0.0005     # 비전 #177 이 measured_stamp 를 소수 3자리(1 ms)로 반올림해 보낸다 — 비교에 그 반올림 폭만 둔다(새 문턱 아님)
 UP_NAMES = ('LENGTH', 'WIDTH', 'THICKNESS')
+A4_Z_TOL_MM = 5.0          # 모서리 안쪽 칸 높이: 가장 낮은 1곳을 뺀 3곳의 평균과 하나라도 이만큼 이상 다르면 Z 문제 → 사람 수정 대기(10/15 사용자 합의, 단일 블록)
+# 모서리 순서 = 윗면 (긴 축 −, 짧은 축 −) · (−, +) · (+, −) · (+, +). 비전 corners_z_m 칸과 같은 순서 — 칸 이름 · 순서는 민범진과 맞출 제안(아직 계약 아님)
+CORNER_SIGNS = ((-1, -1), (-1, 1), (1, -1), (1, 1))
 
 
 def design_up(quat):
@@ -132,8 +140,62 @@ def design_up(quat):
     return UP_NAMES[max(range(3), key=lambda k: abs(R[2][k]))]
 
 
-def regrasp_decision(row, t_req, t_resp, part, place_pose, cfg, tries):
+def design_yaw_deg(quat):
+    """설계 자세(쿼터니언 xyzw) → 블록 긴 축(LENGTH)이 base x 와 이루는 각(°, [−90, 90)) — 비전 yaw_deg 와 같은 규약(180° 대칭). 바깥 영향 없음."""
+    R = matrix_from_quat(quat)
+    return (math.degrees(math.atan2(R[1][0], R[0][0])) + 90.0) % 180.0 - 90.0
+
+
+def corner_xy_errors(row, part, cfg):
+    """중심과 윗면 모서리 4곳의 x · y 오차(mm, 잰 − 설계). 바깥 영향 없음.
+
+    입력: row = placed_offset MEASURED(dx_raw_mm · dy_raw_mm · yaw_deg · up — 눕힘 THICKNESS · 옆세움 WIDTH) · part(quat) · cfg(block_actual_m).
+    출력: [('center', ex, ey), ('c1', ex, ey), …, ('c4', ex, ey)] — 모서리 순서는 CORNER_SIGNS.
+    모서리는 비전이 재지 않는다: 잰 중심 · 잰 yaw 와 실측 블록 치수로 만든 **계산값**(직사각형 가정)이다. 잰 yaw − 설계 yaw 는 블록이 180° 대칭이라
+    [−90, 90) 로 감아 같은 모서리끼리 짝짓는다. 회전만 틀어졌을 때 모서리 한 축 2 mm ≈ 3.1°(긴 축 절반 37.2 mm).
+    """
+    L, W, T = (float(v) * 1000.0 for v in cfg['block_actual_m'])
+    a, b = L / 2.0, (W if row['up'] == 'THICKNESS' else T) / 2.0
+    yd = design_yaw_deg(part['quat'])
+    ym = math.radians(yd + (row['yaw_deg'] - yd + 90.0) % 180.0 - 90.0)
+    yd = math.radians(yd)
+    dx, dy = row.get('dx_raw_mm', row['dx_mm']), row.get('dy_raw_mm', row['dy_mm'])
+    out = [('center', dx, dy)]
+    for k, (su, sv) in enumerate(CORNER_SIGNS, 1):
+        u, v = su * a, sv * b
+        out.append((f'c{k}', dx + (u * math.cos(ym) - v * math.sin(ym)) - (u * math.cos(yd) - v * math.sin(yd)),
+                    dy + (u * math.sin(ym) + v * math.cos(ym)) - (u * math.sin(yd) + v * math.cos(yd))))
+    return out
+
+
+def corner_z_check(corners_z_m):
+    """모서리 안쪽 칸 높이 4곳(m — 비전 corners_z_m, 꼭짓점이 아니라 잰 중심 · yaw 기준 윗면 안쪽 칸) → ('OK' | 'Z' | 'MISSING', 글). 바깥 영향 없음.
+
+    10/15 사용자 합의: 가장 낮은 1곳을 빼고 남은 3곳의 평균과 하나라도 A4_Z_TOL_MM 이상 다르면 Z 문제(자동 다시 집기 안 함 · 사람 수정 대기).
+    판정 문턱은 칸 높이 기준 '세 점 평균 대비 편차 ≥ 5 mm' 하나다. 예: 칸 하나만 h 높으면 편차 2h/3 → 칸 높이 7.5 mm 부터.
+    칸이 꼭짓점 안쪽이라 강체로 기운 블록은 꼭짓점이 더 들려야 걸린다(긴 끝 들림 ≈ 9 mm) — 그 전에 비전 TILTED 가 먼저 거른다.
+    4곳이 다 유한한 수가 아니면 'MISSING' — 못 얻은 것을 정상으로 보지 않는다.
+    """
+    if not isinstance(corners_z_m, (list, tuple)) or len(corners_z_m) != 4:
+        return 'MISSING', '모서리 높이 4곳이 응답에 없어요'
+    z = [_finite(v) for v in corners_z_m]
+    if any(v is None for v in z):
+        return 'MISSING', f'모서리 4곳 중 {sum(v is None for v in z)}곳 높이를 못 얻었어요'
+    rest = sorted(z)[1:]                            # 가장 낮은 1곳을 뺀다
+    mean = sum(rest) / 3.0
+    dev = max(abs(v - mean) for v in rest) * 1000.0
+    if dev >= A4_Z_TOL_MM - FLOAT_EPS_MM:
+        return 'Z', f'모서리 높이 차 {dev:.1f} mm ≥ {A4_Z_TOL_MM:.0f} mm(가장 낮은 곳을 뺀 3곳 평균 기준)'
+    return 'OK', f'모서리 높이 차 {dev:.1f} mm'
+
+
+def regrasp_decision(row, t_req, t_resp, part, place_pose, cfg, tries, corners=False):
     """W144 A4 자동 다시 집기 판단(ROS 없음 · 바깥 영향 없음). 기록 모드와 따로 — w144_regrasp 가 켜졌을 때만 부른다.
+
+    corners(기본 False — 선택 기능, task 파라미터 w144_corner_judge): False 면 지금 판정 그대로(중심 dx · dy 만, 모서리 칸은 보지 않음).
+    True 면 모서리 판정(10/15 사용자 합의, 단일 블록): 모서리 안쪽 칸 높이 → 중심 · 모서리 x · y. 비전 TILTED 거절 · tilted True 는 사람 수정 대기(HOLD — 안 B′,
+    #182 의 '기울어짐도 기록 · 다음 블록'과 달라 PL 확인 대기), 다른 거절은 지금처럼 SKIP. 비전이 모서리 높이(corners_z_m)를 내야 돈다 —
+    칸이 없으면 '못 얻음'으로 다시 집지 않는다(지금 비전에서 켜면 다시 집기가 모두 멈춘다 — 비전 칸과 같이 켤 것).
 
     입력: row = placed_offset 결과(없으면 None) · t_req · t_resp = 측정을 부른 · 답을 받은 시각(time.time(), 초) ·
           part = 설계 부품(part_id · quat · grasp) · place_pose = 이 블록을 놓을 때 실제로 보낸 목표((xyz m, 쿼터니언) — 흩뿌림이면 같은 층
@@ -141,33 +203,59 @@ def regrasp_decision(row, t_req, t_resp, part, place_pose, cfg, tries):
     최신성: #177 은 요청 뒤에 받은 깊이만 쓰고(fresh_frames) measured_stamp 는 그중 마지막 장을 받은 시각(노드 시계)이다 —
           같은 로봇 PC 시계라는 가정 아래 t_req ≤ measured_stamp ≤ t_resp 일 때만 '이번 요청의 영상'으로 본다(밖이면 시계 · 영상을 믿지 않음).
           measured_stamp 는 1 ms 로 반올림돼 오므로 양 끝에 STAMP_ROUND_S(0.5 ms)만 둔다.
-    출력: ('OK', None) = 두 축 모두 A4_TOL_MM 미만(반올림 전 값) — 그대로 이어 감 / ('EXHAUSTED', 글) = A4_TOL_MM 이상이지만 이미 A4_MAX_TRIES 번 다시 놓음 — 남은 오차를 적고
-          이어 감(유효한 측정일 때만 — 측정 불가 · 기울어짐 등은 그 전에 HUMAN) / ('REGRASP', 목표) = PickPlace 목표 {part_id, supply_slot '', grasp(레시피), pick_pose(잰 중심 ·
+    판정 차례(10/15 사용자 합의 — 단일 블록): 측정 유효 → 모서리 안쪽 칸 높이(corner_z_check — 못 얻으면 SKIP, Z 문제면 HOLD) → 중심 · 모서리 4곳 x · y(corner_xy_errors).
+    출력: ('OK', None) = 중심 · 모서리 모두 두 축 A4_TOL_MM 미만(반올림 전 값) — 그대로 이어 감 / ('HOLD', 글) = Z 문제 — 다시 집지 않고 사람 수정 대기 / ('EXHAUSTED', 글) = A4_TOL_MM 이상이지만 이미 A4_MAX_TRIES 번 다시 놓음 — 남은 오차를 적고
+          이어 감(유효한 측정일 때만 — 측정 불가 · 기울어짐 등은 그 전에 SKIP) / ('REGRASP', 목표) = PickPlace 목표 {part_id, supply_slot '', grasp(레시피), pick_pose(잰 중심 ·
           잰 yaw · 잰 윗면에서 자세 치수로 구한 중심 높이 — block_pose), place_pose(설계), open_width_m 0, obstacles []} /
-          ('HUMAN', 까닭) = 사람 확인. 다시 집기 조건 = |dx| ≥ A4_TOL_MM 또는 |dy| ≥ A4_TOL_MM(반올림 전 값). 측정을 못 했거나 믿을 수 없으면(대상 · 자세 다름 · 기울어짐 · 좌표 · yaw · 윗면 없음 · 측정 시각이 요청 · 답 사이가 아님 ·
+          ('SKIP', 까닭) = 측정을 못 씀 — 다시 집지 않고 까닭만 적고 다음 블록(사람 대기 없음, 10/14 21:5x 사용자 결정). 다시 집기 조건 = |dx| ≥ A4_TOL_MM 또는 |dy| ≥ A4_TOL_MM(반올림 전 값). 측정을 못 했거나 믿을 수 없으면(대상 · 자세 다름 · 기울어짐 · 좌표 · yaw · 윗면 없음 · 측정 시각이 요청 · 답 사이가 아님 ·
           원래 놓은 목표를 모름) 다시 집지 않는다. 놓는 목표는 원래 놓을 때 보낸 것 그대로(설계 중심으로 덮어쓰지 않음).
     """
     if row is None:
-        return 'HUMAN', '놓은 블록을 다시 재지 못했어요(측정 꺼짐 · 답 없음)'
+        return 'SKIP', '놓은 블록을 다시 재지 못했어요(측정 꺼짐 · 답 없음)'
     if row.get('status') != 'MEASURED':
-        return 'HUMAN', f'놓은 블록을 재지 못했어요({row.get("reason")}{": " + row["detail"] if row.get("detail") else ""})'
+        if corners and row.get('reason') == 'TILTED':   # 모서리 판정이 켜졌으면 비전 TILTED 거절도 Z 문제 — 자동 집기 없이 사람 수정 대기(안 B′, #182 와 다름 → PL 확인 대기)
+            return 'HOLD', f'놓은 블록이 기울었어요(손목 카메라 TILTED{": " + row["detail"] if row.get("detail") else ""}) — 손으로 바로 놓은 뒤 [계속]을 누르면 다시 잽니다'
+        return 'SKIP', f'놓은 블록을 재지 못했어요({row.get("reason")}{": " + row["detail"] if row.get("detail") else ""})'
     stamp = row.get('measured_stamp')
     if not isinstance(stamp, (int, float)) or isinstance(stamp, bool) or not math.isfinite(stamp) or not t_req - STAMP_ROUND_S <= stamp <= t_resp + STAMP_ROUND_S:
-        return 'HUMAN', '측정 영상이 이번 요청 뒤의 것인지 확인되지 않았어요(measured_stamp가 요청 · 답 시각 사이가 아님)'
+        return 'SKIP', '측정 영상이 이번 요청 뒤의 것인지 확인되지 않았어요(measured_stamp가 요청 · 답 시각 사이가 아님)'
+    if corners and row.get('tilted') is True:      # 잰 블록이 기울었다고 온 경우도 TILTED 거절과 같이 사람 수정 대기(안 B′). 모름(None)은 SKIP
+        return 'HOLD', '놓은 블록이 기울었어요(손목 카메라 tilted) — 손으로 바로 놓은 뒤 [계속]을 누르면 다시 잽니다'
     if row.get('tilted') is not False:
-        return 'HUMAN', '놓은 블록이 기울어졌거나 기울기를 모릅니다'
+        return 'SKIP', '놓은 블록이 기울어졌거나 기울기를 모릅니다'
     want_up = design_up(part['quat'])
     if row.get('up') != want_up:
-        return 'HUMAN', f'놓은 블록 자세({row.get("up")})가 설계({want_up})와 다릅니다'
+        return 'SKIP', f'놓은 블록 자세({row.get("up")})가 설계({want_up})와 다릅니다'
     if row.get('yaw_deg') is None or row.get('top_z_m') is None:
-        return 'HUMAN', '잰 yaw · 윗면 높이가 없습니다'
-    dx_raw, dy_raw = row.get('dx_raw_mm', row['dx_mm']), row.get('dy_raw_mm', row['dy_mm'])   # 반올림 전 값으로 판단(1.996 이 2.00 으로 보여도 다시 집지 않음)
-    if abs(dx_raw) < A4_TOL_MM - FLOAT_EPS_MM and abs(dy_raw) < A4_TOL_MM - FLOAT_EPS_MM:
+        return 'SKIP', '잰 yaw · 윗면 높이가 없습니다'
+    if not corners:                                # 지금 판정(기본) — 중심만
+        dx_raw, dy_raw = row.get('dx_raw_mm', row['dx_mm']), row.get('dy_raw_mm', row['dy_mm'])   # 반올림 전 값으로 판단(1.996 이 2.00 으로 보여도 다시 집지 않음)
+        if abs(dx_raw) < A4_TOL_MM - FLOAT_EPS_MM and abs(dy_raw) < A4_TOL_MM - FLOAT_EPS_MM:
+            return 'OK', None
+        if tries >= A4_MAX_TRIES:                  # 다시 집기를 다 썼다 — 남은 오차만 적고 이어 감(기존 VERIFY 판정은 이미 통과, 사람 대기 없음)
+            return 'EXHAUSTED', f'다시 집기 {A4_MAX_TRIES}번을 다 써도 남은 오차 dx {row["dx_mm"]} · dy {row["dy_mm"]} mm — 그대로 다음 블록'
+        return _regrasp_goal(row, part, place_pose, cfg)
+    if row.get('up') not in ('THICKNESS', 'WIDTH'):
+        return 'SKIP', f'윗면 모서리를 만들 수 없는 자세({row.get("up")})예요'
+    z_state, z_text = corner_z_check(row.get('corners_z_m'))
+    if z_state == 'MISSING':                       # 못 얻은 것은 정상이 아니다 — 다시 집지 않고 까닭을 적고 다음 블록(#182 규칙, 사람 대기 여부는 결정 대기)
+        return 'SKIP', f'모서리 높이를 못 얻어 판정하지 않아요({z_text})'
+    if z_state == 'Z':
+        return 'HOLD', f'놓은 블록이 기울었어요({z_text}) — 손으로 바로 놓은 뒤 [계속]을 누르면 다시 잽니다'
+    errs = corner_xy_errors(row, part, cfg)        # 반올림 전 값으로 판단(1.996 이 2.00 으로 보여도 다시 집지 않음)
+    if all(abs(ex) < A4_TOL_MM - FLOAT_EPS_MM and abs(ey) < A4_TOL_MM - FLOAT_EPS_MM for _, ex, ey in errs):
         return 'OK', None
+    worst = max(errs, key=lambda e: max(abs(e[1]), abs(e[2])))
     if tries >= A4_MAX_TRIES:                      # 다시 집기를 다 썼다 — 남은 오차만 적고 이어 감(기존 VERIFY 판정은 이미 통과, 사람 대기 없음)
-        return 'EXHAUSTED', f'다시 집기 {A4_MAX_TRIES}번을 다 써도 남은 오차 dx {row["dx_mm"]} · dy {row["dy_mm"]} mm — 그대로 다음 블록'
+        return 'EXHAUSTED', (f'다시 집기 {A4_MAX_TRIES}번을 다 써도 남은 오차 dx {row["dx_mm"]} · dy {row["dy_mm"]} mm'
+                             f'(가장 큰 곳 {worst[0]} {worst[1]:.2f} · {worst[2]:.2f} mm) — 그대로 다음 블록')
+    return _regrasp_goal(row, part, place_pose, cfg)
+
+
+def _regrasp_goal(row, part, place_pose, cfg):
+    """다시 집기 목표(잰 자세에서 집어 처음 보낸 목표에 놓기). 처음 목표를 모르면 SKIP. 바깥 영향 없음."""
     if place_pose is None:
-        return 'HUMAN', '이 블록을 놓을 때 보낸 목표를 몰라 다시 놓을 자리를 정할 수 없어요'
+        return 'SKIP', '이 블록을 놓을 때 보낸 목표를 몰라 다시 놓을 자리를 정할 수 없어요'
     pick = block_pose(cfg, row['up'], row['yaw_deg'], row['x_m'], row['y_m'], row['top_z_m'])
     return 'REGRASP', {'part_id': part['part_id'], 'supply_slot': '', 'grasp': part['grasp'], 'pick_pose': pick,
                        'place_pose': copy.deepcopy(place_pose), 'open_width_m': 0.0, 'obstacles': []}
@@ -258,6 +346,7 @@ class TaskManager:
         self._spare_on = None                     # 받침에 놓아 둔 블록의 목표 part_id(있으면 다음 SELECT 가 공급 대신 받침부터 마무리한다)
         self._w144_due = None                     # 닫을 W144 기록(조립 결과 DONE 인가) — 잠금 밖 작업 스레드가 닫는다(10/14 #152 리뷰 3)
         self._w144_starting = False               # 출발했고 W144 기록을 아직 안 열었다 — CHECK 첫 단계가 잠금 밖에서 연다(#152 리뷰 3)
+        self._w144_reopen = False                 # 조립 중 정지로 W144 녹화를 닫았다 — [다시 시작]으로 이어 가면 새로 연다(10/15 박진용)
         self._spare_centers = 0                   # 받침 위 이 블록에 받침 맞추기를 한 수 — 맞춘 뒤 다시 재서 2 mm 넘으면 다시(scatter_pick.CENTER_MAX 번까지)
         self._spare_failed = []                   # 이번 블록에서 받침으로 옮기다 안 된 시도 [(x_m, y_m, 잡기, 각도 °, 옮김 m)] — 같은 후보를 다시 고르지 않게
         self._plan_streak = 0                     # 움직이기 전 길 계산 거절이 연달아 몇 번(받침 경유) — PLAN_STREAK 번이면 사람
@@ -272,6 +361,9 @@ class TaskManager:
         self._a4_last = None                      # W144 A4: 마지막 측정 (token, 기록 row, 부른 시각, 답 받은 시각)
         self._a4_place = {}                       # W144 A4: 블록마다 놓을 때 실제로 보낸 place_pose(흩뿌림은 1 mm 띄운 자리) — 다시 놓을 자리
         self._spread = None                       # 같은 층 1 mm 띄운 놓는 중심(part_id → [x, y, z] m) — 설계가 정해질 때 한 번 계산
+        # 손목 그림 집기 순위(state/2 pick, 10/14 22시 PL) — 공급 find_blocks 결과를 적용할 때만 바뀌고(받침 · 조립 자리 재기는 공급 그림이
+        # 아니라 그대로) 그 사이 모든 state/2 에 실린다. 조립 끝(DONE) · 취소 · IDLE · 새 출발이면 비운다(None = 키를 뺌)
+        self._pick = None
         if self._scatter is not None:             # 흩뿌림 실패 뒤 재시도 설정(robot.yaml scatter.*) — 없거나 이상하면 만들 때 거절한다
             sc = cfg['scatter']
             self.max_attempts = sc['max_attempts']
@@ -716,10 +808,12 @@ class TaskManager:
                 self.logger.log('fail', self.part_id, f'find_blocks {why} — 다시({k + 1}/{tries - 1})')
         return ok, why, body
 
-    def _hold(self, part_id, text, then=None):
-        """받침 경유: 서지 않고 사람을 부른다(one_pick hold) — WAIT_SUPPLY + 알림 no_match_block, [계속]이면 then 을 한 뒤 이어 간다."""
+    def _hold(self, part_id, text, then=None, message_id='no_match_block'):
+        """받침 경유: 서지 않고 사람을 부른다(one_pick hold) — WAIT_SUPPLY + 알림(기본 no_match_block), [계속]이면 then 을 한 뒤 이어 간다.
+
+        message_id: 화면 알림 이름 — 받침 경유 · 공급은 기본 no_match_block 그대로, A4 모서리 판정의 사람 수정 대기만 placed_check(10/15 PL)."""
         self._hold_then = then
-        self._enter_wait_supply(part_id, ('no_match_block', text))
+        self._enter_wait_supply(part_id, (message_id, text))
         return None
 
     def _move_observe(self):
@@ -768,7 +862,7 @@ class TaskManager:
             self._set('PICK_PLACE', None, f'{r["part_id"]} 를 집으러 갑니다')
         elif status == 'DONE':
             with self._lock:               # DONE 방송과 요약 확정 사이에 새 설계 선택 · 출발이 끼어들지 못하게 한 잠금 안에서. 요약 CSV 는 쓰기 스레드가 쓰지만, w144_record 가 켜져 있으면 w144_finish(녹화 종료 · ZIP)가 이 잠금 안에서 돈다(점검 ② 3번 — 박진용)
-                self.part_id = None
+                self.part_id = self._pick = None      # 조립이 끝났다 — 손목 그림 집기 순위도 DONE 알림부터 뺀다(10/14 22시 PL)
                 self._set('DONE', 'done', '조립이 끝났어요')
                 self._finish_run('DONE')
         elif status == 'UNKNOWN_BLOCK' and not self._reobserved:
@@ -815,6 +909,7 @@ class TaskManager:
         적용(commit)과 그 결과(목표 적용 · PICK_PLACE 또는 WAIT_SUPPLY 전환)는 **한 잠금 안에서** 한다 — 정지 신호(on_safety)는 같은 잠금을 얻어야
         반영되므로 commit 확인 뒤 전환 전에 정지가 끼지 못한다. commit 은 요청 번호 · 상태 변화 · 정지 횟수 · 정지 중 여부를 그 안에서 다시 확인한다
         (정지가 끼었거나, 정지 뒤 [다시 시작]까지 끝났어도 그 전 요청의 늦은 답은 적용하지 않는다). 로봇은 move_to 외에 움직이지 않는다.
+        공급 관측 결과를 적용하면 state/2 pick(손목 그림 집기 순위)도 그 결과의 것으로 바꾼다(받침 위 재기는 그대로 — 10/14 22시 PL).
         """
         if not self._scatter.configured:
             self._to_error('흩뿌린 공급 설정(열림 폭)이 없어 집을 수 없어요. 로봇 담당자에게 설정 확인을 부탁하세요')
@@ -853,6 +948,10 @@ class TaskManager:
         with self._lock:
             applied = self._scatter.commit(ticket, lambda: ((self._epoch, self._stop_count), self.halted()), result)
             if applied:
+                if not from_spare:
+                    # 공급 그림의 새 결과가 손목 그림 집기 순위를 바꾼다 — 순위로 고른 결과(SPARE)만 pick 이 있고, 못 고른 결과면 비운다.
+                    # 받침 위 재기는 공급 그림이 아니라 그대로 둔다(10/14 22시 PL). 상태 전환 전에 바꿔야 그 state/2 부터 실린다
+                    self._pick = copy.deepcopy(result.get('pick'))
                 self._apply_scatter_result(target, result, pick_message)
                 return
         if self._stop_count != stops_before:       # 조회 중에 정지가 있었다(이미 [다시 시작]까지 끝났어도) → 다른 정지 때처럼 STOPPED 절차로
@@ -1067,12 +1166,14 @@ class TaskManager:
 
     def _next_spare_candidate(self):
         """받침 경유: 움직이기 전에 길이 안 나온 뒤 다시 찍지 않고 마지막 공급 관측(_spare_seen)에서 다음 후보를 골라 적용한다(one_pick — 장면이 그대로).
-        안 된 후보는 _spare_failed 에 이미 있다. 바깥 영향: 다음 PickPlace 목표 · 상태(로봇은 아직 안 움직임)."""
+        안 된 후보는 _spare_failed 에 이미 있다. 바깥 영향: 다음 PickPlace 목표 · 상태(로봇은 아직 안 움직임) · state/2 pick(같은 그림의 새 순위 ·
+        남은 후보가 없으면 뺌)."""
         target, body = self._spare_seen
         result = self._scatter.prepare_spare(target, body, self._spare_failed)
         with self._lock:
             ticket = self._scatter.begin((self._epoch, self._stop_count))
             if self._scatter.commit(ticket, lambda: ((self._epoch, self._stop_count), self.halted()), result):
+                self._pick = copy.deepcopy(result.get('pick'))     # 같은 공급 그림에서 다시 고른 순위(안 된 후보 빠짐, 10/14 22시 PL)
                 if result['status'] == 'SPARE':
                     self._apply_scatter_result(target, result, '')
                     return None
@@ -1260,7 +1361,7 @@ class TaskManager:
     def _a4_regrasp(self, part):
         """W144 A4 자동 다시 집기(기본 꺼짐 — io.w144_regrasp_on() 이 참일 때만). 반환: True = 상태를 바꿨다(PICK_PLACE · WAIT_SUPPLY), False = 이어 감.
 
-        판단은 regrasp_decision. 다시 집기는 같은 part_id 목표로 PICK_PLACE → 기존 성공 처리 → VERIFY(다시 잼). 사람 확인은 기존 _hold
+        판단은 regrasp_decision. 다시 집기는 같은 part_id 목표로 PICK_PLACE → 기존 성공 처리 → VERIFY(다시 잼). Z 문제(HOLD)와 사람 확인은 기존 _hold
         (WAIT_SUPPLY no_match_block → [계속]이면 다시 확인). 바깥 영향: CSV 'a4_regrasp' 한 줄, 상태 방송.
         """
         on = getattr(self.io, 'w144_regrasp_on', None)
@@ -1269,24 +1370,38 @@ class TaskManager:
         last = self._a4_last
         mine = bool(last) and last[0][3] == self.placed
         row, t_req, t_resp = (last[1], last[2], last[3]) if mine else (None, 0.0, 0.0)
-        verdict, out = regrasp_decision(row, t_req, t_resp, part, self._a4_place.get(self.placed), self.cfg, self._a4_tries.get(self.placed, 0))
+        corner_on = getattr(self.io, 'w144_corner_on', None)
+        corner_on = bool(corner_on and corner_on())          # 모서리 판정(선택, 기본 꺼짐 — w144_corner_judge)
+        verdict, out = regrasp_decision(row, t_req, t_resp, part, self._a4_place.get(self.placed), self.cfg, self._a4_tries.get(self.placed, 0),
+                                        corner_on)
         with self._lock:                           # 판단 뒤 적용 전에 정지 · 취소 · run 바뀜이 끼면 버린다(commit 과 같은 방식, OK 도) — 다음 run_once 가 정지 절차
             if not mine or (self._epoch, self._stop_count, self.run_id, self.placed) != last[0] or self.halted():
                 LOG.info('A4 다시 집기 판단을 버림(정지 또는 상태 바뀜): %s', self.placed)
                 return True
-            if verdict == 'OK':
+            if verdict == 'OK':                    # 모서리 판정이면 기준 안을 다시 집은 횟수와 함께 적어 소진 뒤 진행과 가른다(10/15 사용자 합의)
+                if corner_on:
+                    self.logger.log('a4_regrasp', self.placed, f'기준 안: 다시 집기 {self._a4_tries.get(self.placed, 0)}번 뒤 중심 · 모서리 2 mm 안')
                 return False
+            if verdict == 'HOLD':                  # Z 문제 — 자동으로 다시 집지 않고 사람이 고친 뒤 [계속]이면 다시 확인(VERIFY → 다시 잼)
+                self.logger.log('a4_regrasp', self.placed, f'Z 문제 — 사람 수정 대기: {out}')
+                self._w144_event('regrasp_hold', self.placed, reason=out)
+                self._hold(self.placed, f'{self.placed}: {out}', then='verify', message_id='placed_check')   # 놓은 블록 확인 대기 — 공급 대기(no_match_block)와 구분(10/15 PL)
+                return True
             if verdict == 'EXHAUSTED':
                 self.logger.log('a4_regrasp', self.placed, f'보정 소진: {out}')
                 self._w144_event('regrasp_exhausted', self.placed, dx_mm=row['dx_mm'], dy_mm=row['dy_mm'], tries=self._a4_tries.get(self.placed, 0))
                 return False                       # 기존 흐름(W144 촬영 → SELECT)으로 다음 블록
-            if verdict == 'HUMAN':
-                self.logger.log('a4_regrasp', self.placed, f'사람 확인: {out}')
-                self._hold(self.placed, f'{self.placed}: {out} — 손으로 바로 놓은 뒤 [계속]을 누르면 다시 확인합니다', then='verify')
-                return True
+            if verdict == 'SKIP':                   # 측정을 못 씀 — 다시 집지도, 사람을 부르지도 않고 까닭만 적고 다음 블록(10/14 21:5x 사용자 결정)
+                self.logger.log('a4_regrasp', self.placed, f'측정 못 씀 — 다시 집기 안 함: {out}')
+                self._w144_event('regrasp_skipped', self.placed, reason=out)
+                return False                       # 기존 흐름(W144 촬영 → SELECT)으로 다음 블록
             n = self._a4_tries[self.placed] = self._a4_tries.get(self.placed, 0) + 1
+            more = ''
+            if corner_on:                          # 회전만이면 중심은 작고 모서리가 까닭 — 가장 큰 곳을 같이 적는다
+                worst = max(corner_xy_errors(row, part, self.cfg), key=lambda e: max(abs(e[1]), abs(e[2])))
+                more = f'가장 큰 곳 {worst[0]} {worst[1]:.2f} · {worst[2]:.2f} mm · '
             self.logger.log('a4_regrasp', self.placed, f'{n}번째 다시 집기: dx {row["dx_mm"]} · dy {row["dy_mm"]} mm(설계 중심 기준) · '
-                                                       f'놓을 자리 = 처음 보낸 목표')
+                                                       f'{more}놓을 자리 = 처음 보낸 목표')
             self._start_goal(dict(out, status='FOUND', a4_regrasp=n))
             self._set('PICK_PLACE', None, f'{self.placed} 가 설계 자리에서 벗어나 다시 집어 놓습니다({n}/{A4_MAX_TRIES})')
         return True
@@ -1383,6 +1498,11 @@ class TaskManager:
         if grip.get('grasped'):
             return self._to_error('그리퍼가 블록을 쥐고 있어 이어 갈 수 없어요 → 쥔 블록을 먼저 빼야 해요 → 블록을 받칠 사람과 함께 [정지] → [그리퍼 열기] → [다시 시작]')
         self._recover_slow = True
+        if self._w144_reopen:                      # 정지 때 닫은 W144 녹화를 CHECK 첫 단계가 새 폴더로 다시 연다(녹화 꺼짐이면 아무것도 안 함)
+            self._w144_reopen, self._w144_starting = False, True
+            # 새 녹화는 앞 녹화의 시도 번호를 모른다 — 남겨 두면 다시 집기 · 촬영이 옛 번호를 써서 'action_id 없음' → ERROR 를 되풀이했다(10/15 002 실기).
+            # 정지 때가 아니라 여기서 비운다: 정지 직후 늦게 온 집기 결과가 옛 녹화(아직 열림)에 실패를 적고 옛 번호를 다시 남기기 때문
+            self._w144_open, self._w144_last, self._w144_legs = {}, {}, {}
         if self._scatter is not None and self._scatter.via_spare:
             # 받침 경유: 사람이 확인하고 [다시 시작]하면 시도 수 · 안 된 후보를 비우고 이어 간다(one_pick hold → Enter 와 같음).
             # 받침 기록(_spare_on)은 남겨 받침 위 블록부터 다시 잰다
@@ -1853,7 +1973,7 @@ class TaskManager:
         self._spare_empty = self._no_match = self._bad_blocks = self._spare_centers = 0
         self._fresh, self._hold_then, self._tally = True, None, {'sent': 0, 'ok': 0}
         self._a4_tries, self._a4_last, self._a4_place = {}, None, {}
-        self.placed = self.part_id = None
+        self.placed = self.part_id = self._pick = None     # 새 출발 — 앞 조립의 손목 그림 집기 순위를 싣지 않는다(10/14 22시 PL)
         self.run_id = self.logger.start_run(self.design_id, len(self.planner.parts))   # 실제 출발 때만 새 run_id
         self._w144_open, self._w144_last, self._w144_legs = {}, {}, {}    # W144 시도: 부품 → 열린 action_id · 마지막 실패 action_id, action → 단계 기록
         # W144 기록(촬영 폴더 · 설정 복사 · 필수 토픽 확인 · rosbag)은 CHECK 첫 단계에서(잠금 밖) 연다 — 첫 이동 · find_blocks 보다 먼저
@@ -1912,6 +2032,10 @@ class TaskManager:
                 return
             self._assembling = self.state in RUN_STATES and not self._scan_run
             self._cleaned = False
+            if self._assembling and getattr(self.io, 'w144_finish', None) is not None:
+                # 조립 중 정지면 W144 녹화를 바로 닫는다(닫으면 초당 2장으로 줄이고 원본을 지운다) — 닫지 않으면 [다시 시작] · [초기화] 전까지
+                # 원본(카메라 30 Hz)이 분당 약 2.6 GB 씩 쌓였다(10/14 V008 24 GB · V009 57 GB). [다시 시작]으로 이어 가면 RECOVER 가 새로 연다
+                self._w144_due, self._w144_reopen = False, True
             self._entered_count = self.safety_count
             self._pending_start = False
             self.logger.count_stop()
@@ -1952,11 +2076,12 @@ class TaskManager:
                     self._build_ready.add(run_id)
 
     def _clear_run(self):
-        """run_id 를 비운다(새 설계 · IDLE). 닫히지 않은 기록이 있으면 STOPPED 로 닫는다."""
+        """run_id 를 비운다(새 설계 · IDLE · 취소 · 정리 확인 · 스캔 시작). 닫히지 않은 기록이 있으면 STOPPED 로 닫는다. state/2 pick 도 비운다."""
         if self.logger.active:
             self._finish_run('STOPPED')
         self.logger.clear()
-        self.run_id = None
+        self.run_id = self._pick = None              # 조립이 끝났으니 손목 그림 집기 순위도 뺀다(10/14 22시 PL)
+        self._w144_reopen = False
         if self._scatter is not None:
             self._scatter.invalidate()
         self._recover_slow = False
@@ -1993,11 +2118,15 @@ class TaskManager:
         [다시 시작]을 막으므로 중간 알림 하나로 풀리면 안 된다(10/14 PL E-117). stopped 확인(_enter_stopped)이 대기를 풀면 붙지 않는다.
         그리퍼 열기 대기(STOPPED 에서만 시작)와 정지 확인 대기(ERROR 에서만, STOPPED 진입 때 풀림)는 시험한 상태 · 명령 경로에서 같이 성립하지 않았다
         (test_task_timeouts — 모든 비동기 순서를 증명한 것은 아니다). 둘 다면 기존 gripper_opening 이 먼저다.
+        pick(손목 그림 집기 순위 {image_seq, index, ranks, reason})은 있을 때만 싣고, 없으면 키를 뺀다(null 아님 — 10/14 22시 PL).
         """
         if self._gripper_busy and message_id != 'gripper_done':
             message_id = 'gripper_opening'          # 그리퍼 열기 답 전에는 어떤 알림이든 대기 표시를 유지한다 — 화면은 이것으로 팔 이동 버튼을 끈다(10/13 PL)
         elif self.state == 'ERROR' and self._timeout_pending:
             message_id = 'stop_pending'
-        self.io.publish_state({'schema': 'state/2', 'stamp': time.time(), 'mode': 'auto', 'state': self.state,
-                               'run_id': self.run_id, 'design_id': self.design_id, 'part_id': self.part_id,
-                               'message_id': message_id, 'message': message})
+        msg = {'schema': 'state/2', 'stamp': time.time(), 'mode': 'auto', 'state': self.state,
+               'run_id': self.run_id, 'design_id': self.design_id, 'part_id': self.part_id,
+               'message_id': message_id, 'message': message}
+        if self._pick is not None:
+            msg['pick'] = copy.deepcopy(self._pick)     # 받는 쪽(다리 · 비전 노드)이 바꿔도 다음 알림에 섞이지 않게 복사
+        self.io.publish_state(msg)

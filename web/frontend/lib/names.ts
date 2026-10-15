@@ -71,8 +71,14 @@ const STATE_KO: Record<string, string> = {
   RECOVER: '다시 시작 중', ERROR: '오류', DONE: '완성',
 };
 
-/** 작업 관리자 상태 코드 → 한국어(모르는 코드는 그대로) */
-export const stateName = (s?: string | null) => (s ? STATE_KO[s] ?? s : '');
+// A4 놓은 블록 확인에서 사람을 기다림 — 작업 관리자는 WAIT_SUPPLY 를 쓰되 알림 id 를 공급 대기와 다르게 낸다(10/15 PL '가', 한석형).
+// 이 id 면 상태 · [계속] 글을 공급 말 대신 이것으로. 받침 경유 공급 대기(no_match_block · tilted_block 등)는 그대로 '블록 공급 기다림'
+export const PLACED_CHECK_ID = 'placed_check';
+export const PLACED_CHECK = '놓은 블록 확인 — 손으로 고친 뒤 계속';
+
+/** 작업 관리자 상태 코드 → 한국어(모르는 코드는 그대로). messageId(state/2 message_id)를 주면 WAIT_SUPPLY 중 A4 놓은 블록 확인을 가른다 */
+export const stateName = (s?: string | null, messageId?: string | null) =>
+  s === 'WAIT_SUPPLY' && messageId === PLACED_CHECK_ID ? PLACED_CHECK : s ? STATE_KO[s] ?? s : '';
 
 /** 정지 이유(IRD 7장) → 누가 · 왜 */
 export function stopReasonKo(reason: string): string {

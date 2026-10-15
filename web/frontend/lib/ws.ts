@@ -24,7 +24,7 @@ export interface Robot {
   gripper: GripperState | null;
   scan: ScanResult | null;
   intent: Intent | null;
-  wrist: { seq: number; at: number } | null; // 손목 검출 그림 번호 · 웹 PC 가 받은 시각(ms)
+  wrist: { seq: number; at: number; run_id: string | null } | null; // 손목 검출 그림 번호 · 웹 PC 가 받은 시각(ms) · 그때의 조립 run_id
   gen: GenEvent | null; // 마지막 AI 생성 알림 — 생성 패널이 받으면 job 을 다시 받는다(W112)
   scanImage: BlobInfo | null; // 마지막 스캔 사진 번호 · run_id(그림은 /api/robot/scan.jpg)
   scanCloud: BlobInfo | null; // 마지막 스캔 점군 번호 · run_id(PLY 는 /api/robot/scan_cloud.ply)
@@ -42,6 +42,12 @@ const EMPTY: Robot = {
  *  다시 열기를 막는다. retained 마지막 state/2 로 판정하므로 새로고침 · 다시 붙어도 그대로이고, gripper_done 이나 그 뒤 다른 값이
  *  오면 풀린다(완료 알림을 놓쳐도). message_id 로만 가르고 문구는 비교하지 않는다. 열렸는지는 gripper/state(잡힘 · 폭)로 따로 본다 */
 export const gripperOpening = (r: Robot) => r.state?.message_id === 'gripper_opening';
+
+/** 지금 조립의 진행표 — state 와 진행표의 run_id 가 같을 때만(둘 다 있어야), 아니면 null('진행 없음'). 진행표는 retained 라 task 를
+ *  다시 켜도 지난 조립 것이 남는다(10/15 PL '가++' — 한세교: 다시 켠 task 는 설계가 없어 진행표를 안 보냄). DONE 뒤 · 정지 → 다시 시작은
+ *  같은 run_id 라 그대로 보인다. 진행표를 그리는 곳(ProgressTop · DesignView)은 이것만 쓴다 */
+export const liveProgress = (r: Robot) =>
+  r.progress?.run_id && r.progress.run_id === r.state?.run_id ? r.progress : null;
 
 /** 조립 · 스캔을 시작할 상태(대기 · 출발 대기 · 완성 · 오류 · 스캔 확인)인데 그리퍼가 블록을 쥐고 있나(gripper/state grasped).
  *  작업 관리자 시작 점검이 설계 고르기 · 출발 · 스캔을 거절하므로 화면이 미리 막고 푸는 길을 안내한다(10/14 HMI 점검).
@@ -124,7 +130,7 @@ function apply(r: Robot, e: WsEvent): Robot {
     case 'broker':
       return { ...r, broker: e.data.connected };
     case 'wrist_image': // 그림 자체는 /api/robot/wrist.jpg 로 받는다 — 로그에는 남기지 않음(검출 때마다 와서)
-      return { ...r, wrist: { seq: e.data.seq, at: e.data.stamp * 1000 } };
+      return { ...r, wrist: { seq: e.data.seq, at: e.data.stamp * 1000, run_id: e.data.run_id ?? null } };
     case 'scan_image': // 사진 · 점군 바이트는 REST 로 받는다 — 여기서는 번호 · 어느 스캔 것인지만
       return { ...r, scanImage: e.data };
     case 'scan_cloud':

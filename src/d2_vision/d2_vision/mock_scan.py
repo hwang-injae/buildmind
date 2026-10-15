@@ -261,6 +261,7 @@ class MockScan:
         self.out_root = Path(out_root) if out_root else Path(tempfile.gettempdir()) / 'd2_scan'
         self.runs = OrderedDict()           # run_id → 촬영한 pose_id 목록
         self.n_designs = 0                  # 스캔 임시 이름 번호(scan_<family>_<번호> — wrist_block 과 같은 꼴, 저장 때 웹이 V 번호로 바꾼다) — 노드가 뜬 뒤 성공한 추론 수
+        self.image_seq = 0                  # 공급 find 그림 번호(응답 image_seq, 1부터 — wrist_block 과 같은 규칙, 10/14 22시 PL). 가짜는 그림을 안 내지만 칸은 같게
 
     def capture(self, text):
         """scan_capture: {"pose_id","run_id"} → {"ok":true,"points"}. run_id 별로 pose_id 를 기억한다(MAX_RUNS 개까지)."""
@@ -336,6 +337,7 @@ class MockScan:
         받침은 spare_map_area 전체가 받침 윗면 높이(spare_spots[0] z_m).
         area assembly 면 assembly_json(파라미터 find_assembly_json — {"blocks":[…], "rejected", "detail"}, 비면 DEFAULT_ASSEMBLY 거절 FEW_POINTS)에
         part_id · measured_stamp(지금 시각)를 붙여 답한다 — design_id · part_id 칸이 없으면 SCAN_FAILED(요청 오류).
+        공급 영역(area 없음) 답에만 "image_seq" = 공급 답을 낼 때마다 1 늘리는 번호(1부터 — wrist_block 과 같은 칸, 작업 관리자가 state pick 에 넣음).
         clear 는 늘 gap_mm ≥ min_gap_mm 로 다시 계산한다(IRD — clear 와 gap_mm 이 어긋나지 않게).
         실패: 요청이 틀리면(선택 칸 값 포함) SCAN_FAILED, 파라미터가 블록 목록 JSON 이 아니거나 선택에 쓸 robot 설정이 없으면 ERROR
         (둘 다 success=false)."""
@@ -370,6 +372,9 @@ class MockScan:
                 out.append(b)
             out.sort(key=lambda b: -float(b.get('top_z_m', 0.0)))
             body = {'ok': True, 'blocks': out}
+            if area == 'supply':
+                self.image_seq += 1
+                body['image_seq'] = self.image_seq
             if hm and area == 'spare':                      # 받침 둘레 — 받침 윗면 높이로 평평(블록 자리는 비움 없이 평평 = 손가락 자리 안 막힘)
                 sp = self.robot['spare_spots'][0]
                 body['height_map'] = flat_grid(spare_map_area(self.robot), float(sp.get('z_m', self.robot['table_z_m'])))

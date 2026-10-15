@@ -10,12 +10,12 @@ import math
 import numpy as np
 import pytest
 
-from d2_vision.placed_measure import REJECTS, measure_placed, up_of
+from d2_vision.placed_measure import CORNER_MIN_PTS, REJECTS, corner_heights, measure_placed, up_of
 
 SIZE = [0.07445, 0.0248, 0.0148]          # 실측 블록 (robot.yaml block_actual_m) [길이, 폭, 두께] m
 L, W, T = SIZE
 CX, CY = 0.40, -0.05                      # 설계 자리 가운데(수평) m — 작업면 z = 0
-KEYS = {'part_id', 'x_m', 'y_m', 'top_z_m', 'yaw_deg', 'up', 'tilted', 'confidence', 'size_mm'}
+KEYS = {'part_id', 'x_m', 'y_m', 'top_z_m', 'yaw_deg', 'up', 'tilted', 'confidence', 'size_mm', 'corners_z_m'}
 R_FLAT = np.eye(3)                                                   # 눕힘: 길이 x · 폭 y · 두께 위
 R_EDGE = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])   # 옆세움: 길이 x · 폭 위 · 두께 y
 R_STAND = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]])   # 세움: 길이 위 · 폭 x (test_block_checker 와 같음)
@@ -121,6 +121,7 @@ def check_valid(res, pt, x, y, yaw, up='THICKNESS', top=None, xy_tol=0.001, yaw_
     assert abs(yaw_diff(blk['yaw_deg'], yaw)) < yaw_tol, blk
     assert abs(blk['top_z_m'] - (design_top(pt) if top is None else top)) < 0.0015, blk
     assert (blk['tilted'], blk['confidence']) == (False, 1.0)
+    assert isinstance(blk['corners_z_m'], list) and len(blk['corners_z_m']) == 4
     return blk
 
 
@@ -233,9 +234,18 @@ def _few_points_hole():
     return scene([box(pt['center'], pt['rot'], keep=keep)]), pt
 
 
-def _tilted(axis):
+def _tilted(axis, deg=7.0):
     pt = part(0.0)
-    return scene([box(pt['center'], pt['rot'] @ rot_axis(axis, 7.0))]), pt
+    return scene([box(pt['center'], pt['rot'] @ rot_axis(axis, deg))]), pt
+
+
+def _lifted(axis, h_mm, yaw=0.0):
+    """한쪽 모서리를 h_mm 들어 올린 블록(그 모서리 밑에 무언가가 끼어 걸친 모양). axis 0 = 긴 모서리(폭 방향으로 기욺) · 1 = 짧은 끝(길이 방향)."""
+    pt = part(yaw)
+    span = W if axis == 0 else L
+    c = np.array(pt['center'], float)
+    c[2] += h_mm / 2000.0                      # 한쪽이 바닥에 닿은 채 다른 쪽이 h 만큼 들리면 가운데는 h/2 올라간다
+    return scene([box(c, pt['rot'] @ rot_axis(axis, math.degrees(math.asin(h_mm / 1000.0 / span))))]), pt
 
 
 def _half_hidden():
@@ -256,7 +266,7 @@ REJECT_CASES = {
     'few_points_grid': (_few_points, 'FEW_POINTS'),
     'few_points_hole': (_few_points_hole, 'FEW_POINTS'),
     'tilted_long': (lambda: _tilted(1), 'TILTED'),        # 짧은 축(폭) 둘레 7° — 긴 축 양 끝 높이 차 약 9 mm
-    'tilted_side': (lambda: _tilted(0), 'TILTED'),        # 긴 축 둘레 7° — 양 끝 차는 작고 각도 기준(5°)으로 걸림
+    'tilted_side': (lambda: _lifted(0, 8.0), 'TILTED'),   # 긴 모서리 한쪽 8 mm 들림(약 19°) — 양 끝 차는 작고 폭 방향 각도 기준(10°)으로 걸림
     'half_hidden': (_half_hidden, 'SIZE_MISMATCH'),
 }
 
@@ -278,6 +288,31 @@ def test_rejects_tuple_covers_every_code():
         assert blk is None and rej[0] in REJECTS
         got.add(rej[0])
     assert got == set(REJECTS) and len(REJECTS) == len(set(REJECTS))
+
+
+def test_side_tilt_below_wide_limit_is_ok():
+    """폭 방향(긴 축 둘레) 7° 는 놓은 블록 전용 문턱(TILT_WIDE_DEG 10°) 아래라 정상으로 잰다(10/15 — 깊이 가장자리 처짐으로
+    반듯한 블록도 폭 방향 4 ~ 6° 로 재지는 것을 막으려고). 예전(5°)에는 TILTED 였다."""
+    pts, pt = _tilted(0, 7.0)
+    blk, rej = measure_placed(pts, pt, SIZE)
+    assert rej is None and blk['tilted'] is False, rej
+
+
+@pytest.mark.parametrize('yaw', [0.0, 30.0, 90.0])
+@pytest.mark.parametrize('h_mm', [5.0, 8.0])
+def test_end_lift_along_length_is_tilted(h_mm, yaw):
+    """짧은 끝이 길이 방향으로 5 · 8 mm 들린 블록은 TILTED(10/15 PL — 들린 끝이 높이 띠 밖으로 잘려 평면 기울기로는 못 잡던 것).
+    10 mm 는 들린 끝이 설계 자리 위 8 mm 를 넘어 먼저 COVERED 로 거절될 수 있어 여기서는 뺀다(거절이면 다시 집지 않음은 같다)."""
+    pts, pt = _lifted(1, h_mm, yaw)
+    check_reject(measure_placed(pts, pt, SIZE), 'TILTED')
+
+
+@pytest.mark.parametrize('yaw', [0.0, 30.0, 90.0])
+def test_small_end_lift_is_measured(yaw):
+    """3 mm 들림(양 끝 차가 TILT_MM 5 mm 아래)은 끝 들림 조건에 안 걸리고 정상으로 잰다."""
+    pts, pt = _lifted(1, 3.0, yaw)
+    blk, rej = measure_placed(pts, pt, SIZE)
+    assert rej is None and blk['tilted'] is False, rej
 
 
 # ---------- 10/14 고친 것(하위 검토에서 찾음 — 크기 되돌림 · 틈 보이는 이웃 빼기) ----------
@@ -314,3 +349,55 @@ def test_top_height_is_not_raised_by_depth_noise(sigma):
     pt = part(0.0)
     blk, why = measure_placed(scene([box(pt['center'], pt['rot'])], noise=sigma), pt, SIZE)
     assert why is None and abs(blk['top_z_m'] - (pt['center'][2] + T / 2)) < 0.001, (sigma, blk)
+
+
+# ---------- 모서리 높이 corners_z_m (10/15 한석형 #190) ----------
+
+def test_corners_flat_block_are_at_top():
+    """반듯한 블록: 네 모서리 모두 값(null 없음)이고 설계 윗면 ±1.5 mm, 서로 1.5 mm 안."""
+    pt = part(30.0)
+    blk, _ = measure_placed(scene([box(pt['center'], pt['rot'])]), pt, SIZE)
+    cz = blk['corners_z_m']
+    assert all(v is not None for v in cz) and max(cz) - min(cz) < 0.0015
+    assert all(abs(v - design_top(pt)) < 0.0015 for v in cz), cz
+
+
+def test_corners_long_edge_lifted_3mm_shows_on_one_side():
+    """긴 모서리 한쪽이 3 mm 들림(폭 방향 약 7° — 10° 문턱 아래라 잰다): +v 쪽 두 모서리가 −v 쪽보다 높다.
+    모서리 칸은 끝에서 CORNER_INSET + CELL/2 = 7 mm 안쪽이라 칸 사이 차는 가장자리 들림 × (24.8 − 14) / 24.8 ≈ 3 × 0.44 = 1.3 mm
+    (한석형 Z 문턱 5 mm 는 폭 방향 가장자리 들림 약 11 mm · 길이 방향 약 6 mm 에 해당). 차례 (−u,−v) (−u,+v) (+u,−v) (+u,+v) — v 가 뒤집히면 부호만 반대."""
+    pts, pt = _lifted(0, 3.0)
+    blk, rej = measure_placed(pts, pt, SIZE)
+    assert rej is None, rej
+    cz = blk['corners_z_m']
+    assert all(v is not None for v in cz)
+    expect = 0.003 * (W - 2 * 0.007) / W
+    d1, d2 = cz[1] - cz[0], cz[3] - cz[2]
+    assert abs(abs(d1) - expect) < 0.0006 and abs(abs(d2) - expect) < 0.0006 and d1 * d2 > 0, (cz, expect)
+
+
+def test_corner_heights_window_keeps_lifted_corner_and_nulls_empty_cell():
+    """corner_heights 자체: 한 모서리 칸만 12 mm 올려도 null 이 아니라 그 값(±5 mm 띠가 아니라 −8 ~ +20 mm 창), 점이 CORNER_MIN_PTS 미만인 칸은 null."""
+    rng = np.random.default_rng(1)
+    g = np.arange(-L / 2, L / 2, 0.001); h = np.arange(-W / 2, W / 2, 0.001)
+    gx, gy = np.meshgrid(g, h)
+    p = np.c_[gx.ravel(), gy.ravel(), np.zeros(gx.size)] + rng.normal(0, 0.0003, (gx.size, 3))
+    corner = (p[:, 0] > L / 2 - 0.012) & (p[:, 1] > W / 2 - 0.012)              # (+u,+v) 모서리 둘레 12 mm 를 12 mm 올림
+    p[corner, 2] += 0.012
+    cz = corner_heights(p, (0.0, 0.0), 0.0, 0.0, L, W)
+    assert cz[3] is not None and abs(cz[3] - 0.012) < 0.001 and all(abs(cz[i]) < 0.001 for i in range(3)), cz
+    few = p[~((p[:, 0] < -L / 2 + 0.012) & (p[:, 1] < -W / 2 + 0.012))]      # (−u,−v) 칸 점을 지움
+    cz = corner_heights(few, (0.0, 0.0), 0.0, 0.0, L, W)
+    assert cz[0] is None and all(v is not None for v in cz[1:]), cz
+    assert CORNER_MIN_PTS >= 3
+    json.dumps({'corners_z_m': cz}, allow_nan=False)                           # null 은 JSON 으로 나간다
+
+
+def test_corners_follow_measured_pose_not_design():
+    """블록이 긴 축으로 8 mm 비켜 놓이면 모서리 칸도 잰 자리를 따라가 네 모서리 모두 윗면 높이(설계 자리 기준이면 끝 칸이 블록 밖 — 아래층을 잼)."""
+    pt = part(0.0)
+    c = np.array(pt['center']); c[0] += 0.008
+    blk, rej = measure_placed(scene([box(c, pt['rot'])]), pt, SIZE)
+    assert rej is None, rej
+    cz = blk['corners_z_m']
+    assert all(v is not None and abs(v - design_top(pt)) < 0.0015 for v in cz), cz

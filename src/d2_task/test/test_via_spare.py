@@ -657,3 +657,85 @@ def test_초기화_뒤_정리_끝이면_빈_진행표로_장면을_비운다():
     m._recover()
     assert m.state == 'IDLE'
     assert io.progress and io.progress[-1]['parts'] == [] and io.progress[-1]['schema'] == 'progress/2.0'
+
+
+def test_조립_중_정지면_W144_녹화를_닫고_다시_시작이면_새로_연다():
+    """10/15 박진용: 정지로 멈춘 판은 녹화가 안 닫혀 원본(카메라 30 Hz)이 계속 쌓였다(10/14 V008 24 GB · V009 57 GB).
+    조립 중 정지 → 바로 닫음(완료 아님) · [다시 시작]으로 이어 가면 CHECK 첫 단계가 새로 연다 · 끝나면 다시 닫음."""
+    from test_task_manager import SAFE_STOP
+    m, io = make_w144()
+    start(m)
+    m.run_once()                                                              # CHECK — 녹화 엶
+    assert [e[0] for e in io.w144 if e[0] in ('start', 'finish')] == ['start']
+    m.on_safety(SAFE_STOP)
+    m.run_once()                                                              # STOPPED — 닫기 예약
+    m.run_once()                                                              # 잠금 밖에서 닫음
+    assert m.state == 'STOPPED' and ('finish', False) in io.w144
+    m.on_safety(SAFE_OK)
+    drive(m, 'DONE')
+    m.run_once()                                                              # 끝 — 잠금 밖에서 닫음
+    kinds = [e[0] if e[0] == 'start' else e for e in io.w144 if e[0] in ('start', 'finish')]
+    assert kinds == ['start', ('finish', False), 'start', ('finish', True)]
+
+
+class StrictW144IO(W144IO):
+    """촬영기처럼 녹화마다 시도 번호를 따로 안다 — 새로 열면 비우고, 모르는 번호(retry_of · 실패 · 촬영)는 거절한다."""
+
+    def w144_start(self, design_id, run_id):
+        self.known = set()
+        return super().w144_start(design_id, run_id)
+
+    def w144_begin(self, part_id, sequence, center_m, quat_xyzw, evidence, retry_of=None):
+        if retry_of is not None and retry_of not in self.known:
+            return None, 'ERROR'
+        aid, why = super().w144_begin(part_id, sequence, center_m, quat_xyzw, evidence, retry_of)
+        self.known.add(aid)
+        return aid, why
+
+    def w144_fail(self, action_id, part_id, sequence, reason, evidence):
+        self.w144.append(('fail', action_id, part_id, reason) if action_id in self.known else ('fail_rejected', action_id))
+
+    def w144_after_place(self, part_id, center_m, quat_xyzw, action_id=None, sequence=None, evidence=None):
+        if action_id is not None and action_id not in self.known:
+            return False, 'ERROR'
+        return super().w144_after_place(part_id, center_m, quat_xyzw, action_id, sequence, evidence)
+
+
+def test_집는_중_정지_뒤_다시_시작이면_새_녹화에_시도를_새로_연다():
+    """10/15 002 실기: 정지로 닫고 [다시 시작]으로 새로 연 녹화에 옛 시도 번호를 그대로 써 'action_id 없음' → ERROR 를 되풀이했다.
+    다시 열면 시도 기록을 비워 같은 블록도 새 시도로 begin 하고, 끝까지 간다."""
+    from test_task_manager import SAFE_STOP
+    io = StrictW144IO()
+    m = TaskManager(SPARE_CFG, io, open_width_m=0.0)
+    io.manager = m
+    fast_wait(m)
+    m.on_safety(SAFE_OK)
+    m.on_gripper({'grasped': False})
+    # 첫 집기 도중 정지(펜던트 · 화면) — 집기 노드가 STOPPED 로 끝나면 그 시도가 실패로 닫히고 다음 시도의 retry_of 가 된다
+    io.pick_script = [lambda io: (io.manager.on_safety(SAFE_STOP), (False, 'STOPPED'))[1]]
+    start(m)
+    drive(m, 'STOPPED')
+    m.run_once()
+    m.run_once()                                                              # 닫음
+    assert ('finish', False) in io.w144
+    m.on_safety(SAFE_OK)
+    drive(m, ('DONE', 'ERROR'))
+    assert m.state == 'DONE'
+    starts = [i for i, e in enumerate(io.w144) if e[0] == 'start']
+    again = {e[3] for e in io.w144[starts[1]:] if e[0] == 'begin'}
+    shots = [e for e in io.w144[starts[1]:] if e[0] == 'shot']
+    assert shots and all(s[4] in again for s in shots)                         # 다시 연 뒤 촬영은 모두 새 녹화의 시도 번호로
+    assert not [e for e in io.w144 if e[0] == 'fail_rejected']
+
+
+def test_조립_중이_아닐_때_정지는_W144_녹화를_건드리지_않는다():
+    """대기 · 완성 뒤 정지는 열린 녹화가 없다 — 닫기 · 다시 열기를 예약하지 않는다."""
+    from test_task_manager import SAFE_STOP
+    m, io = make_w144()
+    m.on_safety(SAFE_STOP)
+    m.run_once()
+    m.run_once()
+    m.on_safety(SAFE_OK)
+    m.run_once()
+    m.run_once()
+    assert not [e for e in io.w144 if e[0] in ('start', 'finish')] and not m._w144_reopen

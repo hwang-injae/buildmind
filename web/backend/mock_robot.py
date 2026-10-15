@@ -74,10 +74,88 @@ def fake_wrist_jpeg(seed, text):
         w, h = (150, 50) if rng.random() < 0.5 else (50, 150)
         draw.rectangle([x, y, x + w, y + h], fill=(196, 160, 112), outline=(0, 230, 0) if i == 0 else (255, 200, 0), width=3)
         draw.text((x, y - 14), f'block {0.93 - i * 0.07:.2f}' + (' <- pick' if i == 0 else ''), fill=(255, 255, 255))
-    draw.text((10, 10), text, fill=(255, 255, 255))
+    if text:
+        draw.text((10, 10), text, fill=(255, 255, 255))
     buf = io.BytesIO()
     img.save(buf, 'JPEG', quality=70)
     return buf.getvalue()
+
+
+def fake_supply_scene(seed):
+    """가짜 공급 구역 장면 하나 — 회색 바닥에 나무색 블록 5 ~ 6개(겹친 것 · 세운 것 · 옆으로 선 것 · 기울어진 것 섞임).
+    반환: (BGR 그림, find_blocks 꼴 blocks(윗면 높은 순), 마스크 목록, 순위(블록 번호 1부터 — 덮인 블록은 뺌)). cv2 · numpy 가 없으면 None."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+    rng = np.random.default_rng(seed)
+    img = np.clip(np.full((480, 640, 3), (72, 76, 80), float) + rng.normal(0, 4, (480, 640, 3)), 0, 255).astype(np.uint8)
+
+    def rect(cx, cy, w, h, deg):
+        m = np.zeros((480, 640), np.uint8)
+        cv2.fillConvexPoly(m, cv2.boxPoints(((float(cx), float(cy)), (float(w), float(h)), float(deg))).astype(np.int32), 1)   # cv2 는 numpy 정수를 못 받음
+        return m.astype(bool)
+    jitter = lambda: (rng.integers(-40, 41), rng.integers(-30, 31), rng.integers(-25, 26))
+    kinds = [((300, 190, 110, 38), {'up': 'THICKNESS', 'overlap': 'top', 'tilted': False}),
+             ((470, 300, 110, 38), {'up': 'THICKNESS', 'overlap': 'none', 'tilted': True, 'normal': [0.14, 0.0, 0.99]}),
+             ((170, 330, 110, 38), {'up': 'THICKNESS', 'overlap': 'none', 'tilted': False}),
+             ((520, 130, 100, 22), {'up': 'WIDTH', 'overlap': 'none', 'tilted': False}),
+             ((390, 410, 34, 22), {'up': 'LENGTH', 'overlap': 'none', 'tilted': False})]
+    specs = []
+    for (cx, cy, w, h), b in kinds:
+        dx, dy, dd = jitter()
+        specs.append((cx + dx, cy + dy, w, h, dd, b))
+    under = (specs[0][0] - 15, specs[0][1] + 25, 110, 38, specs[0][4] + 90, {'up': 'THICKNESS', 'overlap': 'under', 'tilted': False})
+    specs.append(under)                                              # 맨 위 블록에 덮인 블록(집을 수 없어 순위 없음)
+    for cx, cy, w, h, deg, b in specs[::-1]:                          # 아래 블록부터 칠해 위 블록이 덮게
+        m = rect(cx, cy, w, h, deg)
+        img[m] = (img[m] * 0.15 + np.array((96, 148, 196)) * (0.8 + 0.2 * rng.random()) * 0.85).astype(np.uint8)
+    masks = [rect(cx, cy, w, h, deg) for cx, cy, w, h, deg, b in specs]
+    masks[-1] &= ~masks[0]
+    blocks = [dict(b, yaw_deg=float(deg)) for cx, cy, w, h, deg, b in specs]
+    ranks = [1, 3] + [k for k in (2, 4, 5) if rng.random() < 0.9] if seed % 2 else [3, 1, 4, 2, 5]
+    return img, blocks, masks, ranks
+
+
+def fake_supply_jpeg(scene, ranks=None, pick=None):
+    """가짜 공급 구역 그림(JPEG) — 진짜 손목 비전 그림 함수(block_finder.draw_found, 10/14 22시 PL)로 그린다: 낱말(FLAT · EDGE ·
+    STAND · TILT n) · 윤곽 색, ranks 가 있으면 우선순위 번호 동그라미 · pick 블록 칠하기. scene = fake_supply_scene 결과. 못 그리면 None."""
+    try:
+        import cv2
+        from d2_vision.block_finder import draw_found
+    except ImportError:
+        return None
+    img, blocks, masks, _ = scene
+    ok, buf = cv2.imencode('.jpg', draw_found(img, blocks, masks, list(range(len(blocks))), ranks=ranks, pick=pick),
+                           [cv2.IMWRITE_JPEG_QUALITY, 70])
+    return buf.tobytes() if ok else None
+
+
+def fake_spare_jpeg(cfg, dx_mm, dy_mm, dyaw_deg):
+    """가짜 받침 다시 재기 그림(640×480 JPEG) — 진짜 손목 비전 그림 함수(block_finder.draw_spare, #181 · 10/14 22시 PL)로
+    빨간 목표 상자 · 초록 잰 블록 · 상자 안 x · y 화살표 · TARGET 아래 큰 'dx dy mm' · 'dyaw' 를 그린다. 카메라는 받침 바로 위 0.40 m(시험과 같은 자세).
+    입력: cfg = robot.yaml · 잰 블록이 목표에서 비킨 값(mm · °). d2_vision · cv2 · numpy 가 없으면 None(그림만 안 보냄)."""
+    try:
+        import cv2
+        import numpy as np
+        from d2_vision.block_finder import draw_spare, project_to_image, top_face_corners
+        from d2_vision.spare_measure import ideal_spare_block
+    except ImportError:
+        return None
+    spot, size = cfg['spare_spots'][0], cfg['block_actual_m']
+    sx, sy = spot['x_m'], spot['y_m']
+    intr = (600.0, 600.0, 320.0, 240.0)
+    cam = np.array([[1.0, 0, 0, sx - 0.020], [0, -1.0, 0, sy + 0.010], [0, 0, -1.0, 0.40], [0, 0, 0, 1.0]])
+    img = np.full((480, 640, 3), (72, 76, 80), np.uint8)
+    target = ideal_spare_block(spot, size)
+    pad = project_to_image(top_face_corners(dict(target, top_z_m=spot['z_m']), [0.09, 0.04, 0.0]), intr, cam)
+    cv2.fillConvexPoly(img, np.round(pad).astype(np.int32), (120, 120, 120))             # 받침 판
+    meas = {**target, 'x_m': sx + dx_mm / 1000, 'y_m': sy + dy_mm / 1000, 'yaw_deg': target['yaw_deg'] + dyaw_deg}
+    blk = project_to_image(top_face_corners(meas, size), intr, cam)
+    cv2.fillConvexPoly(img, np.round(blk).astype(np.int32), (96, 148, 196))              # 실제 블록(나무색)
+    ok, buf = cv2.imencode('.jpg', draw_spare(img, meas, target, intr, cam, size), [cv2.IMWRITE_JPEG_QUALITY, 70])
+    return buf.tobytes() if ok else None
 
 
 def fake_scan_media(blocks, origin, size_mm):
@@ -166,8 +244,10 @@ class MockRobot:
                 message_id = 'gripper_opening'
             elif self.stop_pending and state == 'ERROR':   # 정지 확인 전 ERROR 동안은 거절 글이 나가도 stop_pending 그대로(화면이 [다시 시작]을 끔)
                 message_id = 'stop_pending'
+            if state in ('IDLE', 'READY', 'DONE') or state.startswith('SCAN'):
+                self.st.pop('pick', None)                 # 고른 블록(pick)은 조립 중에만 — 진짜 작업 관리자처럼 판이 끝나면 칸을 뺀다
             self.st.update(state=state, message=message, message_id=message_id, **kw)
-            body = dict(schema='state/2', mode='auto', **self.st)
+            body = dict(schema='state/2', mode='auto', **{k: v for k, v in self.st.items() if not (k == 'pick' and v is None)})
         self.pub('d2/task/state', body)
         print(f'[가짜 로봇] {state} {message}')
 
@@ -212,17 +292,48 @@ class MockRobot:
                 self.timeout_at = 0                    # 한 번만 — 복구 뒤엔 끝까지 간다
                 self._timeout(bid)
                 return
-            jpeg = fake_wrist_jpeg(n, f'MOCK wrist  {n}/{len(ids)}  {bid}')
+            # 진짜처럼 공급 구역을 찾은 그림(번호 없음) → 고른 뒤 순위 번호 · 고른 블록 칠한 그림(진짜 손목 비전 그림 함수, 10/14 22시 PL).
+            # 그림 함수가 없으면 옛 가짜 그림. 진짜와 같이 retained 아님(IRD 10.1)
+            scene = fake_supply_scene(n)
+            jpeg = fake_supply_jpeg(scene) if scene else fake_wrist_jpeg(n, '')
             if jpeg:
-                self.c.publish('d2/vision/wrist_image', jpeg, qos=0)   # 진짜와 같이 retained 아님(IRD 10.1)
+                self.c.publish('d2/vision/wrist_image', jpeg, qos=0)
+            ranks = scene[3] if scene else [1, 3, 2]
+            # 진짜 작업 관리자 state/2 pick 흉내 — 고른 블록 · 순위 · 까닭(화면 손목 칸 아래 한 줄)
+            pick = {'image_seq': n, 'index': ranks[0], 'ranks': ranks,
+                    'reason': f'눕힌 블록 · 높이 {1 + n % 2}층 · 눕힘 곧게 · 열림 0 · FLAT_LONG · 곧게 · 틈 {10 + n} mm'}
+            if scene and self.abort.wait(min(self.step_s, 0.6)):   # 고르는 동안(진짜는 find 뒤 순위 계산) — 번호 없는 그림을 잠깐 보인다
+                return
+            jpeg = fake_supply_jpeg(scene, ranks, ranks[0]) if scene else None
+            if jpeg:
+                self.c.publish('d2/vision/wrist_image', jpeg, qos=0)
+            if n % 3 == 2 and self._spare_steps(bid, pick):   # 블록 몇 개는 진짜처럼 받침을 거친다(받침 다시 재기 그림 — 화면 시험용)
+                return
             for state in ('PICK_PLACE', 'VERIFY'):
-                self.set_state(state, f'{len(placed) + 1}/{len(ids)} {bid}', part_id=bid)
+                self.set_state(state, f'{len(placed) + 1}/{len(ids)} {bid}', part_id=bid, pick=pick)
                 self.set_gripper(state == 'PICK_PLACE', 0.025 if state == 'PICK_PLACE' else 0.0865)   # 놓은 뒤(VERIFY)엔 빈 손
                 if self.abort.wait(self.step_s):
                     return
             placed.append(bid)
             self._observe(planner, run_id, placed)      # 놓은 뒤 확인(VERIFY) 때마다
         self.set_state('DONE', '완성했어요', 'done', part_id=None)
+
+    def _spare_steps(self, bid, pick):
+        """받침 경유 흉내: 받침에 놓기 → 받침 위에서 잼(어긋남 큼) → 가운데로 맞춤 → 다시 잼(어긋남 작음). 잴 때마다 받침 그림을 보낸다
+        (진짜 손목 비전 find_blocks area spare — 10/14 22시 PL). 반환: 정지(abort)면 True(부르는 쪽이 멈춤). 로봇은 안 움직인다(가짜)."""
+        steps = (('PICK_PLACE', f'{bid} 에 쓸 블록을 받침에 옮깁니다', None),
+                 ('SELECT', f'{bid} 에 쓸 블록을 받침에 놓았다. 받침 위에서 잽니다', (3.2, -2.1, 6.0)),
+                 ('PICK_PLACE', f'{bid} 를 받침에서 가운데로 맞춥니다', None),
+                 ('SELECT', f'{bid} 받침 맞춘 자리를 다시 잽니다', (0.4, -0.3, 1.0)))
+        for state, msg, off in steps:
+            if off:
+                jpeg = fake_spare_jpeg(self.cfg, *off)
+                if jpeg:
+                    self.c.publish('d2/vision/wrist_image', jpeg, qos=0)
+            self.set_state(state, msg, part_id=bid, pick=pick)
+            if self.abort.wait(self.step_s):
+                return True
+        return False
 
     def _timeout(self, bid):
         """진짜 작업 관리자 _failed('TIMEOUT')에서 정지 요청이 실패한 경우 — ERROR + message_id stop_pending(10/14 PL 안 A, 한석형).

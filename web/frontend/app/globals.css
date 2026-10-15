@@ -360,10 +360,18 @@ button.mitem.selected .tag.ok { color: #fff; border-color: #fff; }
 /* ---------- 손목 카메라 — 640×480 그림을 그대로(4:3). 넓은 칸 맨 위에 크게, 화면 높이 60 % 까지(10/14 PL) ---------- */
 .cam { aspect-ratio: 4 / 3; border-radius: 12px; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; }
 .cam img { width: 100%; height: 100%; object-fit: contain; display: block; transition: transform 0.2s; }
+.cam.stale img { opacity: 0.4; filter: grayscale(0.7); } /* 지난 조립 · 오래된 손목 그림(10/15 PL '가++') — 지우지 않고 흐리게 */
 .wrist-panel .cam { width: min(100%, calc(60vh * 4 / 3)); margin: 0 auto; cursor: zoom-in; }
 .cam-idle { background: var(--canvas-bg); border: 1px dashed var(--line); color: var(--muted); font-size: 14px; cursor: default; }
 .layout .view-panel .view3d, .layout .view-panel > .view3d-empty { height: auto; aspect-ratio: 4 / 3; max-height: 60vh; } /* 옆 손목 카메라와 같은 꼴 */
 .cam-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); align-items: center; }
+.cam-help > summary { cursor: pointer; font-size: 13px; color: var(--muted); width: fit-content; }
+.cam-help[open] { display: flex; flex-direction: column; gap: 6px; }
+/* 고른 까닭 한 줄(state/2 pick.reason) — 그림 속 번호 동그라미와 같은 모양 */
+.pick-reason { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.rank-badge { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; color: #000; border: 2px solid #000; font-size: 12px; font-weight: 800; }
+.rank-badge.small { width: 18px; height: 18px; font-size: 11px; }
 .cam-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; border: 2px solid; }
 .cam-legend b { color: var(--text); font-weight: 700; }
 .zoom-row { display: flex; gap: 6px; margin-left: auto; }

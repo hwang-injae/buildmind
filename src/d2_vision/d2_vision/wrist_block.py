@@ -23,7 +23,9 @@
       family 는 recipe_dir 의 기본 설계(이름에 CHAIR · DESK) 중 블록 수 · 외곽이 가장 가까운 것, 못 구하면 unknown.
       번호 = scan_dir 에 이미 있는 blocks.json 수 + 1(노드를 다시 켜도 이름이 겹치지 않게). 추론이 끝난 run_id 는 메모리에서 지운다.
   `/d2/vision/find_blocks`(JsonQuery) {"run_id"} → 요청 뒤 컬러 · 깊이(scan_frames 장 평균) + TF 자세 × 보정 → BlockFinder(block_finder.py)
-      → {"ok":true,"blocks":[…]}(IRD 4.2 칸, 윗면 높이 순). 블록 0개도 ok true(빈 목록 — 작업 관리자가 WAIT_SUPPLY).
+      → {"ok":true,"blocks":[…],"image_seq":n}(IRD 4.2 칸, 윗면 높이 순). 블록 0개도 ok true(빈 목록 — 작업 관리자가 WAIT_SUPPLY).
+      image_seq(10/14 22시 PL) = 공급 영역 찾기(area 없음)를 계산할 때마다 1 늘리는 그림 번호(노드가 켜질 때 0 → 첫 답 1). 그림을 못 냈어도 싣는다 —
+      작업 관리자가 고른 블록을 state/2 pick.image_seq 에 그대로 넣으면 이 노드가 그 그림에 번호를 덧그린다(아래 wrist_image). area spare · assembly 답에는 없다.
       마스크: YOLO seg(본 방법 E-38 — 모델은 켤 때 읽는다, 아래 '켤 때 YOLO'). 예비(엣지 + 깊이, E-47)는 yolo_fallback:=true 일 때만.
       선택 칸(10/13 — 없으면 위와 똑같이 답한다. 값 검사는 mock_scan.find_options, 틀리면 SCAN_FAILED):
         "height_map": true → 응답에 "height_map" {"x0_m","y0_m","res_m","nx","ny","z_m"} 를 더한다 — 같은 깊이 · 자세의 base 점으로
@@ -32,13 +34,27 @@
             z_m[iy·nx + ix]. 작업 관리자가 잡기 후보의 손가락 자리에 높은 셀이 있는지 본다.
         "area": "spare" → YOLO · 마스크 없이 받침(robot.yaml spare_spots[0]) 위 블록 하나를 깊이로만 잰다(spare_measure.measure_on_spare)
             → {"ok":true,"blocks":[b]}(b = 위 칸 + "base_z_m" 받침 윗면) 또는 빈 받침 {"ok":true,"blocks":[]}. 카메라는 작업 관리자가
-            먼저 받침 위로 옮겨 둔다. 컬러 · wrist_image 는 쓰지 않는다. 이때 height_map 은 받침 둘레(받침 가운데 ± 블록 길이/2 + 손가락 여유) 지도다.
+            먼저 받침 위로 옮겨 둔다. 재기는 깊이만 쓴다. 요청 뒤 컬러가 있으면 wrist_image 에 잰 블록 · 목표 자리를 그려 낸다(그림만, 10/14 HMI · PL).
+            이때 height_map 은 받침 둘레(받침 가운데 ± 블록 길이/2 + 손가락 여유) 지도다.
       기울어진 블록(tilted true)에만 "center_top_z_m"(윗면 가운데 평면 높이 m) · "normal"(윗면 단위 법선, 위쪽)을 더한다(block_finder).
         "area": "assembly" + "design_id" · "part_id"(10/14 W144 — 한석형 · 민범진) → 조립 자리에 방금 놓은 블록 하나를 깊이로만 잰다
             (placed_measure.measure_placed — 설계 자리 둘레, YOLO 없음) → {"ok":true,"part_id","blocks":[b] 또는 [],"rejected","detail","measured_stamp"}.
             못 재면(옆 블록과 붙음 · 덮임 · 세운 블록 · 기울어짐 · 점 부족 · 크기 다름 · 없음) blocks [] + rejected 코드 — 요청 오류(SCAN_FAILED)와 다르다.
+            placed_method:=mask(10/15 PL — 기본 꺼짐)면 같은 깊이로 measure_placed 를 먼저 보고(기울어짐 · 덮임 · 세움 · 점 부족 · 없음은
+            그대로), 크기 · 위치 · yaw 는 요청 뒤 컬러 한 장의 YOLO 마스크 + 광선으로 다시 잰다(placed_mask.measure_placed_mask —
+            깊이가 윗면 가장자리를 처지게 재 크기가 작게 · 가운데가 흔들리는 것을 피하려고). 응답 칸은 같다 — 어느 방법으로 쟀는지는 로그에만.
+            컬러가 없거나 · YOLO 를 안 읽었거나(yolo_fallback) · 마스크 쪽 예외면 깊이 결과 그대로 + 경고.
   `/d2/vision/wrist_image`(sensor_msgs/CompressedImage, JPEG 품질 70, 640×480 그대로) — find_blocks 때마다 검출 결과
-      (윤곽 · 번호 · up · yaw)를 그린 그림 한 장(IRD E-67 '때만 내도 됨'). 매 프레임 내지 않는다.
+      (윤곽 · 윤곽 위 작은 글자 'FLAT/EDGE/STAND[ TILT n]')를 그린 그림 한 장(IRD E-67 '때만 내도 됨'). 매 프레임 내지 않는다.
+      고른 뒤 덧그림(10/14 22시 PL): `/d2/task/state`(std_msgs/String state/2 JSON, task 와 같은 QoS — RELIABLE · TRANSIENT_LOCAL · KEEP_LAST 1)를
+      받아 선택 칸 "pick" {"image_seq","index"(1부터),"ranks"[…](1부터, 우선순위 차례),"reason"} 의 image_seq 가 마지막 공급 찾기 번호와 같고
+      (image_seq, index, ranks)가 지난번과 다를 때만 그 찾기 그림에 우선순위 번호 동그라미 · 고른 블록 채우기를 그려 한 장 더 낸다
+      (block_finder.draw_found ranks · pick, 판단은 pick_redraw_key). state 가 올 때마다 그리지 않는다. 꼴이 틀린 state · pick 은 종류마다 경고 한 번만.
+      area spare 때는 잰 블록 윗면 · 받침 목표 자리 상자 · 가운데 차이(base dx · dy mm + 방향 화살표)를
+      그린다(block_finder.draw_spare, 컬러가 없으면 안 냄). 받침 단계에는 이 그림만 낸다.
+      작업대 그림(박진용 안 ②, 10/14 22시 PL — block_finder.draw_workbench): check_progress 답 때(시작 확인 · 블록을 놓은 뒤) 물은 부품의
+      설계 윗면 사각형을 판정 색(present 초록 · occluded · unknown 주황 · absent 빨강)과 짧은 이름('LEG 1-3')으로, find_blocks area assembly
+      (A4 다시 재기) 답 때 설계 자리(빨간 굵은 상자) + 잰 블록(초록) + 차이 · 거절 코드 글자로 한 장. 요청 뒤 컬러가 없으면 안 낸다(답은 그대로).
 
 설계 · 블록 이름 (E-52, 10/7)
   요청 design_id 칸으로 설계를 고른다(블록 이름에서 잘라 내지 않는다). part_ids 는 전체 블록 이름
@@ -74,11 +90,17 @@
   yolo_model   YOLO seg 모델 파일(.pt) 경로. 기본 = 이 패키지 share/models 에 설치된 판(DEFAULT_YOLO_MODEL, E-86)
   yolo_fallback  true 면 YOLO 를 읽지 않고 예비 마스크(엣지 + 깊이, E-47)만 쓴다(기본 false — 모델 · ultralytics 가 없는 시험 · CI 용)
   yolo_conf    YOLO 검출 신뢰도 문턱(0.55 — 10/8 확정 모델 26s판: 검증 장면 재현율 ≥ 0.95 를 지키는 가장 높은 값, 0.5 보다 헛것만 줄고 놓침은 같음)
+  placed_method  find_blocks area assembly 재는 방법: 'depth'(기본 — 깊이만, measure_placed) · 'mask'(YOLO 마스크 + 광선으로 크기 · 위치,
+               기울기 · 덮임은 깊이 — 10/15 PL). 'mask' 가 아니면 모두 depth. 요청마다 읽는다(ros2 param set 으로 바로 바꿀 수 있다)
+  placed_mask_shift_px  mask 방법에서 YOLO 마스크를 옮길 (du, dv) 픽셀(정수 · 실수 둘 다 됨 — 정수 픽셀로 반올림, 기본 [0, 0]) — 컬러 ↔ 깊이 정렬 어긋남 보정.
+               10/15 흉내 시험에서 dy −2.6 mm 치우침 · 마스크를 깊이 윗면에 맞추려면 u 약 −5 px, 같은 15장의 가운데 dy 를 0 으로 하는 값은
+               약 [−3, 0](eval_mask) — 값은 실기에서 정한다. 요청마다 읽는다
 robot.yaml(d2_bringup)에서 assembly_origin · assembly_area_half_m · block_size_m · block_actual_m · timeout.service_s ·
   table_z_m · find.min_gap_mm · grasp_depth_m · finger.width_m · supply_area_m · spare_spots(area spare 때) 를 읽는다.
 
-바깥 영향: 서비스 답 · camera_status · wrist_image · scan_preview 발행 · get_design 조회(remote, 설계마다 · 판마다 한 번) ·
+바깥 영향: 서비스 답 · camera_status · wrist_image · scan_preview 발행 · /d2/task/state 구독(그림만) · get_design 조회(remote, 설계마다 · 판마다 한 번) ·
   scan_capture 미리보기 PLY · 자세 자료(사진 · 깊이 · 자세) · scan_infer 의 파일 쓰기(scan_dir 아래)뿐. 로봇·카메라·그리퍼에 명령을 보내지 않는다(관측 · 촬영 자세 이동은 작업 관리자가 move_to 로).
+  placed_method:=mask 면 find_blocks area assembly 때 YOLO 를 한 번 더 돌린다(답 시간 + YOLO 한 번 — 이 PC GPU 실측 약 0.02초 · CPU 면 더 길다). 작업대 그림은 두 방법 다 같은 조건(요청 뒤 컬러가 있을 때)으로 낸다.
 답할 때: 요청이 온 **뒤에** 들어온 깊이 프레임 n_frames 장(최대 1.5초 기다림)의 중앙값을 쓴다 — 로봇이 막 멈춘 직후의 움직이던 프레임을 섞지 않으려고.
   remote 에서 처음 보는 설계이거나 run_id 가 바뀌었으면 그 앞에 get_design 을 최대 timeout.service_s(3초) 기다린다.
 켤 때 YOLO(10/11 E-86): yolo_fallback 이 false(기본)인데 ultralytics 가 없거나 · 모델 파일이 없거나 · 읽기 · 미리 돌리기가 실패하면
@@ -122,6 +144,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from rcl_interfaces.msg import ParameterDescriptor
 import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
@@ -137,13 +160,15 @@ from std_msgs.msg import String
 from d2_interfaces.srv import CheckProgress, JsonQuery
 from d2_motion.motion_math import RECIPE_SUFFIXES, load_recipe, recipe_parts
 from d2_vision.block_checker import BlockChecker, depth_to_base_points, mean_depth_mm, recipe_from_design, recipe_path
-from d2_vision.block_finder import BlockFinder, base_image, draw_found, finder_cfg, masks_from_yolo
+from d2_vision.block_finder import (BlockFinder, base_image, draw_found, draw_spare, draw_workbench, finder_cfg, masks_from_yolo,
+                                   pick_redraw_key, placed_note)
 from d2_vision.design_cache import RunDesignCache
 # 요청 검사(run_id 를 폴더 이름으로 써도 되는지까지) · 레시피 두 파일 → blocks/2 는 가짜 노드와 같은 함수를 쓴다(ROS 없는 계산, 시험 있음)
 from d2_vision.height_grid import height_grid, spare_map_area, supply_map_area
 from d2_vision.mock_scan import assembly_target, find_options, load_recipe_files, parse_request, structure_to_blocks
+from d2_vision.placed_mask import measure_placed_mask_detail
 from d2_vision.placed_measure import measure_placed
-from d2_vision.spare_measure import measure_on_spare
+from d2_vision.spare_measure import ideal_spare_block, measure_on_spare
 from d2_vision.structure_scanner import StructureScanner, family_of, save_capture, save_preview, scan_response
 from d2_vision.tcp_pose import TcpPose, camera_pose_mm, default_calib_path, load_calib, load_tilt_shift
 
@@ -152,6 +177,9 @@ NAN = float('nan')
 DEFAULT_YOLO_MODEL = str(Path(get_package_share_directory('d2_vision')) / 'models' / 'block_seg_26s_e150_261008.pt')
 QOS_STATUS = QoSProfile(history=HistoryPolicy.KEEP_LAST, depth=1,
                         reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.VOLATILE)
+# 작업 관리자 /d2/task/state 와 같은 QoS(task_node LATCHED_QOS — IRD 4.1 E-62): 늦게 떠도 마지막 state 를 받는다
+QOS_STATE = QoSProfile(history=HistoryPolicy.KEEP_LAST, depth=1,
+                       reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 FRESH_WAIT_S = 1.5         # 요청 뒤 새 프레임 n장을 이만큼 기다린다(30 Hz 면 10장에 0.33초 — 여유 포함). 넘으면 TIMEOUT
 SERVICE_WAIT_S = 3.0       # TF 자세 · 서비스(get_design 은 timeout.service_s) 기본 기다림 — 10/10 W156 뒤 두산 서비스는 안 부름
 MAX_SCAN_RUNS = 5          # 추론 전 run_id 를 이만큼만 기억한다(scan_infer 가 안 온 판이 쌓여 메모리가 늘지 않게 — 한 판 점군 약 2~5 MB)
@@ -186,6 +214,10 @@ class WristBlock(Node):
         self.declare_parameter('yolo_fallback', False)     # true = YOLO 안 읽고 예비 마스크만(시험 · CI 용 — E-86, 기본 끔)
         self.declare_parameter('yolo_conf', 0.55)
         self.declare_parameter('status_hz', 2.0)
+        self.declare_parameter('placed_method', 'depth')          # find_blocks area assembly: depth(기본, 깊이만) · mask(마스크 + 광선, 10/15 PL)
+        # mask 때 마스크를 옮길 (du, dv) 픽셀 — 컬러 ↔ 깊이 정렬 보정(실기에서 정함). 형을 안 묶는다(dynamic_typing): [-3, 0] 처럼 정수로 넣어도
+        # 노드가 죽지 않게(DOUBLE_ARRAY 로 선언하면 INTEGER_ARRAY 를 넣을 때 InvalidParameterTypeException 으로 안 켜진다 — 10/15 검토)
+        self.declare_parameter('placed_mask_shift_px', [0.0, 0.0], ParameterDescriptor(dynamic_typing=True))
 
         self.bridge = CvBridge()
         self.lock = threading.Lock()
@@ -202,6 +234,10 @@ class WristBlock(Node):
         self.scan_lock = threading.Lock()
         self.find_lock = threading.Lock()     # BlockFinder 가 마지막 마스크를 들고 있어 한 번에 하나씩
         self.design_lock = threading.Lock()   # 설계 캐시(RunDesignCache)를 check_progress · find_blocks(assembly)가 같이 쓴다 — 동시에 부르면 안전하지 않다
+        self.image_seq = 0                    # 공급 find_blocks 그림 번호(응답 image_seq, 1부터) — 작업 관리자 state pick.image_seq 가 어느 그림을 고른 것인지 맞춘다
+        self.find_ctx = None                  # 마지막 공급 find 그림 재료 dict(seq · color · blocks · masks · mask_index · frame_id) — 한 번에 통째로 바꾼다
+        self.pick_drawn = None                # 지난번 pick 으로 다시 그린 열쇠(pick_redraw_key) — on_state 만 쓴다(자기 그룹이라 차례로 돈다)
+        self.warned = set()                   # 한 번만 남긴 경고 종류(state JSON · pick 꼴 · 그림) — state 는 자주 와서 같은 경고가 쌓이지 않게
 
         self.cfg = self._load_robot_yaml()
         self.T_tcp2c = self._load_calib()
@@ -231,6 +267,9 @@ class WristBlock(Node):
         self.create_service(JsonQuery, '/d2/vision/scan_capture', self.on_scan_capture, callback_group=group)
         self.create_service(JsonQuery, '/d2/vision/scan_infer', self.on_scan_infer, callback_group=group)
         self.create_service(JsonQuery, '/d2/vision/find_blocks', self.on_find_blocks, callback_group=group)
+        # 작업 관리자 state/2 의 pick(고른 블록 · 우선순위) → 마지막 공급 find 그림에 번호를 덧그려 한 번 더 낸다(10/14 22시 PL).
+        # 자기 그룹 — state 콜백끼리 차례로 돌아 pick_drawn 을 잠금 없이 쓴다
+        self.create_subscription(String, '/d2/task/state', self.on_state, QOS_STATE, callback_group=MutuallyExclusiveCallbackGroup())
         self.pub_status = self.create_publisher(String, '/d2/vision/camera_status', QOS_STATUS)
         self.pub_image = self.create_publisher(CompressedImage, '/d2/vision/wrist_image', 10)   # IRD E-67 QoS 기본(VOLATILE)
         self.pub_preview = self.create_publisher(String, '/d2/vision/scan_preview', 10)         # IRD E-82 QoS 기본(VOLATILE) — 보기 전용
@@ -463,7 +502,8 @@ class WristBlock(Node):
         req.part_ids(전체 블록 이름). 출력 res(배열은 모두 요청 길이).
 
         보정값 확인 → 설계 고르기 · 읽기(checker_for — remote 면 처음 보는 설계 · run_id 가 바뀐 판만 get_design) → 요청 뒤 새 깊이 프레임 n장 중앙값
-        + TF 자세 → 점군 → BlockChecker → 답. 바깥 영향: get_design · 로그.
+        + TF 자세 → 점군 → BlockChecker → 답. 바깥 영향: get_design · 로그 · wrist_image 작업대 그림 한 장(요청 뒤 컬러가 있을 때만,
+        설계 윗면을 판정 색으로 — _publish_bench_image. 그림 실패는 경고만, 답은 그대로).
         실패: 보정값 없음 · design_id 칸이 빔 · 설계를 못 읽음 → ERROR(get_design 시간 초과만 TIMEOUT), 프레임 · TF 자세 없음 → TIMEOUT
         (모두 state unknown, 값 NaN)."""
         ids = list(req.part_ids)
@@ -510,6 +550,10 @@ class WristBlock(Node):
         # 로그에는 absent 때 보이는 면(작업면) 높이도 적는다 — 보정 기울기 진단용(10/7 박진용 실기: 윗면 −2.8 mm). 서비스 답은 IRD 5장대로 NaN
         self.get_logger().info('check_progress %s %d개 (점 %d, 손끝 z %.0f mm) → %s' % (
             design_id, len(ids), len(pts), T_b2t[2, 3], {r['part_id']: (r['state'], None if np.isnan(r['top_z_m']) else round(r['top_z_m'] * 1000, 1)) for r in results}))
+        # 작업대 그림(박진용 안 ②, 10/14 22시 PL): 물은 부품의 설계 윗면을 판정 색으로. 설계에 없는 part_id 는 자리를 몰라 뺀다
+        parts = [{'part_id': r['part_id'], 'center': checker.parts[r['part_id']]['center'], 'rot': checker.parts[r['part_id']]['rot'],
+                  'state': r['state']} for r in results if r['part_id'] in checker.parts]
+        self._publish_bench_image(t_req, parts, T_b2c)
         return res
 
     # ---------- 스캔 · 흩뿌림 찾기 (JsonQuery) ----------
@@ -726,10 +770,18 @@ class WristBlock(Node):
         """find_blocks 검출 결과를 그린 그림 한 장을 `/d2/vision/wrist_image`(JPEG 70, 640×480 그대로)로 낸다. 실패는 경고만."""
         try:
             img = draw_found(color, blocks, self.finder.last_masks, self.finder.last_info.get('mask_index', []))
+        except (ValueError, IndexError, cv2.error) as e:
+            self.get_logger().warn('wrist_image 를 못 만듦: %s' % e)
+            return
+        self._publish_jpeg(img, frame_id)
+
+    def _publish_jpeg(self, img, frame_id):
+        """다 그린 BGR 그림 한 장을 `/d2/vision/wrist_image`(JPEG 70, 크기 그대로)로 낸다. 인코딩 실패는 경고만(발행 안 함)."""
+        try:
             ok, buf = cv2.imencode('.jpg', img, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
             if not ok:
                 raise ValueError('JPEG 인코딩 실패')
-        except (ValueError, IndexError, cv2.error) as e:
+        except (ValueError, cv2.error) as e:
             self.get_logger().warn('wrist_image 를 못 만듦: %s' % e)
             return
         msg = CompressedImage(format='jpeg', data=buf.tobytes())
@@ -739,7 +791,10 @@ class WristBlock(Node):
 
     def on_find_blocks(self, req, res):
         """find_blocks 콜백: {"run_id"[, "height_map"][, "area"]} → 요청 뒤 컬러 · 깊이(scan_frames 장 평균) → BlockFinder
-        → {"ok":true,"blocks":[…][, "height_map":{…}]} + wrist_image 한 장. area spare 면 _find_spare(받침 위 블록 하나, 깊이만).
+        → {"ok":true,"blocks":[…],"image_seq":n[, "height_map":{…}]} + wrist_image 한 장. area spare 면 _find_spare(받침 위 블록 하나, 깊이만) ·
+        area assembly 면 _find_assembly(둘 다 image_seq 없음).
+        image_seq = 공급 찾기를 계산할 때마다 1 늘리는 번호(find_lock 안) — 그 찾기의 컬러 · 블록 · 마스크를 find_ctx 로 기억해 두었다가
+        작업 관리자 state pick 이 이 번호를 가리키면 on_state 가 번호를 덧그린다.
 
         블록 0개도 ok true(빈 목록 → 작업 관리자 WAIT_SUPPLY). 선택 칸 값이 틀리면 SCAN_FAILED. 계산 예외 → success=false ERROR.
         나머지 실패는 맨 위. 바깥 영향: wrist_image 발행 · 로그. run_id 는 기록용(로그)."""
@@ -761,11 +816,16 @@ class WristBlock(Node):
         depth_mm, color, frame_id, T = snap
         try:
             with self.find_lock:
+                self.image_seq += 1                                       # find_lock 안 — 번호와 기억한 그림 재료가 같은 찾기 것이게
+                seq = self.image_seq
                 masks, scores = self._yolo_masks(color)
                 blocks = self.finder.find(color, depth_mm / 1000.0, self.intr, T, masks=masks, scores=scores)
                 self.publish_wrist_image(color, blocks, frame_id)
                 info = self.finder.last_info
-            out = {'ok': True, 'blocks': blocks}
+                # 작업 관리자가 고른 뒤(state pick) 번호 · 고른 블록을 덧그릴 재료 — 복사하지 않고 참조만(다음 find 가 새 목록을 만든다)
+                self.find_ctx = {'seq': seq, 'color': color, 'blocks': blocks, 'masks': self.finder.last_masks,
+                                 'mask_index': list(info.get('mask_index', [])), 'frame_id': frame_id}
+            out = {'ok': True, 'blocks': blocks, 'image_seq': seq}   # 그림을 못 냈어도 번호는 싣는다(작업 관리자가 그대로 pick 에 넣음)
             if want_map:
                 # 찾기와 같은 깊이 · 자세로 다시 만든다(blocks_from_masks 안의 점을 꺼내 두지 않으려고 — 640×480 에 수십 ms)
                 out['height_map'] = height_grid(base_image(depth_mm / 1000.0, self.intr, T), supply_map_area(self.finder.cfg['area_m'], self.cfg))
@@ -779,13 +839,15 @@ class WristBlock(Node):
 
     def _find_spare(self, res, rid, t0, want_map=False):
         """find_blocks area spare: 요청 뒤 깊이(scan_frames 장 평균) + TF 자세 → base 점 → measure_on_spare(받침 spare_spots[0]).
-        출력: JsonQuery 응답 res — {"ok":true,"blocks":[블록 하나]} 또는 빈 받침 {"ok":true,"blocks":[]}. YOLO · 컬러 · wrist_image 안 씀.
+        출력: JsonQuery 응답 res — {"ok":true,"blocks":[블록 하나]} 또는 빈 받침 {"ok":true,"blocks":[]}. YOLO 안 씀 · 재기는 깊이만.
+        요청 뒤 컬러가 있으면 wrist_image 한 장(잰 블록 윗면 · 목표 자리 상자 · 가운데 차이, block_finder.draw_spare) — 그림이 실패하거나
+        컬러가 없으면 그림만 건너뛴다(답 · 측정값은 그대로).
         want_map 이면 같은 깊이로 받침 둘레 높이 지도(spare_area)를 "height_map" 칸에 더한다 — 다시 잡기 전 손가락 자리 확인(one_pick p1_to_recipe, #20).
-        실패: 보정값 없음 → ERROR · TF · 깊이 시간 초과 → TIMEOUT(_snapshot) · spare_spots 없음 · 계산 예외 → ERROR. 바깥 영향: 로그."""
-        snap, err = self._snapshot(self.scan_frames, need_color=False)
+        실패: 보정값 없음 → ERROR · TF · 깊이 시간 초과 → TIMEOUT(_snapshot) · spare_spots 없음 · 계산 예외 → ERROR. 바깥 영향: 로그 · wrist_image."""
+        snap, err = self._snapshot(self.scan_frames, need_color=False)   # 컬러는 있으면 그림에만 — 없다고 실패하지 않는다
         if snap is None:
             return self._answer(res, 'find_blocks(spare)', err, t0)
-        depth_mm, _, _, T = snap
+        depth_mm, color, frame_id, T = snap
         try:
             pts = depth_to_base_points(depth_mm / 1000.0, self.intr, T, stride=1)
             b = measure_on_spare(pts, self.cfg['spare_spots'][0], self.cfg['block_actual_m'])
@@ -794,10 +856,82 @@ class WristBlock(Node):
             return self._answer(res, 'find_blocks(spare)', self._fail(False, 'ERROR', '받침 재기 예외: %s' % e), t0)
         self.get_logger().info('find_blocks(spare) %s: 점 %d → %s' % (
             rid, len(pts), '빈 받침' if b is None else (b['up'], b['x_m'], b['y_m'], b['yaw_deg'])))
+        if color is not None:
+            self._publish_spare_image(color, b, T, frame_id)
         out = {'ok': True, 'blocks': [b] if b else []}
         if want_map:
             out['height_map'] = height_grid(pts, spare_map_area(self.cfg))
         return self._answer(res, 'find_blocks(spare)', (True, '', out), t0)
+
+    def _publish_spare_image(self, color, b, T, frame_id):
+        """받침 다시 재기 그림(잰 블록 b 또는 None · 목표 = spare_spots[0] 눕힘)을 wrist_image 로 낸다. 그림 예외는 경고만 — 답은 그대로."""
+        try:
+            size = self.cfg['block_actual_m']
+            img = draw_spare(color, b, ideal_spare_block(self.cfg['spare_spots'][0], size), self.intr, T, size)
+        except Exception as e:                # 그림 때문에 받침 재기 답이 실패하면 안 된다
+            self.get_logger().warn('wrist_image(spare) 를 못 만듦: %r' % (e,))
+            return
+        self._publish_jpeg(img, frame_id)
+
+    def _publish_bench_image(self, t_req, parts, T, measured=None, note='', color=None):
+        """작업대 그림(설계 자리 윗면 · 판정 색 — block_finder.draw_workbench)을 wrist_image 한 장으로 낸다(박진용 안 ②, 10/14 22시 PL).
+
+        입력: t_req = 요청 받은 시각(s) — color 가 없으면 그 뒤에 들어온 마지막 컬러를 쓴다(앞 장은 로봇이 움직이던 때일 수 있어 안 씀) ·
+              parts = draw_workbench 의 부품 목록 · T = T_base2cam 4x4 m(그 요청의 자세) · measured · note = draw_workbench 그대로 ·
+              color = (BGR, frame_id) 이미 받은 컬러(find_blocks assembly — _snapshot 이 고른 장).
+        컬러 · camera_info 가 없으면 조용히 건너뛴다(draw_spare 와 같게 — 답 · 측정은 그대로). 그림 예외는 경고 한 번만. 바깥 영향: wrist_image 발행."""
+        if color is None:
+            with self.lock:
+                last = self.color
+            if last is None or last[0] <= t_req:
+                return
+            color = (last[1], last[2])
+        if self.intr is None or not parts:
+            return
+        try:
+            img = draw_workbench(color[0], parts, self.intr, T, self.cfg['block_actual_m'], measured=measured, note=note)
+        except Exception as e:                # 그림 때문에 check_progress · 다시 재기 답이 실패하면 안 된다
+            self._warn_once('bench_draw', 'wrist_image(작업대) 를 못 만듦: %r — 그림만 건너뜀(이 경고는 한 번만)' % (e,))
+            return
+        self._publish_jpeg(img, color[1])
+
+    def _warn_once(self, kind, text):
+        """같은 종류(kind) 경고는 노드가 뜬 동안 한 번만 남긴다 — state 는 자주 와서 같은 꼴 오류가 로그를 덮지 않게."""
+        if kind not in self.warned:
+            self.warned.add(kind)
+            self.get_logger().warn(text)
+
+    def on_state(self, msg):
+        """/d2/task/state(state/2 JSON) 콜백 — 'pick' 칸이 마지막 공급 find 그림(image_seq)을 가리키고 지난번과 다르면
+        그 그림에 우선순위 번호(ranks) · 고른 블록(index) 채우기를 덧그려 wrist_image 를 한 장 더 낸다(10/14 22시 PL).
+
+        판단은 block_finder.pick_redraw_key(시험 있음): pick 없음 · image_seq null · 다른 그림 번호 · 지난번과 같음이면 아무것도 안 한다.
+        state 는 다른 칸이 바뀌어도 다시 오므로 같은 pick 으로 다시 그리지 않는다. JSON 이 아님 · pick 꼴 틀림 · 그림 실패는 종류마다 경고 한 번만
+        (콜백이 죽지 않는다). 바깥 영향: wrist_image 발행 · 로그."""
+        try:
+            st = json.loads(msg.data)
+        except ValueError:
+            self._warn_once('state_json', '/d2/task/state 를 JSON 으로 못 읽음 — pick 그림을 건너뜀(이 경고는 한 번만)')
+            return
+        if not isinstance(st, dict):
+            self._warn_once('state_json', '/d2/task/state 가 JSON 객체가 아님 — pick 그림을 건너뜀(이 경고는 한 번만)')
+            return
+        ctx = self.find_ctx                   # find 콜백이 통째로 바꾸므로 한 번 읽어 둔다
+        try:
+            key = pick_redraw_key(ctx['seq'] if ctx else None, self.pick_drawn, st.get('pick'))
+        except ValueError as e:
+            self._warn_once('pick', '/d2/task/state pick 칸 꼴이 틀림(%s) — 그림을 건너뜀(이 경고는 한 번만)' % e)
+            return
+        if key is None:
+            return
+        self.pick_drawn = key                 # 그림이 실패해도 같은 pick 으로 다시 시도하지 않는다(같은 실패가 반복되지 않게)
+        try:
+            img = draw_found(ctx['color'], ctx['blocks'], ctx['masks'], ctx['mask_index'], ranks=list(key[2]), pick=key[1])
+        except Exception as e:                # 보기 전용 — 무엇이 실패해도 노드 · 작업은 그대로
+            self._warn_once('pick_draw', 'wrist_image(pick) 를 못 만듦: %r — 그림만 건너뜀(이 경고는 한 번만)' % (e,))
+            return
+        self._publish_jpeg(img, ctx['frame_id'])
+        self.get_logger().info('wrist_image: 그림 #%d 에 고른 블록 %d · 순위 %s 를 덧그림' % (key[0], key[1], list(key[2])))
 
 
     def _find_assembly(self, res, rid, target, t0):
@@ -806,7 +940,9 @@ class WristBlock(Node):
         출력: {"ok":true, "part_id", "blocks":[블록 하나] 또는 [], "rejected": null 또는 거절 코드(placed_measure.REJECTS), "detail",
               "measured_stamp": 쓴 깊이 중 마지막 장을 받은 시각(초, 노드 시계)}. 측정 거절 · 블록 없음(NO_PART)은 ok true(이번엔 못 잼 — 다시 집지 않음).
         실패(success false): 설계에 없는 part_id → SCAN_FAILED '요청 오류' · 설계를 못 읽음 → ERROR(get_design 시간 초과 TIMEOUT) ·
-        보정값 없음 · 계산 예외 → ERROR · TF · 깊이 시간 초과 → TIMEOUT. 바깥 영향: 로그(remote 면 get_design — 보통 check_progress 로 이미 캐시)."""
+        보정값 없음 · 계산 예외 → ERROR · TF · 깊이 시간 초과 → TIMEOUT. 바깥 영향: 로그(remote 면 get_design — 보통 check_progress 로 이미 캐시) ·
+        요청 뒤 컬러가 있으면 wrist_image 작업대 그림 한 장(설계 자리 빨간 상자 + 잰 블록 초록 + placed_note 글자, 박진용 안 ②).
+        placed_method:=mask 면 깊이 결과 뒤에 _placed_by_mask 가 크기 · 위치를 마스크로 다시 잰다(응답 꼴 같음, 거기서 실패하면 깊이 결과 그대로)."""
         design_id, part_id = target
         with self.design_lock:
             checker, reason = self.checker_for(design_id, rid)
@@ -820,20 +956,60 @@ class WristBlock(Node):
             return self._answer(res, 'find_blocks(assembly)', err, t0)
         with self.lock:
             stamp = self.last_frame_t                                     # _snapshot 이 쓴 마지막 깊이 장(바로 뒤 새 장이 왔으면 그 장 — 33 ms 안)
-        depth_mm, _, _, T = snap
+        depth_mm, color, frame_id, T = snap
         try:
             pts = depth_to_base_points(depth_mm / 1000.0, self.intr, T, stride=1)
             b, why = measure_placed(pts, {'part_id': part_id, 'center': part['center'], 'rot': part['rot']}, self.cfg['block_actual_m'])
         except Exception as e:                # 계산 예외로 노드가 죽지 않게 — 원인은 로그로
             self.get_logger().error('find_blocks(assembly) %s %s 예외: %r' % (rid, part_id, e))
             return self._answer(res, 'find_blocks(assembly)', self._fail(False, 'ERROR', '놓은 블록 재기 예외: %s' % e), t0)
+        if self.get_parameter('placed_method').value == 'mask':
+            b, why = self._placed_by_mask(rid, part_id, part, depth_mm, color, T, b, why)
         out = {'ok': True, 'part_id': part_id, 'blocks': [b] if b else [], 'rejected': None if b else why[0],
                'detail': '' if b else why[1], 'measured_stamp': round(float(stamp), 3)}
         c = part['center']
         self.get_logger().info('find_blocks(assembly) %s %s: 점 %d → %s' % (
             rid, part_id, len(pts), '거절 %s — %s' % why if b is None else
             '잼 dx %.1f · dy %.1f mm · yaw %.1f° · 윗면 %s mm' % ((b['x_m'] - c[0]) * 1000, (b['y_m'] - c[1]) * 1000, b['yaw_deg'], b['size_mm'])))
+        if color is not None:                 # 작업대 그림: 설계 자리(빨간 목표 상자) + 잰 블록(초록) + 차이 · 거절 코드 글자(박진용 안 ②)
+            self._publish_bench_image(None, [{'part_id': part_id, 'center': c, 'rot': part['rot'], 'state': None}], T,
+                                      measured=b, note=placed_note(part_id, b, c, out['rejected']), color=(color, frame_id))
         return self._answer(res, 'find_blocks(assembly)', (True, '', out), t0)
+
+    def _placed_by_mask(self, rid, part_id, part, depth_mm, color, T, b, why):
+        """_find_assembly 의 placed_method:=mask 갈래 — 깊이 결과 (b, why) 를 YOLO 마스크 + 광선 결과(placed_mask.measure_placed_mask)로 바꾼다.
+
+        입력: depth_mm = 평균 깊이 (H, W) mm · color = 요청 뒤 컬러 BGR 또는 None · T = 카메라 → base 4x4 m · (b, why) = measure_placed 결과.
+        출력: (블록 dict 또는 None, 거절 (코드, 설명) 또는 None) — measure_placed 와 같은 꼴. 쓴 방법 · 까닭은 로그 한 줄에만(응답 칸 그대로).
+        실패 때: 컬러 없음 · YOLO 안 읽음(yolo_fallback) · 추론 실패 · 계산 예외면 받은 깊이 결과를 그대로 돌려주고 경고 로그(노드는 계속).
+        바깥 영향: YOLO 한 번(find_lock 안 — find_blocks · scan_capture 와 차례로) · 로그."""
+        if color is None:
+            self.get_logger().warn('find_blocks(assembly) %s %s: placed_method mask 인데 요청 뒤 컬러가 없다 — 깊이 결과로' % (rid, part_id))
+            return b, why
+        try:
+            raw = self.get_parameter('placed_mask_shift_px').value
+            try:
+                shift = [float(v) for v in raw]
+                if len(shift) != 2:
+                    raise ValueError
+            except (TypeError, ValueError):
+                self._warn_once('mask_shift', 'placed_mask_shift_px 가 [du, dv] 두 수가 아니다(%r) — 옮기지 않음(이 경고는 한 번만)' % (raw,))
+                shift = [0.0, 0.0]
+            with self.find_lock:
+                masks, _ = self._yolo_masks(color)
+            if masks is None:
+                self.get_logger().warn('find_blocks(assembly) %s %s: YOLO 마스크가 없다(yolo_fallback · 추론 실패) — 깊이 결과로' % (rid, part_id))
+                return b, why
+            P = base_image(depth_mm / 1000.0, self.intr, T)
+            bm, wm, info = measure_placed_mask_detail(P, masks, {'part_id': part_id, 'center': part['center'], 'rot': part['rot']},
+                                                      self.cfg['block_actual_m'], self.intr, T, shift)
+        except Exception as e:                # 마스크 쪽 예외로 노드가 죽거나 답을 못 하지 않게 — 깊이 결과로 돌아간다
+            self.get_logger().warn('find_blocks(assembly) %s %s: 마스크 재기 예외 %r — 깊이 결과로' % (rid, part_id, e))
+            return b, why
+        self.get_logger().info('find_blocks(assembly) %s %s: 방법 %s%s · 마스크 %d개 · 픽셀 %d · 옮김 %s px · 깊이 %s' % (
+            rid, part_id, info['method'], ' (%s)' % info['reason'] if info['reason'] else '', len(masks), info['mask_px'], info['shift_px'],
+            info['depth_reject'] or 'OK %s mm' % info['depth_size_mm']))
+        return bm, wm
 
 
 def main(args=None):

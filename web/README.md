@@ -43,7 +43,7 @@ cd web/frontend && NEXT_PUBLIC_BACKEND=http://localhost:8000 npm run dev
 
 설계 생성(`design_gen`)은 **웹 PC에 로그인된 Claude Code**로 부른다. 컨테이너 안에는 Claude 로그인이 없으므로 웹 PC **호스트**에서 중계 `web/claude_bridge.py`를 띄우고,
 `design_gen`은 OpenAI 라이브러리 그대로 주소(`D2_LLM_URL`)만 중계로 돌린다(키는 보내지 않음). 중계는 OpenAI 형식 요청을 `claude -p --json-schema`로 바꾼다
-(도구 · MCP · 파일 접근 없이, 빈 임시 폴더에서). 음성 STT(Whisper)는 그대로 OpenAI 키를 쓴다.
+(도구 · MCP · 파일 접근 없이, 빈 임시 폴더에서). 음성 받아 적기(gpt-4o-mini-transcribe, 안 되면 whisper-1)는 그대로 OpenAI 키를 쓴다.
 
 ```bash
 # 0) 한 번: 웹 PC 에서 Claude Code 로그인(데스크톱 앱 또는 claude 명령) — 중계는 그 계정의 구독 한도를 쓴다
@@ -101,7 +101,7 @@ curl -s http://172.17.0.1:8790/health                    # {"ok": true, "claude"
 | `IDLE` | 설계 선택 · 스캔 · 생성 | 설계를 고르세요 |
 | `READY` | [조립](설계 3D) · 취소 | [조립]을 누르세요 — "작업 영역에 사람이 없는지 확인하세요" |
 | `CHECK` · `SELECT` · `PICK_PLACE` · `VERIFY` | (정지) | 조립 중 n/N (%) |
-| `WAIT_SUPPLY` | 계속(= start) | `supply_empty` · `tilted_block` · `no_match_block`("맞는 블록이 없어요. 블록을 정리하거나 더 넣고 [계속]", E-73) |
+| `WAIT_SUPPLY` | 계속(= start) | `supply_empty` · `tilted_block` · `no_match_block`("맞는 블록이 없어요. 블록을 정리하거나 더 넣고 [계속]", E-73 — 받침 경유 · 공급 사람 확인도 이것) · `placed_check`(A4 모서리 판정 `w144_corner_judge` 켬의 사람 수정 대기 — 모서리 안쪽 칸 높이 차 · TILTED · tilted. 화면 "놓은 블록 확인 — 손으로 고친 뒤 계속" · [고쳤어요 · 계속] → 그 블록을 다시 잼, 10/15 PL · 한석형 #190) |
 | `WAIT_HMI` | 계속(= start) | 웹 연결이 끊겼었어요. [계속]을 누르세요(`hmi_lost`) |
 | `SCAN_MOVE` · `SCAN_CAPTURE` · `SCAN_INFER` | (정지) | 스캔 중(`scan_running`) |
 | `SCAN_REVIEW` | 그대로 저장 · 다시 스캔 · 취소(AI로 고치기는 10/14 이후) | 비교 화면(`scan_review`) |
@@ -190,7 +190,7 @@ web/backend/
 │   │                 (스캔 사진 · 점군 · 손목 영상은 W127 나머지 뒤)
 │   ├── designs.py    /api/designs 목록 · 상세 · 규칙 숫자(W111 최소형 ✅) · 생성 · 고르기 · 스캔 저장(W108 · W112 · W116) → DesignGenerator · DesignStore
 │   ├── ws.py         /ws(W126 ✅) {"type", "data"} 한 겹 — 붙으면 들고 있는 값 먼저, 그 뒤 바뀔 때마다(밀리면 오래된 것부터 버림)
-│   └── voice.py      /api/voice — 화면 마이크 → d2/hmi/voice/listen → 호스트 voice(Whisper → 의도 → MQTT d2/hmi/intent). 음성은 HMI 밖(10/13 PL)
+│   └── voice.py      /api/voice — 화면 마이크 → d2/hmi/voice/listen → 호스트 voice(받아 적기 gpt-4o-mini-transcribe → 안 되면 whisper-1 → 받아 적은 문장 그대로 MQTT d2/hmi/intent request_design — 의도 고르기 없음, E-96). 음성은 HMI 밖(10/13 PL)
 ├── mqtt_client.py    MqttClient(W126 ✅) — 브로커와 통신 한 곳: req/res(req_id · req_timeout_s, 자동 재전송 없음) · 상태 마지막 값 ·
 │                     d2/web/alive 1초(LWT false) · 다리 연결 신호 3초 끊김 · serve()로 등록한 함수가 get_design · save_build 답함
 │                     (토픽 이름 · req/res 짝은 d2_bridge/bridge_codec.py 를 같이 씀)
