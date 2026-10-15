@@ -4,7 +4,8 @@
 // 10/14 PL: 블록 고르기 순서(우선순위)가 핵심이라 크게 — 설계 3D 왼쪽 반 칸(10/14 저녁) · 확대(×1 ~ ×3, 그림을 누른 곳 중심) · 전체 화면.
 // 손목 그림은 세 가지(10/14 22시 PL — 그림은 손목 비전이 그림, 화면은 덧그리지 않음): 공급 구역(block_finder.draw_found — 낱말 FLAT · EDGE ·
 // STAND · TILT n, 고른 뒤 우선순위 번호 동그라미 · 고른 블록 칠하기) · 받침 다시 재기(draw_spare — 빨간 목표 상자 · 초록 잰 블록 · dx dy · dyaw) ·
-// 작업대(놓은 부품 설계 자리). 그림 아래: 고른 까닭 한 줄(state/2 pick.reason — 그림 속 한글 대신 화면 글, PL) + 접어 둔 '그림 보는 법'.
+// 작업대(draw_workbench — 놓은 부품 설계 자리 판정 색, A4 다시 재기 때는 굵은 빨간 설계 자리 + 초록 잰 블록(블록 치수 그대로 잰 자리에 —
+// 10/15 PL '가', 민범진 정정)). 그림 아래: 고른 까닭 한 줄(state/2 pick.reason — 그림 속 한글 대신 화면 글, PL) + 접어 둔 '그림 보는 법'.
 // 그쪽 글자 · 색이 바뀌면 이 풀이도 같이 고친다.
 // 관측 자세가 높아 블록이 작게 보여서 확대한다. 배율 · 중심은 이 브라우저에만 기억(localStorage — 못 쓰면 기억 없이 그대로 동작).
 import { useEffect, useState, type MouseEvent } from 'react';
@@ -120,6 +121,11 @@ export default function WristCamera({ robot }: { robot: Robot }) {
             <span><i style={{ borderColor: '#00c800' }} />있음</span>
             <span><i style={{ borderColor: '#ffa500' }} />확인 못 함</span>
             <span><i style={{ borderColor: '#ff0000' }} />없음</span>
+          </div>
+          <div className="cam-legend">
+            <b>놓은 블록 다시 재기</b>
+            <span><i style={{ borderColor: '#ff0000', borderWidth: 3 }} />굵은 빨강 = 그 부품의 설계 자리</span>
+            <span><i style={{ borderColor: '#00c800' }} />초록 상자 + 십자 = 깊이로 잰 블록 자리(크기는 블록 치수 그대로) — 빨간 상자와 어긋난 만큼이 놓은 오차</span>
           </div>
         </details>
       )}
