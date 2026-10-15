@@ -174,7 +174,7 @@ class MqttClient:
 
     def listen(self):
         """마이크 버튼 → voice.py 에 '한 번 듣기'를 알린다(d2/hmi/voice/listen {schema voice_listen/1, stamp}, QoS 1).
-        retained 로 두지 않는다 — 늦게 붙은 voice.py 가 옛 누름으로 녹음하지 않게. voice.py 는 녹음 · Whisper 뒤 d2/hmi/intent
+        retained 로 두지 않는다 — 늦게 붙은 voice.py 가 옛 누름으로 녹음하지 않게. voice.py 는 녹음 · 받아 적기(gpt-4o-mini-transcribe → 안 되면 whisper-1) 뒤 d2/hmi/intent
         {intent: request_design, text} 를 낸다(backend 가 /ws 로 넘김). 반환: {success, reason[, message]} — 브로커가 없으면 success false."""
         if not self.client.is_connected():
             return {'success': False, 'reason': 'ERROR', 'message': NO_BROKER}
