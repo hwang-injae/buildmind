@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 import yaml
 
-from d2_vision.block_finder import TARGET_BGR, base_axes_px, draw_spare, project_to_image, spare_label, spare_offset_text
+from d2_vision.block_finder import (OFFSET_SCALE, TARGET_BGR, _ray_to_edge, base_axes_px, draw_spare, project_to_image, spare_label,
+                                    spare_offset_big, spare_offset_text, top_face_corners)
 from d2_vision.spare_measure import OPEN_GAP_MM, ideal_spare_block, measure_on_spare
 
 ROBOT = yaml.safe_load((Path(__file__).resolve().parents[2] / 'd2_robot' / 'd2_bringup' / 'config' / 'robot.yaml').read_text(encoding='utf-8'))
@@ -146,7 +147,8 @@ def test_draw_spare_exact_fit_keeps_both_outlines():
 
 
 def test_spare_texts_dyaw_and_base_offset():
-    """잰 블록 글자는 목표와의 yaw 차이(90° 경계에서 +90 · −90 이 번갈지 않게) · 왼쪽 위 글자는 base dx · dy(mm)."""
+    """잰 블록 글자는 목표와의 yaw 차이(90° 경계에서 +90 · −90 이 번갈지 않게) · TARGET 아래 큰 글자는 dx · dy(mm) 한 줄
+    (spare_offset_text 는 작업대 다시 재기 글자 placed_note 가 그대로 씀)."""
     target = ideal_spare_block(SPOT, SIZE)
     for yaw in (89.6, -89.6):                                  # 같은 자세(180° 대칭) — 목표 −90 과 차이는 ±0.4
         assert spare_label({**target, 'yaw_deg': yaw}, target) == 'SPARE FLAT dyaw +0'
@@ -154,6 +156,36 @@ def test_spare_texts_dyaw_and_base_offset():
     assert spare_label({**target, 'yaw_deg': 12.0}, None) == 'SPARE FLAT +12'
     meas = {**target, 'x_m': target['x_m'] + 0.0021, 'y_m': target['y_m'] - 0.0008}
     assert spare_offset_text(meas, target) == 'base dx +2.1 dy -0.8 mm'
+    assert spare_offset_big(meas, target) == 'dx +2.1  dy -0.8 mm'
+
+
+def test_draw_spare_offset_below_target_and_axes_inside_box():
+    """10/15 PL '나': 어긋난 거리는 TARGET 아래 큰 한 줄(왼쪽 위 작은 글자 · 화살표는 없앰), base x · y 화살표는 목표 상자 안 —
+    잰 블록이 축에서 얼마나 틀어졌는지 상자 안에서 보이게."""
+    cv2 = pytest.importorskip('cv2')
+    color = np.full((480, 640, 3), 90, np.uint8)
+    target = ideal_spare_block(SPOT, SIZE)
+    meas = {**target, 'x_m': SX + 0.0021, 'y_m': SY - 0.0008, 'yaw_deg': target['yaw_deg'] + 3.0}
+    img = draw_spare(color, meas, target, DRAW_INTR, DRAW_T, SIZE)
+    white = (img == 255).all(axis=2)
+    assert not white[:80, :120].any()                                       # 왼쪽 위(옛 글자 · 화살표 자리)는 비었다
+    box = project_to_image(top_face_corners(target, SIZE), DRAW_INTR, DRAW_T)
+    inside = np.zeros(white.shape, np.uint8)
+    cv2.fillConvexPoly(inside, np.round(box).astype(np.int32), 1)
+    assert (white & inside.astype(bool)).any()                              # 상자 안 흰 화살표 · 'x' 'y'
+    vs, us = np.nonzero(white & (np.arange(480)[:, None] > box[:, 1].max() + 20))   # TARGET 글자보다 아래
+    (tw, _), _ = cv2.getTextSize(spare_offset_big(meas, target), cv2.FONT_HERSHEY_SIMPLEX, OFFSET_SCALE, 6)
+    assert len(us) and us.max() - us.min() + 1 >= 0.8 * tw                  # 큰 한 줄이 거의 다 그려짐
+    assert abs((us.min() + us.max()) / 2 - box[:, 0].mean()) <= 6           # 상자와 가로 가운데가 같다(글자 모양 치우침 몇 px)
+
+
+def test_ray_to_edge_in_box():
+    """상자 가운데에서 방향 따라 가장자리까지 거리 — 축 화살표 길이(상자 안에 들게)."""
+    sq = np.array([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
+    c = np.array([5.0, 5.0])
+    assert _ray_to_edge(sq, c, np.array([1.0, 0.0])) == pytest.approx(5.0)
+    assert _ray_to_edge(sq, c, np.array([0.0, -1.0])) == pytest.approx(5.0)
+    assert _ray_to_edge(sq, c, np.array([1.0, 1.0]) / np.sqrt(2)) == pytest.approx(5.0 * np.sqrt(2))
 
 
 def test_base_axes_px_follows_camera_rotation():

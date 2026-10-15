@@ -3,7 +3,7 @@
 // 그대로 보여 준다(화면은 덧그리지 않음). 그림이 오면 /ws 로 번호만 오고, 그림은 /api/robot/wrist.jpg 로 받는다.
 // 10/14 PL: 블록 고르기 순서(우선순위)가 핵심이라 크게 — 설계 3D 왼쪽 반 칸(10/14 저녁) · 확대(×1 ~ ×3, 그림을 누른 곳 중심) · 전체 화면.
 // 손목 그림은 세 가지(10/14 22시 PL — 그림은 손목 비전이 그림, 화면은 덧그리지 않음): 공급 구역(block_finder.draw_found — 낱말 FLAT · EDGE ·
-// STAND · TILT n, 고른 뒤 우선순위 번호 동그라미 · 고른 블록 칠하기) · 받침 다시 재기(draw_spare — 빨간 목표 상자 · 초록 잰 블록 · dx dy · dyaw) ·
+// STAND · TILT n, 고른 뒤 우선순위 번호 동그라미 · 고른 블록 칠하기) · 받침 다시 재기(draw_spare — 빨간 목표 상자 · 초록 잰 블록 · 상자 안 x · y 화살표 · TARGET 아래 큰 dx dy · dyaw) ·
 // 작업대(draw_workbench — 놓은 부품 설계 자리 판정 색, A4 다시 재기 때는 굵은 빨간 설계 자리 + 초록 잰 블록(블록 치수 그대로 잰 자리에 —
 // 10/15 PL '가', 민범진 정정)). 그림 아래: 고른 까닭 한 줄(state/2 pick.reason — 그림 속 한글 대신 화면 글, PL) + 접어 둔 '그림 보는 법'.
 // 그쪽 글자 · 색이 바뀌면 이 풀이도 같이 고친다.
@@ -118,7 +118,7 @@ export default function WristCamera({ robot }: { robot: Robot }) {
             <b>받침</b>
             <span><i style={{ borderColor: '#ff0000' }} />맞춰야 할 자리</span>
             <span><i style={{ borderColor: '#00c800' }} />잰 블록</span>
-            <span><b>dx dy</b> = 어긋난 거리(mm) · <b>dyaw</b> = 틀어진 각도</span>
+            <span><b>dx dy</b> = 어긋난 거리(mm, 상자 안 화살표 <b>x</b> · <b>y</b> 방향) · <b>dyaw</b> = 틀어진 각도</span>
           </div>
           <div className="cam-legend">
             <b>작업대</b>

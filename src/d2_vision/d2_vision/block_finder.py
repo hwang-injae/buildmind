@@ -740,7 +740,10 @@ BADGE_SCALE = 0.5            # 우선순위 번호 동그라미 글자 크기 �
 BADGE_STEP_PX = 3            # 번호 동그라미 자리 후보 격자 간격(픽셀) — 블록 하나에 후보 수백 개, 가운데에서 3 px 안쪽까지 맞춤
 BADGE_OFF_PENALTY = 1000.0   # 블록 밖 후보 벌점(픽셀 거리에 더함) — 블록 안에 글자와 안 겹치는 자리가 있으면 늘 그쪽을 고르게
 PICK_ALPHA = 0.35            # 고른 블록 마스크 채우기 진하기 — 블록 결이 비쳐 보이게 반투명
-AXIS_PX = 25                 # 받침 그림 왼쪽 위 base +x · +y 방향 화살표 길이(픽셀) — 받침 관측 자세는 사진이 돌아가 있어 'dx dy' 방향을 보여 준다
+OFFSET_SCALE = 0.8           # 받침 그림 TARGET 아래 dx · dy 글자 크기(10/15 PL '나' — 왼쪽 위 작은 글자 대신 크게). 목표 상자는 받침 촬영 자세
+                             # (렌즈가 블록 윗면 위 ~44 cm)에서 640×480 기준 약 103 × 34 px 라 상자 안에 크게 넣으면 테두리를 덮어서 아래에 한 줄로
+AXIS_IN_BOX = 0.8            # 받침 상자 안 축 화살표 길이 = 가운데에서 그 방향 가장자리까지의 이 배 — 화살 끝이 빨간 테에 묻히지 않게
+AXIS_PX = 25               # 받침 그림 상자 안 base +x · +y 방향 화살표 최대 길이(픽셀) — 받침 관측 자세는 사진이 돌아가 있어 'dx dy' 방향을 보여 준다
 
 
 def _deg(a):
@@ -782,6 +785,53 @@ def spare_offset_text(measured, target):
     """받침 그림 왼쪽 위 글자: 'base dx ±n.n dy ±n.n mm'(잰 − 목표 가운데, base_link x · y). 사진 가로 · 세로가 아님을 글자에 적는다."""
     dx, dy = ((float(measured[k]) - float(target[k])) * 1000 for k in ('x_m', 'y_m'))
     return f'base dx {dx:+.1f} dy {dy:+.1f} mm'
+
+
+def spare_offset_big(measured, target):
+    """받침 그림 TARGET 아래 큰 글자 한 줄: 'dx +2.1  dy -0.8 mm'(잰 − 목표 가운데, base_link x · y — spare_offset_text 와 같은 값.
+    축은 상자 안 화살표로 보여서 'base' 낱말은 뺀다). 바깥 영향 없음."""
+    dx, dy = ((float(measured[k]) - float(target[k])) * 1000 for k in ('x_m', 'y_m'))
+    return f'dx {dx:+.1f}  dy {dy:+.1f} mm'
+
+
+def _put_big_line(cv2, img, txt, cx, top):
+    """img 에 큰 흰 글자(굵은 검은 테, OFFSET_SCALE) 한 줄을 가로 가운데 cx · 윗변 top(픽셀)에 그린다 — 영상 밖으로 나가지 않게
+    당긴다(아래가 모자라면 위로 올라가 상자와 겹칠 수 있음). 바깥 영향: img 를 고친다."""
+    (w, h), base = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, OFFSET_SCALE, 6)
+    x = min(max(int(cx - w / 2), 2), img.shape[1] - w - 2)
+    y = min(max(int(top) + h, h + 2), img.shape[0] - base - 2)
+    cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_SIMPLEX, OFFSET_SCALE, (0, 0, 0), 6)
+    cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_SIMPLEX, OFFSET_SCALE, (255, 255, 255), 2)
+
+
+def _ray_to_edge(poly, c, d):
+    """볼록 다각형 poly (N, 2) 안의 점 c 에서 단위 방향 d 로 가장자리까지 거리(픽셀). 못 만나면 inf. 바깥 영향 없음."""
+    best = np.inf
+    for k in range(len(poly)):
+        p, e = poly[k], poly[(k + 1) % len(poly)] - poly[k]
+        den = d[0] * e[1] - d[1] * e[0]
+        if abs(den) < 1e-9:
+            continue                             # 변과 나란한 방향
+        w = p - c
+        t, s = (w[0] * e[1] - w[1] * e[0]) / den, (w[0] * d[1] - w[1] * d[0]) / den
+        if t > 0 and 0 <= s <= 1:
+            best = min(best, t)
+    return best
+
+
+def _put_axes_in_box(cv2, img, px, dirs):
+    """base +x · +y 방향 화살표를 목표 상자 px (4, 2) 가운데에서 상자 안으로 그린다(10/15 PL '나' — 잰 블록이 축에서 얼마나 틀어졌는지
+    상자 안에서 바로 보이게). 길이 = 그 방향 가장자리까지의 AXIS_IN_BOX 배(AXIS_PX 넘지 않게 — 받침 상자 짧은 변 쪽은 ~14 px).
+    'x' · 'y' 글자는 화살 끝 옆, 다른 화살표 반대쪽에(둘이 겹치지 않게). 흰 선 아래 검은 테(나무색 블록 위에서도 보이게).
+    입력: dirs = base_axes_px 결과(단위 벡터 2개). 바깥 영향: img 를 고친다."""
+    c = px.mean(axis=0)
+    for i, (d, name) in enumerate(zip(dirs, ('x', 'y'))):
+        tip = c + min(AXIS_PX, AXIS_IN_BOX * _ray_to_edge(px, c, d)) * d
+        a, b = (int(round(c[0])), int(round(c[1]))), (int(round(tip[0])), int(round(tip[1])))
+        cv2.arrowedLine(img, a, b, (0, 0, 0), 3, tipLength=0.35)
+        cv2.arrowedLine(img, a, b, (255, 255, 255), 1, tipLength=0.35)
+        side = -dirs[1 - i]
+        _put_label(cv2, img, name, (tip[0] + 7 * side[0], tip[1] + 7 * side[1] + 4), center=True)
 
 
 def _label_box(cv2, img, txt, org, center=False):
@@ -920,11 +970,13 @@ def draw_spare(color, measured, target, intr, T_base2cam, block_actual_m):
           block_actual_m = [길이, 폭, 두께] m. 출력: 같은 크기 BGR 새 그림(입력은 그대로).
     그림: 목표 상자(빨강, 4 px)를 먼저, 잰 블록(초록, 2 px)을 위에 — 딱 맞으면 초록 선 양옆에 빨간 테가 보인다.
     글자: 목표 'TARGET'은 상자 아래 · 잰 블록 spare_label('SPARE FLAT dyaw +1')은 사각형 위(테두리를 가리지 않게).
-          둘 다 있으면 왼쪽 위에 spare_offset_text('base dx +2.1 dy -0.8 mm') + 그 아래 base +x · +y 방향 화살표
-          (받침 관측 자세는 사진이 돌아가 있어 base +x 가 사진 위쪽으로 보인다 — 숫자를 사진 가로 · 세로로 읽지 않게).
+          둘 다 있으면 목표 상자 가운데에서 상자 안으로 base +x · +y 방향 화살표('x' · 'y' — 잰 블록이 축에서 얼마나 틀어졌는지 보이게) +
+          TARGET 아래에 큰 한 줄 spare_offset_big('dx +2.1  dy -0.8 mm', 10/15 PL '나')
+          (받침 관측 자세는 사진이 돌아가 있어 base +x 가 사진 위쪽으로 보인다 — 숫자를 사진 가로 · 세로로 읽지 않게 화살표로).
     카메라 뒤로 가는 사각형은 그리지 않는다. 바깥 영향 없음. 실패: cv2 가 없으면 ImportError."""
     import cv2
     img = np.ascontiguousarray(color).copy()
+    target_px = target_label = None
     for b, bgr, thick, below in ((target, TARGET_BGR, 4, True), (measured, OVERLAP_BGR['none'], 2, False)):
         if b is None:
             continue
@@ -936,18 +988,16 @@ def draw_spare(color, measured, target, intr, T_base2cam, block_actual_m):
         cv2.drawMarker(img, (int(round(cu)), int(round(cv))), bgr, cv2.MARKER_CROSS, 12 if below else 8, 1)
         if below:
             (_, h), _ = cv2.getTextSize('TARGET', cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, 3)
-            _put_label(cv2, img, 'TARGET', (cu, px[:, 1].max() + h + 6), center=True)
+            target_px, target_label = px, _put_label(cv2, img, 'TARGET', (cu, px[:, 1].max() + h + 6), center=True)
         else:
             _put_label(cv2, img, spare_label(b, target), (cu, px[:, 1].min() - 6), center=True)
-    if measured is not None and target is not None:
-        _put_label(cv2, img, spare_offset_text(measured, target), (5, 18))
+    if measured is not None and target_px is not None:
         dirs = base_axes_px(target, intr, T_base2cam)
         if dirs is not None:
-            o = np.array([34.0, 66.0])                                  # 화살표 시작점(왼쪽 위 글자 아래 — 화살표가 위로 가도 글자와 안 겹치게)
-            for d, name in zip(dirs, ('+x', '+y')):
-                tip = o + AXIS_PX * d
-                cv2.arrowedLine(img, (int(o[0]), int(o[1])), (int(round(tip[0])), int(round(tip[1]))), (255, 255, 255), 1, tipLength=0.3)
-                _put_label(cv2, img, name, (tip[0] + 6 * d[0], tip[1] + 6 * d[1] + 4), center=True)
+            _put_axes_in_box(cv2, img, target_px, dirs)
+        # 어긋난 거리는 TARGET 글자 바로 아래에 크게 한 줄(10/15 PL '나' — 왼쪽 위 작은 글자는 안 읽혔다. 목표 상자는 받침 촬영 자세에서
+        # ~103 × 34 px 라 상자 안에 크게 넣으면 빨강 · 초록 테두리를 덮어서 아래로)
+        _put_big_line(cv2, img, spare_offset_big(measured, target), target_px[:, 0].mean(), target_label[3] + 4)
     return img
 
 
