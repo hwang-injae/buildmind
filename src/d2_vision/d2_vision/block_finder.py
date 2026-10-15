@@ -742,8 +742,8 @@ BADGE_OFF_PENALTY = 1000.0   # 블록 밖 후보 벌점(픽셀 거리에 더함)
 PICK_ALPHA = 0.35            # 고른 블록 마스크 채우기 진하기 — 블록 결이 비쳐 보이게 반투명
 OFFSET_SCALE = 0.8           # 받침 그림 TARGET 아래 dx · dy 글자 크기(10/15 PL '나' — 왼쪽 위 작은 글자 대신 크게). 목표 상자는 받침 촬영 자세
                              # (렌즈가 블록 윗면 위 ~44 cm)에서 640×480 기준 약 103 × 34 px 라 상자 안에 크게 넣으면 테두리를 덮어서 아래에 한 줄로
-AXIS_IN_BOX = 0.8            # 받침 상자 안 축 화살표 길이 = 가운데에서 그 방향 가장자리까지의 이 배 — 화살 끝이 빨간 테에 묻히지 않게
-AXIS_PX = 25               # 받침 그림 상자 안 base +x · +y 방향 화살표 최대 길이(픽셀) — 받침 관측 자세는 사진이 돌아가 있어 'dx dy' 방향을 보여 준다
+AXIS_PX = 25               # 받침 그림 base +x · +y 방향 화살표 길이(픽셀) — 받침 관측 자세는 사진이 돌아가 있어 'dx dy' 방향을 보여 준다
+AXIS_GAP_PX = 6              # 받침 그림 축 화살표 묶음과 상자 · 글자 사이 여백(픽셀) — 붙어 보이지 않을 만큼만
 
 
 def _deg(a):
@@ -789,49 +789,80 @@ def spare_offset_text(measured, target):
 
 def spare_offset_big(measured, target):
     """받침 그림 TARGET 아래 큰 글자 한 줄: 'dx +2.1  dy -0.8 mm'(잰 − 목표 가운데, base_link x · y — spare_offset_text 와 같은 값.
-    축은 상자 안 화살표로 보여서 'base' 낱말은 뺀다). 바깥 영향 없음."""
+    축은 상자 위 화살표로 보여서 'base' 낱말은 뺀다). 바깥 영향 없음."""
     dx, dy = ((float(measured[k]) - float(target[k])) * 1000 for k in ('x_m', 'y_m'))
     return f'dx {dx:+.1f}  dy {dy:+.1f} mm'
 
 
 def _put_big_line(cv2, img, txt, cx, top):
     """img 에 큰 흰 글자(굵은 검은 테, OFFSET_SCALE) 한 줄을 가로 가운데 cx · 윗변 top(픽셀)에 그린다 — 영상 밖으로 나가지 않게
-    당긴다(아래가 모자라면 위로 올라가 상자와 겹칠 수 있음). 바깥 영향: img 를 고친다."""
+    당긴다(아래가 모자라면 위로 올라가 상자와 겹칠 수 있음). 반환: 그린 글자 상자 (x0, y0, x1, y1). 바깥 영향: img 를 고친다."""
     (w, h), base = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, OFFSET_SCALE, 6)
     x = min(max(int(cx - w / 2), 2), img.shape[1] - w - 2)
     y = min(max(int(top) + h, h + 2), img.shape[0] - base - 2)
     cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_SIMPLEX, OFFSET_SCALE, (0, 0, 0), 6)
     cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_SIMPLEX, OFFSET_SCALE, (255, 255, 255), 2)
+    return x, y - h, x + w, y + base
 
 
-def _ray_to_edge(poly, c, d):
-    """볼록 다각형 poly (N, 2) 안의 점 c 에서 단위 방향 d 로 가장자리까지 거리(픽셀). 못 만나면 inf. 바깥 영향 없음."""
-    best = np.inf
-    for k in range(len(poly)):
-        p, e = poly[k], poly[(k + 1) % len(poly)] - poly[k]
-        den = d[0] * e[1] - d[1] * e[0]
-        if abs(den) < 1e-9:
-            continue                             # 변과 나란한 방향
-        w = p - c
-        t, s = (w[0] * e[1] - w[1] * e[0]) / den, (w[0] * d[1] - w[1] * d[0]) / den
-        if t > 0 and 0 <= s <= 1:
-            best = min(best, t)
-    return best
+def _axes_glyph(cv2, dirs):
+    """base +x · +y 축 화살표 묶음을 원점 (0, 0) 기준으로 — ([(글자, 화살 끝, 글자 자리)], 묶음 상자 (x0, y0, x1, y1)) 픽셀.
+    화살 길이 AXIS_PX, 글자 '+x' · '+y' 는 화살 끝 너머(_put_label 아래 가운데 자리). 바깥 영향 없음."""
+    parts, xs, ys = [], [0.0], [0.0]
+    for d, name in zip(dirs, ('+x', '+y')):
+        tip = AXIS_PX * np.asarray(d, float)
+        org = tip + 6 * np.asarray(d, float) + (0.0, 4.0)
+        (w, h), base = cv2.getTextSize(name, cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, 3)
+        xs += [tip[0], org[0] - w / 2, org[0] + w / 2]
+        ys += [tip[1], org[1] - h, org[1] + base]
+        parts.append((name, tip, org))
+    return parts, (min(xs), min(ys), max(xs), max(ys))
 
 
-def _put_axes_in_box(cv2, img, px, dirs):
-    """base +x · +y 방향 화살표를 목표 상자 px (4, 2) 가운데에서 상자 안으로 그린다(10/15 PL '나' — 잰 블록이 축에서 얼마나 틀어졌는지
-    상자 안에서 바로 보이게). 길이 = 그 방향 가장자리까지의 AXIS_IN_BOX 배(AXIS_PX 넘지 않게 — 받침 상자 짧은 변 쪽은 ~14 px).
-    'x' · 'y' 글자는 화살 끝 옆, 다른 화살표 반대쪽에(둘이 겹치지 않게). 흰 선 아래 검은 테(나무색 블록 위에서도 보이게).
-    입력: dirs = base_axes_px 결과(단위 벡터 2개). 바깥 영향: img 를 고친다."""
-    c = px.mean(axis=0)
-    for i, (d, name) in enumerate(zip(dirs, ('x', 'y'))):
-        tip = c + min(AXIS_PX, AXIS_IN_BOX * _ray_to_edge(px, c, d)) * d
-        a, b = (int(round(c[0])), int(round(c[1]))), (int(round(tip[0])), int(round(tip[1])))
-        cv2.arrowedLine(img, a, b, (0, 0, 0), 3, tipLength=0.35)
-        cv2.arrowedLine(img, a, b, (255, 255, 255), 1, tipLength=0.35)
-        side = -dirs[1 - i]
-        _put_label(cv2, img, name, (tip[0] + 7 * side[0], tip[1] + 7 * side[1] + 4), center=True)
+def _axes_spot(size, ext, box, avoid):
+    """축 화살표 묶음의 원점 (x, y) 픽셀 — 목표 상자 위(상자 밖, 가로 가운데) → 위가 모자라면(상자가 그림 위 끝 근처) 상자 오른쪽 →
+    왼쪽 → 다 안 되면 None(부르는 쪽이 왼쪽 위 구석 — 옛 자리). 10/15 PL: 상자 안 가운데는 보기 안 좋았다.
+    입력: size = (W, H) · ext = _axes_glyph 묶음 상자(원점 기준) · box = 목표 상자 (x0, y0, x1, y1) · avoid = 피할 상자들
+    (목표 · 잰 블록 테두리 · 그린 글자). 조건: 묶음이 영상 안(2 px 여유)이고 avoid 어느 것과도 안 겹침. 바깥 영향 없음."""
+    W, H = size
+    ex0, ey0, ex1, ey1 = ext
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+
+    def fits(o):
+        g = (o[0] + ex0, o[1] + ey0, o[0] + ex1, o[1] + ey1)
+        return g[0] >= 2 and g[1] >= 2 and g[2] <= W - 2 and g[3] <= H - 2 and not any(_overlaps(g, a) for a in avoid)
+
+    def pushed(o, step):                         # 옆자리: 겹치는 것의 바깥 변까지 밀어 가며 다시 본다(글자가 상자보다 넓을 수 있음)
+        for _ in range(len(avoid) + 1):
+            g = (o[0] + ex0, o[1] + ey0, o[0] + ex1, o[1] + ey1)
+            hit = [a for a in avoid if _overlaps(g, a)]
+            if not hit:
+                return o
+            o = ((max(a[2] for a in hit) + AXIS_GAP_PX - ex0) if step > 0 else (min(a[0] for a in hit) - AXIS_GAP_PX - ex1), o[1])
+        return o
+
+    def inside(v, lo, hi, n):                    # 가운데 맞춘 자리를 영상 안(2 px 여유)으로 당김 — 상자가 구석에 붙어도 옆 · 위 자리를 살림
+        return min(max(v, 2 - lo), n - 2 - hi)
+
+    half = (ex1 - ex0) / 2                       # 위 자리는 상자 · 잰 블록 · 그 글자(윗변이 상자 아랫변보다 위인 것) 중 가장 위보다 더 위
+    top = min([box[1]] + [a[1] for a in avoid if a[1] <= box[3] and a[0] < cx + half and a[2] > cx - half])
+    side_y = inside(cy - (ey0 + ey1) / 2, ey0, ey1, H)
+    tries = [(inside(cx - (ex0 + ex1) / 2, ex0, ex1, W), top - AXIS_GAP_PX - ey1),
+             pushed((box[2] + AXIS_GAP_PX - ex0, side_y), +1),
+             pushed((box[0] - AXIS_GAP_PX - ex1, side_y), -1)]
+    return next((o for o in tries if fits(o)), None)
+
+
+def _put_axes(cv2, img, origin, parts):
+    """_axes_glyph 묶음을 origin(픽셀)에 그린다 — 흰 화살표 아래 검은 테(나무색 블록 · 어두운 바닥 위에서도 보이게) + '+x' · '+y'.
+    바깥 영향: img 를 고친다."""
+    o = np.asarray(origin, float)
+    a = (int(round(o[0])), int(round(o[1])))
+    for name, tip, org in parts:
+        b = (int(round(o[0] + tip[0])), int(round(o[1] + tip[1])))
+        cv2.arrowedLine(img, a, b, (0, 0, 0), 3, tipLength=0.3)
+        cv2.arrowedLine(img, a, b, (255, 255, 255), 1, tipLength=0.3)
+        _put_label(cv2, img, name, (o[0] + org[0], o[1] + org[1]), center=True)
 
 
 def _label_box(cv2, img, txt, org, center=False):
@@ -970,13 +1001,14 @@ def draw_spare(color, measured, target, intr, T_base2cam, block_actual_m):
           block_actual_m = [길이, 폭, 두께] m. 출력: 같은 크기 BGR 새 그림(입력은 그대로).
     그림: 목표 상자(빨강, 4 px)를 먼저, 잰 블록(초록, 2 px)을 위에 — 딱 맞으면 초록 선 양옆에 빨간 테가 보인다.
     글자: 목표 'TARGET'은 상자 아래 · 잰 블록 spare_label('SPARE FLAT dyaw +1')은 사각형 위(테두리를 가리지 않게).
-          둘 다 있으면 목표 상자 가운데에서 상자 안으로 base +x · +y 방향 화살표('x' · 'y' — 잰 블록이 축에서 얼마나 틀어졌는지 보이게) +
-          TARGET 아래에 큰 한 줄 spare_offset_big('dx +2.1  dy -0.8 mm', 10/15 PL '나')
+          둘 다 있으면 TARGET 아래에 큰 한 줄 spare_offset_big('dx +2.1  dy -0.8 mm', 10/15 PL '나') + base +x · +y 방향 화살표를
+          목표 상자 위(상자 밖 — 잰 블록 글자보다 위) · 위가 모자라면 상자 오른쪽 → 왼쪽 → 왼쪽 위 구석(_axes_spot, 10/15 PL)
           (받침 관측 자세는 사진이 돌아가 있어 base +x 가 사진 위쪽으로 보인다 — 숫자를 사진 가로 · 세로로 읽지 않게 화살표로).
     카메라 뒤로 가는 사각형은 그리지 않는다. 바깥 영향 없음. 실패: cv2 가 없으면 ImportError."""
     import cv2
     img = np.ascontiguousarray(color).copy()
     target_px = target_label = None
+    avoid = []                                   # 그린 테두리 · 글자 상자 — 축 화살표가 피할 곳
     for b, bgr, thick, below in ((target, TARGET_BGR, 4, True), (measured, OVERLAP_BGR['none'], 2, False)):
         if b is None:
             continue
@@ -984,20 +1016,25 @@ def draw_spare(color, measured, target, intr, T_base2cam, block_actual_m):
         if px is None:
             continue
         cv2.polylines(img, [np.round(px).astype(np.int32)], True, bgr, thick)
+        avoid.append((px[:, 0].min() - thick, px[:, 1].min() - thick, px[:, 0].max() + thick, px[:, 1].max() + thick))
         cu, cv = px.mean(axis=0)
         cv2.drawMarker(img, (int(round(cu)), int(round(cv))), bgr, cv2.MARKER_CROSS, 12 if below else 8, 1)
         if below:
             (_, h), _ = cv2.getTextSize('TARGET', cv2.FONT_HERSHEY_SIMPLEX, LABEL_SCALE, 3)
             target_px, target_label = px, _put_label(cv2, img, 'TARGET', (cu, px[:, 1].max() + h + 6), center=True)
+            avoid.append(target_label)
         else:
-            _put_label(cv2, img, spare_label(b, target), (cu, px[:, 1].min() - 6), center=True)
+            avoid.append(_put_label(cv2, img, spare_label(b, target), (cu, px[:, 1].min() - 6), center=True))
     if measured is not None and target_px is not None:
-        dirs = base_axes_px(target, intr, T_base2cam)
-        if dirs is not None:
-            _put_axes_in_box(cv2, img, target_px, dirs)
         # 어긋난 거리는 TARGET 글자 바로 아래에 크게 한 줄(10/15 PL '나' — 왼쪽 위 작은 글자는 안 읽혔다. 목표 상자는 받침 촬영 자세에서
         # ~103 × 34 px 라 상자 안에 크게 넣으면 빨강 · 초록 테두리를 덮어서 아래로)
-        _put_big_line(cv2, img, spare_offset_big(measured, target), target_px[:, 0].mean(), target_label[3] + 4)
+        avoid.append(_put_big_line(cv2, img, spare_offset_big(measured, target), target_px[:, 0].mean(), target_label[3] + 4))
+        dirs = base_axes_px(target, intr, T_base2cam)
+        if dirs is not None:                     # 축은 상자 위(상자 밖) → 모자라면 옆 → 다 막히면 왼쪽 위 구석(10/15 PL — 상자 안은 보기 안 좋았다)
+            parts, ext = _axes_glyph(cv2, dirs)
+            box = (target_px[:, 0].min(), target_px[:, 1].min(), target_px[:, 0].max(), target_px[:, 1].max())
+            spot = _axes_spot((img.shape[1], img.shape[0]), ext, box, avoid)
+            _put_axes(cv2, img, spot if spot is not None else (34.0, 66.0), parts)
     return img
 
 

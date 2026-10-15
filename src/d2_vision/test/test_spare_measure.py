@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import yaml
 
-from d2_vision.block_finder import (OFFSET_SCALE, TARGET_BGR, _ray_to_edge, base_axes_px, draw_spare, project_to_image, spare_label,
+from d2_vision.block_finder import (AXIS_GAP_PX, OFFSET_SCALE, TARGET_BGR, _axes_spot, base_axes_px, draw_spare, project_to_image, spare_label,
                                     spare_offset_big, spare_offset_text, top_face_corners)
 from d2_vision.spare_measure import OPEN_GAP_MM, ideal_spare_block, measure_on_spare
 
@@ -159,9 +159,9 @@ def test_spare_texts_dyaw_and_base_offset():
     assert spare_offset_big(meas, target) == 'dx +2.1  dy -0.8 mm'
 
 
-def test_draw_spare_offset_below_target_and_axes_inside_box():
-    """10/15 PL '나': 어긋난 거리는 TARGET 아래 큰 한 줄(왼쪽 위 작은 글자 · 화살표는 없앰), base x · y 화살표는 목표 상자 안 —
-    잰 블록이 축에서 얼마나 틀어졌는지 상자 안에서 보이게."""
+def test_draw_spare_offset_below_target_and_axes_above_box():
+    """10/15 PL: 어긋난 거리는 TARGET 아래 큰 한 줄(왼쪽 위 작은 글자는 없앰), base x · y 화살표는 목표 상자 위(상자 밖 — 상자 안
+    가운데는 보기 안 좋았다). 상자 안에는 흰 것(화살표 · 글자)이 없다."""
     cv2 = pytest.importorskip('cv2')
     color = np.full((480, 640, 3), 90, np.uint8)
     target = ideal_spare_block(SPOT, SIZE)
@@ -172,20 +172,29 @@ def test_draw_spare_offset_below_target_and_axes_inside_box():
     box = project_to_image(top_face_corners(target, SIZE), DRAW_INTR, DRAW_T)
     inside = np.zeros(white.shape, np.uint8)
     cv2.fillConvexPoly(inside, np.round(box).astype(np.int32), 1)
-    assert (white & inside.astype(bool)).any()                              # 상자 안 흰 화살표 · 'x' 'y'
+    assert not (white & inside.astype(bool)).any()                          # 상자 안은 비었다
+    cu, top = int(box[:, 0].mean()), int(box[:, 1].min())
+    assert white[:top - 26, cu - 60:cu + 60].any()                          # 잰 블록 글자(상자 위 ~18 px)보다 더 위에 화살표
     vs, us = np.nonzero(white & (np.arange(480)[:, None] > box[:, 1].max() + 20))   # TARGET 글자보다 아래
     (tw, _), _ = cv2.getTextSize(spare_offset_big(meas, target), cv2.FONT_HERSHEY_SIMPLEX, OFFSET_SCALE, 6)
     assert len(us) and us.max() - us.min() + 1 >= 0.8 * tw                  # 큰 한 줄이 거의 다 그려짐
     assert abs((us.min() + us.max()) / 2 - box[:, 0].mean()) <= 6           # 상자와 가로 가운데가 같다(글자 모양 치우침 몇 px)
 
 
-def test_ray_to_edge_in_box():
-    """상자 가운데에서 방향 따라 가장자리까지 거리 — 축 화살표 길이(상자 안에 들게)."""
-    sq = np.array([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
-    c = np.array([5.0, 5.0])
-    assert _ray_to_edge(sq, c, np.array([1.0, 0.0])) == pytest.approx(5.0)
-    assert _ray_to_edge(sq, c, np.array([0.0, -1.0])) == pytest.approx(5.0)
-    assert _ray_to_edge(sq, c, np.array([1.0, 1.0]) / np.sqrt(2)) == pytest.approx(5.0 * np.sqrt(2))
+def test_axes_spot_above_then_side_then_none():
+    """축 화살표 자리: 상자 위(상자 밖, 가로 가운데) → 상자가 그림 위 끝에 붙어 위가 모자라면 오른쪽 → 왼쪽 → 다 막히면 None(왼쪽 위 구석)."""
+    ext = (-10.0, -40.0, 30.0, 5.0)                                         # 묶음 상자(원점 기준) — +x 위 · +y 오른쪽 꼴
+    g = lambda o: (o[0] + ext[0], o[1] + ext[1], o[0] + ext[2], o[1] + ext[3])
+    mid = (300.0, 200.0, 400.0, 234.0)
+    o = _axes_spot((640, 480), ext, mid, [mid, (290.0, 180.0, 410.0, 195.0)])   # 상자 + 그 위 글자
+    assert g(o)[3] <= 180.0 - AXIS_GAP_PX + 1e-9 and abs((g(o)[0] + g(o)[2]) / 2 - 350.0) < 1e-9
+    top = (300.0, 4.0, 400.0, 38.0)
+    o = _axes_spot((640, 480), ext, top, [top])
+    assert g(o)[0] >= 400.0 + AXIS_GAP_PX - 1e-9                            # 위가 모자라 오른쪽
+    right = (560.0, 4.0, 636.0, 38.0)
+    o = _axes_spot((640, 480), ext, right, [right])
+    assert g(o)[2] <= 560.0 - AXIS_GAP_PX + 1e-9                            # 오른쪽도 모자라 왼쪽
+    assert _axes_spot((640, 480), ext, mid, [(0.0, 0.0, 640.0, 480.0)]) is None
 
 
 def test_base_axes_px_follows_camera_rotation():
