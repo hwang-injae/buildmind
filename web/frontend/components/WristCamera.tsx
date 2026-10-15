@@ -119,6 +119,7 @@ export default function WristCamera({ robot }: { robot: Robot }) {
             <span><i style={{ borderColor: '#ff0000' }} />맞춰야 할 자리</span>
             <span><i style={{ borderColor: '#00c800' }} />잰 블록</span>
             <span><b>dx dy</b> = 어긋난 거리(mm, 상자 위 화살표 <b>+x</b> · <b>+y</b> 방향) · <b>dyaw</b> = 틀어진 각도</span>
+            <span>세운 블록(<b>SPARE STAND</b> · <b>EDGE</b>)은 그 블록 테두리만</span>
           </div>
           <div className="cam-legend">
             <b>작업대</b>
