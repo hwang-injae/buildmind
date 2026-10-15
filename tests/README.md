@@ -19,6 +19,8 @@
 | `test_claude_bridge.py` | 설계 AI 중계 `web/claude_bridge.py`(10/13 E-99) — `claude` 실행 없이 가짜 실행 함수로 요청 → `claude` 인자 · 응답 모양, 진짜 `design_gen`을 붙여 도구 읽기 → 후보 → 검사까지 |
 | `test_scan_recommend.py` | 스캔 '추천 설계'(`DesignStore.match_scan`, E-97)가 비전 일치율(V-48 `match_rate`)과 같게 고름 |
 | `test_mqtt_access.py` | `tools/mqtt_access.sh` 방화벽 규칙 만들기 · 확인(웹 PC 브로커를 로봇 PC만 받게, #136) — 가짜 iptables로, 실제 차단은 실기 확인 |
+| `test_voice.py` | 웹 PC 음성 `web/backend/voice.py`(E-105 · E-118) — 마이크 · 시동어 모델 · OpenAI · 브로커 없이 가짜 부품으로 듣기 순서와 보낼 MQTT 내용(`d2/hmi/intent` · 정지 낱말이면 `d2/safety/stop/req`)을 본다 |
+| `test_design_store_pg.py` | PostgreSQL 저장소 `PgDesignStore`(W088)가 JSON 폴더 저장소와 같은 모양으로 돌려줌 — 레시피 지문 그대로 · 같은 ID 409 · 다음 번호 · `save_build` 한 번만 · DB 끊김 = 일시 실패. **시험 DB가 있을 때만**(`D2_TEST_DATABASE_URL` — 표를 비우므로 시연 DB에 쓰지 않음), 없으면 건너뜀(CI) |
 | `test_w144_recorder.py` | `tools/w144_capture/placement_recorder.py` — 배치 뒤 observe 촬영을 더하는 것만(이동 · 촬영은 가짜, 실기 확인 아님) |
 
 `conftest.py` 가 저장소 루트(`ROOT`)·`robot.yaml`(`robot_cfg`)·`pr_check.py`(`pr_check_mod`)·저장소 파일 목록(`repo_files`)을 fixture 로 준다. `src/d2_robot/d2_motion` 을 `sys.path` 에 넣어 `d2_motion.motion_math` 를 ROS 없이 import 한다.

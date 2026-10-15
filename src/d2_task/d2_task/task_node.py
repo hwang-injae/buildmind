@@ -536,7 +536,9 @@ class TaskNode(Node):
             done = bool(completed) and bool(rec.rows) and all(r['captured'] for r in rec.rows)
             if tr is not None:
                 tr.event('run_end', completed=done, placed=len(rec.rows), captured=sum(r['captured'] for r in rec.rows))
-                bag_ok = tr.stop_bag('' if completed else '조립이 끝나지 않고 멈춤(정지 · 오류 · Ctrl+C)')
+                # 멈춘 판도 bag 자체가 정상으로 닫혔으면 complete 로 두어 초당 2장 줄이기를 돌린다(10/15 박진용 — 전엔 멈춘 판은 줄이지 않아
+                # 원본이 그대로 남았다). 조립이 끝났는지는 위 run_end completed 와 아래 ZIP 이름(done)에 남는다
+                bag_ok = tr.stop_bag('')
                 done = done and bag_ok
                 self.get_logger().info(f'[W144] bag {tr.manifest["bag"].get("status")}: {tr.bag_dir}')
                 if tr.start_reduce():          # 정상 bag 만 — 초당 2장 · 색 PNG 로 줄인 뒤 원본을 지운다(따로 도는 프로세스)
