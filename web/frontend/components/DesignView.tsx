@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as api from '@/lib/api';
 import type { DesignPart, CmdResult, Design, Rules } from '@/lib/types';
-import { gripperOpening, holdingBlock, type Robot } from '@/lib/ws';
+import { gripperOpening, holdingBlock, liveProgress, type Robot } from '@/lib/ws';
 import { MADE_KO, ROLE, designName, rejectText, roleOf, setDisplayName, stateName } from '@/lib/names';
 import DesignTree from './DesignTree';
 import Preview3D, { type Item3D } from './Preview3D';
@@ -105,7 +105,7 @@ export default function DesignView({ robot, viewId, rules, dark, onPick, onLog, 
   const items: Item3D[] = useMemo(() => {
     if (!design) return [];
     const idBySeq = new Map((design.placements?.steps ?? []).map((s) => [s.sequence, s.part_id]));
-    const prog = running && robot.progress?.run_id === st?.run_id ? robot.progress : null;
+    const prog = running ? liveProgress(robot) : null;
     const stateById = new Map((prog?.parts ?? []).map((b) => [b.part_id, b.state]));
     if (!running) return roleItems(design.parts.parts);
     return design.parts.parts.map((b) => {

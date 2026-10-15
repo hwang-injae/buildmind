@@ -21,6 +21,7 @@ STATE_TOPICS = {            # MQTT 상태 토픽(retained) → /ws 이벤트 typ
     'd2/safety/state': 'safety',
     'd2/gripper/state': 'gripper',
 }
+PROGRESS_TOPIC = 'd2/task/progress'   # 지난 조립 것이면 웹이 retained 를 비운다(_progress_stale) — 다리는 로봇 → 웹 한 방향이라 ROS 로 안 감
 INTENT_TOPIC = 'd2/hmi/intent'
 VOICE_LISTEN_TOPIC = 'd2/hmi/voice/listen'   # 화면 마이크 버튼 → voice.py(웹 PC 안에서만 — 다리 안 거침, 10/13 PL). retained 아님
 # 바이트 토픽(JSON 아님 · retained 아님 — IRD 10.1 · 10.5) → (/ws 이벤트 type, 구독 QoS). 마지막 한 장만 들고 화면에는 번호만 알린다
@@ -202,7 +203,7 @@ class MqttClient:
             return
         try:
             if msg.topic in STATE_TOPICS:
-                self._on_state(STATE_TOPICS[msg.topic], json.loads(msg.payload))
+                self._on_state(STATE_TOPICS[msg.topic], json.loads(msg.payload), retained=bool(msg.retain))
             elif msg.topic == BRIDGE_ALIVE_TOPIC:
                 self._on_bridge_alive(json.loads(msg.payload))
             elif msg.topic == INTENT_TOPIC:
@@ -217,8 +218,11 @@ class MqttClient:
         except (ValueError, KeyError, TypeError):
             pass
 
-    def _on_state(self, kind, data):
-        """상태 JSON 을 들고 있고 화면에 알린다. 객체가 아니면 버린다(판단 · 고치기 없음)."""
+    def _on_state(self, kind, data, retained=False):
+        """상태 JSON 을 들고 있고 화면에 알린다. 객체가 아니면 버린다(판단 · 고치기 없음).
+        retained = 브로커에 남아 있던 값(붙을 때 받음). 들고 있는 진행표가 지난 조립 것이면(_progress_stale) 브로커의 retained 진행표를
+        빈 payload 로 지우고 들고 있던 값도 버린 뒤 화면에 progress null 을 알린다(10/15 PL '가++' — 한세교: task · 다리를 다시 켜도
+        옛 진행표가 남았다. 다시 켠 task 는 설계가 없어 진행표를 안 보낸다). 브로커가 끊겼으면 retained 는 못 지우고 들고 있던 값만 버린다."""
         if not isinstance(data, dict):
             return
         with self._lock:
@@ -229,12 +233,31 @@ class MqttClient:
                 for k in SCAN_BLOBS:
                     self._blobs.pop(k, None)
                     self.state.pop(k, None)
-        self._emit(kind, data)
+            stale = self._progress_stale(kind, retained)
+            if stale:
+                self.state.pop('progress', None)
+        if not (stale and kind == 'progress'):     # 지금 받은 것이 지난 진행표면 화면에 한 번도 내지 않는다
+            self._emit(kind, data)
+        if stale:
+            if self.client.is_connected():
+                self.client.publish(PROGRESS_TOPIC, b'', qos=1, retain=True)
+            self._emit('progress', None)
+
+    def _progress_stale(self, kind, retained):
+        """(잠금 안) 들고 있는 진행표가 지난 조립 것인가 — 들고 있는 state 의 run_id 가 비었는데(새로 켠 task · IDLE · 설계만 고른 READY)
+        진행표에는 run_id 가 있을 때. 판단은 state 가 왔을 때와 브로커에 남아 있던(retained) 진행표가 왔을 때만 한다 — 살아 있는 task 가
+        막 보낸 진행표는 새 출발 때 새 run_id 의 state 보다 먼저 닿을 수 있어 건드리지 않는다. state 를 아직 모르면 판단하지 않는다.
+        DONE · 정지 뒤 다시 시작은 state 에 run_id 가 남아 있어 그대로 둔다."""
+        if kind != 'state' and not (kind == 'progress' and retained):
+            return False
+        st, pr = self.state.get('state'), self.state.get('progress')
+        return st is not None and pr is not None and not st.get('run_id') and bool(pr.get('run_id'))
 
     def _on_blob(self, kind, data):
         """바이트를 마지막 하나만 들고 {"seq", "stamp", "bytes"} 를 알린다(내용은 GET /api/robot/… — /ws 를 무겁게 하지 않게).
 
         스캔 사진 · 점군에는 run_id(직전 scan_result 의 것 — 다리가 scan_result 바로 뒤에 보냄)를 붙여 화면이 다른 스캔 것과 섞지 않게 한다.
+        손목 그림에는 받을 때 들고 있던 state 의 run_id(없으면 null)를 붙인다 — 화면이 지금 조립과 다른 그림을 흐리게(10/15 PL '가++').
         """
         with self._lock:
             seq = self._blob_seq.get(kind, 0) + 1
@@ -242,6 +265,8 @@ class MqttClient:
             info = {'seq': seq, 'stamp': round(time.time(), 3), 'bytes': len(data)}   # stamp = 웹 PC 가 받은 시각('몇 초 전' 표시용)
             if kind in SCAN_BLOBS:
                 info['run_id'] = self._scan_run
+            elif kind == 'wrist_image':
+                info['run_id'] = (self.state.get('state') or {}).get('run_id')
             self.state[kind] = info
         self._emit(kind, info)
 

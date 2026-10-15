@@ -88,13 +88,13 @@ export interface Intent {
 export type WsEvent =
   | { type: 'state'; data: TaskState }
   | { type: 'safety'; data: SafetyState }
-  | { type: 'progress'; data: Progress }
+  | { type: 'progress'; data: Progress | null } // null = backend 가 지난 조립 진행표를 지움(10/15 PL '가++')
   | { type: 'gripper'; data: GripperState }
   | { type: 'scan_result'; data: ScanResult }
   | { type: 'intent'; data: Intent }
   | { type: 'bridge_alive'; data: { alive: boolean } }
   | { type: 'broker'; data: { connected: boolean } }
-  | { type: 'wrist_image'; data: { seq: number; stamp: number } }
+  | { type: 'wrist_image'; data: { seq: number; stamp: number; run_id?: string | null } } // run_id = backend 가 받을 때의 state run_id
   | { type: 'scan_image' | 'scan_cloud'; data: BlobInfo }
   | { type: 'scan_preview'; data: ScanPreview }
   | { type: 'timing'; data: { req_timeout_s: number } }

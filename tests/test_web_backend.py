@@ -39,9 +39,10 @@ class FakePaho:
         return self.up
 
     def publish(self, topic, payload, qos=0, retain=False):
-        self.sent.append((topic, json.loads(payload), retain))
+        body = json.loads(payload) if payload else None     # 빈 payload = retained 지우기(None 으로 남김)
+        self.sent.append((topic, body, retain))
         if self.on_publish_hook:
-            self.on_publish_hook(topic, json.loads(payload))
+            self.on_publish_hook(topic, body)
         return SimpleNamespace(rc=0, wait_for_publish=lambda *_: None)
 
     def subscribe(self, topics):
@@ -155,7 +156,60 @@ def test_wrist_image_kept_as_bytes_and_only_seq_announced(mc):
     assert mc.blob('wrist_image') == b'\xff\xd8jpeg-2'
     seqs = [e['data']['seq'] for e in mc.events if e['type'] == 'wrist_image']
     assert seqs == [1, 2] and mc.snapshot()['wrist_image']['seq'] == 2
-    assert 'run_id' not in mc.snapshot()['wrist_image']        # 손목 그림은 스캔과 짝짓지 않는다
+    assert mc.snapshot()['wrist_image']['run_id'] is None      # 스캔과 짝짓지 않고 받을 때의 state run_id — state 를 모르면 null
+
+
+def test_wrist_image_tagged_with_state_run_id_at_receipt(mc):
+    """10/15 PL '가++': 손목 그림에 받을 때 들고 있던 state 의 run_id 를 붙인다 — 화면이 지금 조립과 다른 그림을 흐리게."""
+    mc._on_message(mc.client, None, msg('d2/task/state', {'schema': 'state/2', 'state': 'PICK', 'run_id': 'R1'}))
+    mc._on_message(mc.client, None, msg('d2/vision/wrist_image', b'\xff\xd8jpeg-1'))
+    mc._on_message(mc.client, None, msg('d2/task/state', {'schema': 'state/2', 'state': 'IDLE', 'run_id': None}))
+    assert mc.snapshot()['wrist_image']['run_id'] == 'R1'        # 뒤에 state 가 바뀌어도 받을 때 값 그대로
+    mc._on_message(mc.client, None, msg('d2/vision/wrist_image', b'\xff\xd8jpeg-2'))
+    assert mc.snapshot()['wrist_image']['run_id'] is None
+
+
+def progress(run_id, parts=1):
+    """progress/2.0 흉내 — 부품 parts 개."""
+    return {'schema': 'progress/2.0', 'design_id': '002_CHAIR_BACK_V000', 'run_id': run_id,
+            'parts': [{'part_id': f'P{i}', 'state': 'present'} for i in range(parts)]}
+
+
+def test_stale_progress_cleared_when_task_restarts(mc):
+    """10/15 PL '가++'(한세교): task · 다리를 다시 켜면 state 는 run_id 없는 IDLE 인데 들고 있던 진행표는 지난 조립 것 →
+    브로커 retained 진행표를 빈 payload 로 지우고 들고 있던 값도 버린 뒤 화면에 progress null."""
+    mc._on_message(mc.client, None, msg('d2/task/state', {'schema': 'state/2', 'state': 'PLACE', 'run_id': 'R1'}))
+    mc._on_message(mc.client, None, msg('d2/task/progress', progress('R1', 4)))
+    mc.events.clear()
+    mc._on_message(mc.client, None, msg('d2/task/state', {'schema': 'state/2', 'state': 'IDLE', 'run_id': None}))
+    assert mc.client.sent == [('d2/task/progress', None, True)]  # 빈 retained = 브로커가 지움
+    assert 'progress' not in mc.snapshot()
+    assert mc.events[-1] == {'type': 'progress', 'data': None}
+
+
+def test_retained_old_progress_dropped_on_backend_start(mc):
+    """backend 가 붙을 때 브로커에 남아 있던(retained) 진행표가 run_id 없는 state 와 다르면 화면에 한 번도 내지 않고 지운다."""
+    mc._on_message(mc.client, None, msg('d2/task/state', {'schema': 'state/2', 'state': 'IDLE', 'run_id': None}, retain=True))
+    mc._on_message(mc.client, None, msg('d2/task/progress', progress('R1'), retain=True))
+    assert mc.client.sent == [('d2/task/progress', None, True)] and 'progress' not in mc.snapshot()
+    assert [e['data'] for e in mc.events if e['type'] == 'progress'] == [None]
+
+
+def test_live_or_same_run_progress_kept(mc):
+    """지우지 않는 경우: ① 살아 있는 task 가 막 보낸 진행표(새 출발 때 새 run_id state 보다 먼저 닿을 수 있음) ② 같은 run_id(조립 중 ·
+    DONE · 정지 뒤 다시 시작) ③ state 를 아직 모름 ④ 브로커가 끊겼으면 retained 는 못 지우고 들고 있던 값만 버림."""
+    mc._on_message(mc.client, None, msg('d2/task/progress', progress('R0'), retain=True))          # ③
+    mc._on_message(mc.client, None, msg('d2/task/state', {'schema': 'state/2', 'state': 'DONE', 'run_id': 'R0'}))   # ②
+    mc._on_message(mc.client, None, msg('d2/task/state', {'schema': 'state/2', 'state': 'STOPPED', 'run_id': 'R0'}))
+    assert mc.client.sent == [] and mc.snapshot()['progress']['run_id'] == 'R0'
+    mc.client.up = False
+    mc._on_message(mc.client, None, msg('d2/task/state', {'schema': 'state/2', 'state': 'READY', 'run_id': None}))   # ④
+    assert mc.client.sent == [] and 'progress' not in mc.snapshot()
+    mc.client.up = True
+    mc._on_message(mc.client, None, msg('d2/task/progress', progress('R2')))                        # ① 살아 있는 새 진행표
+    assert mc.client.sent == [] and mc.snapshot()['progress']['run_id'] == 'R2'
+    mc._on_message(mc.client, None, msg('d2/task/state', {'schema': 'state/2', 'state': 'CHECK', 'run_id': 'R2'}))
+    assert mc.client.sent == [] and mc.snapshot()['progress']['run_id'] == 'R2'
 
 
 def test_scan_image_cloud_paired_with_scan_result_and_cleared_on_new_scan(mc):
