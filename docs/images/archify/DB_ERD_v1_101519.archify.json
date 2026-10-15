@@ -1,0 +1,318 @@
+{
+ "schema_version": 1,
+ "diagram_type": "erd",
+ "meta": {
+  "title": "BuildMind DB ERD — PostgreSQL 16(컨테이너 db)",
+  "locale": "ko",
+  "output": "발표/archify/erd-d2-db-20261015-184922/d2-db.html",
+  "quality_profile": "showcase"
+ },
+ "layout": {
+  "mode": "grid",
+  "gapX": 80,
+  "gapY": 44
+ },
+ "entities": [
+  {
+   "id": "designs",
+   "label": "designs",
+   "sublabel": "설계 — 한 줄 = 설계 1개 · 저장 뒤 안 바뀜",
+   "tag": "설계",
+   "row": 0,
+   "col": 0,
+   "width": 350,
+   "attributes": [
+    {
+     "name": "design_id",
+     "type": "text — <Template>_V<3자리>",
+     "key": "pk"
+    },
+    {
+     "name": "template_id",
+     "type": "text 생성 — design_id 앞부분"
+    },
+    {
+     "name": "family",
+     "type": "text 생성 — chair · desk"
+    },
+    {
+     "name": "version",
+     "type": "text 생성 — V000 …"
+    },
+    {
+     "name": "parent_id",
+     "type": "text — 부모 설계(CAD 기본만 비움)",
+     "key": "fk",
+     "references": "designs.design_id"
+    },
+    {
+     "name": "made_by",
+     "type": "text — cad · web · voice · scan"
+    },
+    {
+     "name": "prompt",
+     "type": "text — 요청 글"
+    },
+    {
+     "name": "check_result",
+     "type": "jsonb — 검사 결과"
+    },
+    {
+     "name": "parts",
+     "type": "jsonb — parts/4.0 설계도"
+    },
+    {
+     "name": "recipe",
+     "type": "json — recipe/4.0 글자 그대로"
+    },
+    {
+     "name": "placements",
+     "type": "jsonb — placements/4.0"
+    },
+    {
+     "name": "ai_template",
+     "type": "text — 스캔 AI가 고른 Template"
+    },
+    {
+     "name": "ai_reason",
+     "type": "text — 고른 까닭"
+    },
+    {
+     "name": "template_changed",
+     "type": "boolean 생성 — Template 바뀜"
+    },
+    {
+     "name": "schema",
+     "type": "text — design/4.0"
+    },
+    {
+     "name": "created",
+     "type": "timestamptz — 저장 시각"
+    },
+    {
+     "name": "display_name",
+     "type": "text — 화면 이름 1 ~ 40자"
+    }
+   ]
+  },
+  {
+   "id": "templates",
+   "label": "templates (보기)",
+   "sublabel": "designs 중 version = V000",
+   "tag": "설계",
+   "row": 1,
+   "col": 0,
+   "width": 350,
+   "attributes": [
+    {
+     "name": "template_id",
+     "type": "text"
+    },
+    {
+     "name": "family",
+     "type": "text"
+    },
+    {
+     "name": "design_id",
+     "type": "text — V000 설계"
+    },
+    {
+     "name": "base_recipe",
+     "type": "json — 기본 설계 레시피"
+    },
+    {
+     "name": "template",
+     "type": "json — Template 규칙"
+    }
+   ]
+  },
+  {
+   "id": "builds",
+   "label": "builds",
+   "sublabel": "조립 기록 — 한 줄 = 조립 1번",
+   "tag": "조립 기록",
+   "row": 0,
+   "col": 1,
+   "width": 320,
+   "attributes": [
+    {
+     "name": "run_id",
+     "type": "text — R<날짜>_<시각>_<4자리>",
+     "key": "pk"
+    },
+    {
+     "name": "design_id",
+     "type": "text — 조립한 설계",
+     "key": "fk",
+     "references": "designs.design_id"
+    },
+    {
+     "name": "result",
+     "type": "text — DONE · STOPPED · ERROR"
+    },
+    {
+     "name": "placed",
+     "type": "integer — 놓은 블록"
+    },
+    {
+     "name": "total",
+     "type": "integer — 전체 블록"
+    },
+    {
+     "name": "duration_s",
+     "type": "real — 걸린 시간"
+    },
+    {
+     "name": "stop_count",
+     "type": "integer — 정지 횟수"
+    },
+    {
+     "name": "part_errors",
+     "type": "jsonb — 블록마다 dx · dy · dz"
+    },
+    {
+     "name": "schema",
+     "type": "text — build/2"
+    },
+    {
+     "name": "saved",
+     "type": "timestamptz — 저장 시각"
+    }
+   ]
+  },
+  {
+   "id": "gen_logs",
+   "label": "gen_logs",
+   "sublabel": "AI 호출 기록 — 한 줄 = 호출 1번",
+   "tag": "AI 기록",
+   "row": 0,
+   "col": 2,
+   "width": 330,
+   "attributes": [
+    {
+     "name": "id",
+     "type": "bigint — 자동 번호",
+     "key": "pk"
+    },
+    {
+     "name": "kind",
+     "type": "text — 호출 종류"
+    },
+    {
+     "name": "text",
+     "type": "text — 요청 글"
+    },
+    {
+     "name": "template",
+     "type": "text — Template"
+    },
+    {
+     "name": "base_id",
+     "type": "text — 바탕 설계"
+    },
+    {
+     "name": "model",
+     "type": "text — 모델"
+    },
+    {
+     "name": "prompt_sha",
+     "type": "text — 프롬프트 지문"
+    },
+    {
+     "name": "messages",
+     "type": "jsonb — 주고받은 글"
+    },
+    {
+     "name": "calls",
+     "type": "jsonb — 호출"
+    },
+    {
+     "name": "attempts",
+     "type": "jsonb — 후보 · 검사 결과"
+    },
+    {
+     "name": "result",
+     "type": "jsonb — 결과"
+    },
+    {
+     "name": "fallback",
+     "type": "boolean — 자동 전환"
+    },
+    {
+     "name": "error",
+     "type": "jsonb — 오류"
+    },
+    {
+     "name": "elapsed_s",
+     "type": "real — 걸린 시간"
+    },
+    {
+     "name": "started",
+     "type": "timestamptz — 시작"
+    },
+    {
+     "name": "design_id",
+     "type": "text — 저장된 설계(외래 키 아님)"
+    },
+    {
+     "name": "extra",
+     "type": "jsonb — 그 밖 기록"
+    }
+   ]
+  }
+ ],
+ "relationships": [
+  {
+   "id": "builds_design",
+   "from": "builds",
+   "to": "designs",
+   "label": "조립한 설계",
+   "fromCardinality": "many",
+   "fromOptional": true,
+   "toCardinality": "one"
+  },
+  {
+   "id": "genlogs_design",
+   "from": "gen_logs",
+   "to": "designs",
+   "label": "저장된 설계(외래 키 아님)",
+   "fromCardinality": "many",
+   "fromOptional": true,
+   "toCardinality": "one",
+   "toOptional": true,
+   "variant": "dashed",
+   "identifying": false
+  },
+  {
+   "id": "templates_design",
+   "from": "templates",
+   "to": "designs",
+   "label": "보기 — V000만",
+   "fromCardinality": "one",
+   "toCardinality": "one",
+   "variant": "dashed",
+   "identifying": false
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "규칙",
+   "items": [
+    "계보: designs.parent_id → designs.design_id(같은 표를 가리킴 — 부모 하나에 자식 여럿)",
+    "설계 이름은 <Template>_V<3자리>만 — CAD 기본 설계(V000)만 부모가 비어 있다",
+    "저장한 설계는 안 바뀐다(화면 이름 display_name 만 고침)",
+    "recipe 는 json(글자 그대로) — 지문 recipe_sha256 이 맞게"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "켜기 · 되돌리기",
+   "items": [
+    "웹 PC .env COMPOSE_PROFILES=db · DATABASE_URL 이면 PostgreSQL",
+    "DATABASE_URL 을 비우면 JSON 폴더 /data 로 돌아감",
+    "처음 켤 때만 web/db/init/001_schema.sql 실행"
+   ]
+  }
+ ]
+}

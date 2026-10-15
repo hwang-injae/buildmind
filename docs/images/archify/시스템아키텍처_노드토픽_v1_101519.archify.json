@@ -1,0 +1,773 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "BuildMind 시스템 아키텍처 — ROS 노드 · 토픽",
+  "locale": "ko",
+  "output": "발표/archify/architecture-d2-nodes-20261015-191718/d2-system-nodes.html",
+  "quality_profile": "showcase"
+ },
+ "components": [
+  {
+   "id": "user",
+   "type": "external",
+   "label": "Operator",
+   "sublabel": "웹 PC 브라우저 · 펜던트",
+   "pos": [
+    30,
+    40
+   ],
+   "size": [
+    150,
+    64
+   ],
+   "icon": "person"
+  },
+  {
+   "id": "mic",
+   "type": "external",
+   "label": "Microphone",
+   "sublabel": "웹 PC USB",
+   "pos": [
+    345,
+    40
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "claude",
+   "type": "external",
+   "label": "Claude",
+   "sublabel": "설계 AI · opus",
+   "pos": [
+    660,
+    40
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "openai",
+   "type": "external",
+   "label": "OpenAI STT",
+   "sublabel": "받아 적기 API",
+   "pos": [
+    975,
+    40
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "frontend",
+   "type": "frontend",
+   "label": "frontend",
+   "sublabel": "화면 · Next.js 정적",
+   "pos": [
+    30,
+    180
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "claude_bridge",
+   "type": "backend",
+   "label": "claude_bridge",
+   "sublabel": "설계 AI 중계 :8790",
+   "pos": [
+    660,
+    180
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "files",
+   "type": "database",
+   "label": "/data",
+   "sublabel": "JSON 저장소 · 되돌리기용",
+   "pos": [
+    30,
+    330
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "backend",
+   "type": "backend",
+   "label": "backend",
+   "sublabel": "FastAPI :8000",
+   "pos": [
+    345,
+    330
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "mqtt",
+   "type": "messagebus",
+   "label": "mosquitto",
+   "sublabel": "MQTT 브로커 :1883",
+   "pos": [
+    660,
+    330
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "voice",
+   "type": "backend",
+   "label": "voice.py",
+   "sublabel": "음성 · 시동어 · 호스트",
+   "pos": [
+    975,
+    330
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "db",
+   "type": "database",
+   "label": "db",
+   "sublabel": "PostgreSQL 16",
+   "pos": [
+    345,
+    470
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "d435",
+   "type": "external",
+   "label": "D435i",
+   "sublabel": "손목 카메라 USB 3",
+   "pos": [
+    30,
+    600
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "realsense",
+   "type": "cloud",
+   "label": "realsense2_camera node",
+   "sublabel": "카메라 드라이버",
+   "pos": [
+    30,
+    720
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "scan_preview",
+   "type": "backend",
+   "label": "scan_live_preview node",
+   "sublabel": "스캔 점군 미리보기",
+   "pos": [
+    345,
+    720
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "bridge",
+   "type": "backend",
+   "label": "bridge node",
+   "sublabel": "ROS ↔ MQTT 변환만",
+   "pos": [
+    660,
+    720
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "safety",
+   "type": "security",
+   "label": "safety_stop node",
+   "sublabel": "정지 · 잠금 · 다시 시작",
+   "pos": [
+    975,
+    720
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "wrist",
+   "type": "backend",
+   "label": "wrist_block node",
+   "sublabel": "블록 찾기 · 잰 값 · 그림",
+   "pos": [
+    345,
+    870
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "task",
+   "type": "backend",
+   "label": "task node",
+   "sublabel": "작업 관리자 · 검사 묶음",
+   "pos": [
+    660,
+    870
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "recipe",
+   "type": "backend",
+   "label": "recipe_manager",
+   "sublabel": "CAD → 레시피 파일",
+   "pos": [
+    30,
+    1020
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "yaml",
+   "type": "database",
+   "label": "robot.yaml",
+   "sublabel": "설정 · tcp.json · 레시피",
+   "pos": [
+    345,
+    1020
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "pick",
+   "type": "backend",
+   "label": "pick_place node",
+   "sublabel": "집기 · 놓기 · 받침 경유",
+   "pos": [
+    660,
+    1020
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "gripper",
+   "type": "backend",
+   "label": "gripper node",
+   "sublabel": "그리퍼 열기 · 닫기",
+   "pos": [
+    975,
+    1020
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "scene",
+   "type": "backend",
+   "label": "scene_manager node",
+   "sublabel": "MoveIt 장면 관리",
+   "pos": [
+    345,
+    1170
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "move_group",
+   "type": "cloud",
+   "label": "move_group node",
+   "sublabel": "MoveIt2 계획 · 실행",
+   "pos": [
+    660,
+    1170
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "onrobot",
+   "type": "cloud",
+   "label": "onrobot_rg_control node",
+   "sublabel": "RG2 드라이버",
+   "pos": [
+    975,
+    1170
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "dsr",
+   "type": "cloud",
+   "label": "dsr_controller2 node",
+   "sublabel": "두산 드라이버 · TF",
+   "pos": [
+    660,
+    1320
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "robot",
+   "type": "external",
+   "label": "Doosan M0609",
+   "sublabel": "제어기 DRCF · 펜던트",
+   "pos": [
+    660,
+    1470
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "rg2",
+   "type": "external",
+   "label": "OnRobot RG2",
+   "sublabel": "그리퍼",
+   "pos": [
+    975,
+    1470
+   ],
+   "size": [
+    150,
+    64
+   ]
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "웹 PC — ROS 없음",
+   "wraps": [
+    "frontend",
+    "claude_bridge",
+    "files",
+    "backend",
+    "mqtt",
+    "voice",
+    "db"
+   ]
+  },
+  {
+   "kind": "security-group",
+   "label": "컨테이너 web",
+   "wraps": [
+    "frontend",
+    "files",
+    "backend"
+   ]
+  },
+  {
+   "kind": "security-group",
+   "label": "컨테이너 mosquitto",
+   "wraps": [
+    "mqtt"
+   ]
+  },
+  {
+   "kind": "security-group",
+   "label": "컨테이너 db",
+   "wraps": [
+    "db"
+   ]
+  },
+  {
+   "kind": "region",
+   "label": "로봇 PC — ROS 2 노드 전부(호스트)",
+   "wraps": [
+    "realsense",
+    "scan_preview",
+    "bridge",
+    "safety",
+    "wrist",
+    "task",
+    "recipe",
+    "yaml",
+    "pick",
+    "gripper",
+    "scene",
+    "move_group",
+    "onrobot",
+    "dsr"
+   ]
+  }
+ ],
+ "connections": [
+  {
+   "id": "user-frontend",
+   "from": "user",
+   "to": "frontend",
+   "label": "http://127.0.0.1:8000",
+   "variant": "emphasis"
+  },
+  {
+   "id": "frontend-backend",
+   "from": "frontend",
+   "to": "backend",
+   "label": "/api · /ws",
+   "variant": "emphasis"
+  },
+  {
+   "id": "backend-claude_bridge",
+   "from": "backend",
+   "to": "claude_bridge",
+   "label": "POST /v1/chat/completions"
+  },
+  {
+   "id": "claude_bridge-claude",
+   "from": "claude_bridge",
+   "to": "claude",
+   "label": "claude -p"
+  },
+  {
+   "id": "backend-files",
+   "from": "backend",
+   "to": "files",
+   "label": "designs/<id>.json"
+  },
+  {
+   "id": "backend-db",
+   "from": "backend",
+   "to": "db",
+   "label": "SQL db:5432"
+  },
+  {
+   "id": "backend-mqtt",
+   "from": "backend",
+   "to": "mqtt",
+   "label": "…/req ↔ d2/task/state",
+   "variant": "emphasis"
+  },
+  {
+   "id": "voice-mqtt",
+   "from": "voice",
+   "to": "mqtt",
+   "label": "d2/hmi/intent"
+  },
+  {
+   "id": "mic-voice",
+   "from": "mic",
+   "to": "voice",
+   "label": "USB 오디오"
+  },
+  {
+   "id": "voice-openai",
+   "from": "voice",
+   "to": "openai",
+   "label": "audio/transcriptions"
+  },
+  {
+   "id": "mqtt-bridge",
+   "from": "mqtt",
+   "to": "bridge",
+   "label": "d2/# · MQTT 1883",
+   "variant": "emphasis"
+  },
+  {
+   "id": "bridge-task",
+   "from": "bridge",
+   "to": "task",
+   "label": "hmi/command ↔ task/state",
+   "variant": "emphasis"
+  },
+  {
+   "id": "bridge-safety",
+   "from": "bridge",
+   "to": "safety",
+   "label": "safety/stop ↔ state",
+   "variant": "security"
+  },
+  {
+   "id": "bridge-wrist",
+   "from": "bridge",
+   "to": "wrist",
+   "label": "hmi/get_design ↔ wrist_image"
+  },
+  {
+   "id": "gripper-bridge",
+   "from": "gripper",
+   "to": "bridge",
+   "label": "gripper/state"
+  },
+  {
+   "id": "scan_preview-bridge",
+   "from": "scan_preview",
+   "to": "bridge",
+   "label": "vision/scan_preview"
+  },
+  {
+   "id": "task-wrist",
+   "from": "task",
+   "to": "wrist",
+   "label": "vision/find_blocks"
+  },
+  {
+   "id": "task-scan_preview",
+   "from": "task",
+   "to": "scan_preview",
+   "label": "task/state"
+  },
+  {
+   "id": "task-pick",
+   "from": "task",
+   "to": "pick",
+   "label": "motion/pick_place",
+   "variant": "emphasis"
+  },
+  {
+   "id": "task-gripper",
+   "from": "task",
+   "to": "gripper",
+   "label": "gripper/command ↔ state"
+  },
+  {
+   "id": "task-safety",
+   "from": "task",
+   "to": "safety",
+   "label": "safety/stop ↔ state",
+   "variant": "security",
+   "labelDy": -16
+  },
+  {
+   "id": "task-scene",
+   "from": "task",
+   "to": "scene",
+   "label": "task/progress"
+  },
+  {
+   "id": "pick-gripper",
+   "from": "pick",
+   "to": "gripper",
+   "label": "gripper/command"
+  },
+  {
+   "id": "pick-scene",
+   "from": "pick",
+   "to": "scene",
+   "label": "motion/scene/attach"
+  },
+  {
+   "id": "safety-pick",
+   "from": "safety",
+   "to": "pick",
+   "label": "safety/state",
+   "variant": "security"
+  },
+  {
+   "id": "realsense-wrist",
+   "from": "realsense",
+   "to": "wrist",
+   "label": "color · aligned_depth"
+  },
+  {
+   "id": "realsense-scan_preview",
+   "from": "realsense",
+   "to": "scan_preview",
+   "label": "aligned_depth_to_color"
+  },
+  {
+   "id": "d435-realsense",
+   "from": "d435",
+   "to": "realsense",
+   "label": "USB 3"
+  },
+  {
+   "id": "recipe-task",
+   "from": "recipe",
+   "to": "task",
+   "label": "<id>_recipe.json"
+  },
+  {
+   "id": "gripper-onrobot",
+   "from": "gripper",
+   "to": "onrobot",
+   "label": "/onrobot/sendCommand"
+  },
+  {
+   "id": "onrobot-rg2",
+   "from": "onrobot",
+   "to": "rg2",
+   "label": "Modbus TCP"
+  },
+  {
+   "id": "pick-move_group",
+   "from": "pick",
+   "to": "move_group",
+   "label": "move_action · execute_trajectory",
+   "variant": "emphasis",
+   "labelDy": 50
+  },
+  {
+   "id": "pick-dsr",
+   "from": "pick",
+   "to": "dsr",
+   "label": "joint_trajectory ↔ /joint_states",
+   "variant": "security"
+  },
+  {
+   "id": "scene-move_group",
+   "from": "scene",
+   "to": "move_group",
+   "label": "apply_planning_scene"
+  },
+  {
+   "id": "move_group-dsr",
+   "from": "move_group",
+   "to": "dsr",
+   "label": "follow_joint_trajectory",
+   "variant": "emphasis"
+  },
+  {
+   "id": "safety-dsr",
+   "from": "safety",
+   "to": "dsr",
+   "label": "joint_trajectory · get_robot_state",
+   "variant": "security"
+  },
+  {
+   "id": "dsr-robot",
+   "from": "dsr",
+   "to": "robot",
+   "label": "DRCF",
+   "variant": "emphasis"
+  },
+  {
+   "id": "yaml-task",
+   "from": "yaml",
+   "to": "task",
+   "label": "robot.yaml",
+   "variant": "dashed"
+  },
+  {
+   "id": "yaml-wrist",
+   "from": "yaml",
+   "to": "wrist",
+   "label": "robot.yaml",
+   "variant": "dashed"
+  },
+  {
+   "id": "yaml-scan_preview",
+   "from": "yaml",
+   "to": "scan_preview",
+   "label": "robot.yaml",
+   "variant": "dashed"
+  },
+  {
+   "id": "yaml-scene",
+   "from": "yaml",
+   "to": "scene",
+   "label": "robot.yaml",
+   "variant": "dashed"
+  },
+  {
+   "id": "yaml-pick",
+   "from": "yaml",
+   "to": "pick",
+   "label": "robot.yaml",
+   "variant": "dashed"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "선 위 이름",
+   "items": [
+    "ROS 토픽 · 서비스 · 액션 이름 — 앞의 /d2/ 는 뺐다(예: hmi/command = /d2/hmi/command)",
+    "d2/… = MQTT 토픽(브로커 경유) · '↔' = 가는 것 ↔ 오는 것",
+    "한 줄에 이름이 여럿이면 대표 1 ~ 2개 — task ↔ wrist_block 은 find_blocks · check_progress, gripper → onrobot 답은 /onrobot_joint_states"
+   ]
+  },
+  {
+   "dot": "emerald",
+   "title": "선 종류",
+   "items": [
+    "굵은 선 = [조립] 흐름(화면 → task → pick_place → move_group → dsr → 로봇)",
+    "빨간 선 = 정지(safety_stop → task · pick_place · 제어기 서기 궤적)",
+    "점선 = 설정 파일 robot.yaml(d2_bringup config — 노드가 켜질 때 읽음)"
+   ]
+  },
+  {
+   "dot": "violet",
+   "title": "노드 · 컨테이너",
+   "items": [
+    "로봇 PC 노드 = ROS 2 노드(호스트) · bringup 런치가 dsr_controller2(ros2_control_node + robot_state_publisher) · move_group · onrobot_rg_control(OnRobotRGControllerServer)을 띄움",
+    "웹 PC = web 컨테이너(frontend · backend · /data) · mosquitto · db 컨테이너 + 호스트 claude_bridge · voice.py"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "따로 보는 창",
+   "items": [
+    "MQTT 토픽 18개 = 'MQTT 토픽 흐름' 창 · DB 표 · 칸 = 'DB ERD' 창"
+   ]
+  }
+ ]
+}

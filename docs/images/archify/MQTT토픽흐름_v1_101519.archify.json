@@ -1,0 +1,259 @@
+{
+ "schema_version": 1,
+ "diagram_type": "dataflow",
+ "meta": {
+  "title": "BuildMind MQTT 토픽 흐름 — 웹 PC ↔ 브로커 ↔ 다리 ↔ 로봇 PC",
+  "locale": "ko",
+  "output": "발표/archify/dataflow-d2-mqtt-20261015-185041/d2-mqtt.html",
+  "quality_profile": "showcase",
+  "legend": {
+   "entries": {
+    "dashed": {
+     "label": "바이트 — 사진 · 점군 · 영상(retained 아님)"
+    },
+    "security": {
+     "label": "정지 — 정지 요청 · 정지 상태"
+    },
+    "emphasis": {
+     "label": "명령 — 웹이 로봇에 부탁"
+    }
+   }
+  }
+ },
+ "stages": [
+  {
+   "label": "웹 PC"
+  },
+  {
+   "label": "브로커"
+  },
+  {
+   "label": "다리"
+  },
+  {
+   "label": "로봇 PC 노드"
+  }
+ ],
+ "nodes": [
+  {
+   "id": "backend",
+   "type": "backend",
+   "label": "backend",
+   "sublabel": "FastAPI · DesignStore",
+   "stage": 0,
+   "row": 1
+  },
+  {
+   "id": "voice",
+   "type": "backend",
+   "label": "voice.py",
+   "sublabel": "시동어 · 받아 적기",
+   "stage": 0,
+   "row": 3
+  },
+  {
+   "id": "mqtt",
+   "type": "messagebus",
+   "label": "mosquitto",
+   "sublabel": ":1883 · 전달만",
+   "stage": 1,
+   "row": 2
+  },
+  {
+   "id": "bridge",
+   "type": "backend",
+   "label": "bridge",
+   "sublabel": "ROS ↔ MQTT",
+   "stage": 2,
+   "row": 2
+  },
+  {
+   "id": "task",
+   "type": "backend",
+   "label": "작업 관리자",
+   "sublabel": "task_manager",
+   "stage": 3,
+   "row": 0
+  },
+  {
+   "id": "safety",
+   "type": "security",
+   "label": "정지 노드",
+   "sublabel": "safety_stop",
+   "stage": 3,
+   "row": 1
+  },
+  {
+   "id": "gripper",
+   "type": "backend",
+   "label": "그리퍼",
+   "sublabel": "gripper",
+   "stage": 3,
+   "row": 2
+  },
+  {
+   "id": "wrist",
+   "type": "backend",
+   "label": "손목 비전",
+   "sublabel": "wrist_block",
+   "stage": 3,
+   "row": 3
+  },
+  {
+   "id": "preview",
+   "type": "backend",
+   "label": "스캔 미리보기",
+   "sublabel": "scan_live_preview",
+   "stage": 3,
+   "row": 4
+  }
+ ],
+ "flows": [
+  {
+   "id": "web-req",
+   "from": "backend",
+   "to": "mqtt",
+   "label": "요청 · 답 · alive",
+   "classification": "서비스 · alive",
+   "variant": "emphasis",
+   "route": "top-channel"
+  },
+  {
+   "id": "voice-pub",
+   "from": "voice",
+   "to": "mqtt",
+   "label": "intent · stop",
+   "classification": "음성",
+   "variant": "security"
+  },
+  {
+   "id": "listen",
+   "from": "mqtt",
+   "to": "voice",
+   "label": "voice/listen",
+   "classification": "웹 PC 안"
+  },
+  {
+   "id": "to-bridge",
+   "from": "mqtt",
+   "to": "bridge",
+   "label": "…/req · intent",
+   "classification": "서비스 req",
+   "variant": "emphasis",
+   "route": "top-channel"
+  },
+  {
+   "id": "to-task",
+   "from": "bridge",
+   "to": "task",
+   "label": "명령 · 설계 검사",
+   "classification": "서비스 req",
+   "variant": "emphasis"
+  },
+  {
+   "id": "to-safety",
+   "from": "bridge",
+   "to": "safety",
+   "label": "stop · resume",
+   "classification": "서비스 req",
+   "variant": "security"
+  },
+  {
+   "id": "task-state",
+   "from": "task",
+   "to": "bridge",
+   "label": "state · progress",
+   "classification": "retained"
+  },
+  {
+   "id": "task-call",
+   "from": "task",
+   "to": "bridge",
+   "label": "get_design · save",
+   "classification": "서비스 req"
+  },
+  {
+   "id": "safety-state",
+   "from": "safety",
+   "to": "bridge",
+   "label": "safety/state",
+   "classification": "retained",
+   "variant": "security"
+  },
+  {
+   "id": "grip-state",
+   "from": "gripper",
+   "to": "bridge",
+   "label": "gripper/state",
+   "classification": "retained"
+  },
+  {
+   "id": "wrist-img",
+   "from": "wrist",
+   "to": "bridge",
+   "label": "wrist_image",
+   "classification": "바이트",
+   "variant": "dashed"
+  },
+  {
+   "id": "preview-img",
+   "from": "preview",
+   "to": "bridge",
+   "label": "scan_preview",
+   "classification": "바이트",
+   "variant": "dashed"
+  },
+  {
+   "id": "to-broker",
+   "from": "bridge",
+   "to": "mqtt",
+   "label": "상태 · 답 · 사진",
+   "classification": "retained · res",
+   "route": "bottom-channel"
+  },
+  {
+   "id": "to-web",
+   "from": "mqtt",
+   "to": "backend",
+   "label": "상태 · 답 · 사진",
+   "classification": "retained · res",
+   "route": "bottom-channel"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "emerald",
+   "title": "상태 — retained(늦게 붙어도 마지막 값)",
+   "items": [
+    "d2/task/state · d2/task/progress · d2/task/scan_result",
+    "d2/safety/state · d2/gripper/state",
+    "d2/bridge/alive · d2/web/alive(1초 · 끊기면 LWT false)"
+   ]
+  },
+  {
+   "dot": "cyan",
+   "title": "서비스 — …/req → …/res + req_id",
+   "items": [
+    "웹이 부름: d2/hmi/command · d2/safety/stop · d2/safety/resume · d2/task/check_design",
+    "로봇이 부름: d2/hmi/get_design · d2/hmi/save_build",
+    "5초 안 답 없으면 보낸 쪽이 TIMEOUT"
+   ]
+  },
+  {
+   "dot": "violet",
+   "title": "바이트 · 음성",
+   "items": [
+    "d2/vision/wrist_image · scan_image · scan_cloud · scan_preview · scan_preview_cloud",
+    "d2/hmi/intent(voice.py → backend · 다리) · d2/hmi/voice/listen(웹 PC 안만)"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "규칙",
+   "items": [
+    "토픽 = d2/<ROS 이름> — 다리는 바꾸기만 하고 판단하지 않는다",
+    "브로커는 웹 PC Wi-Fi IP:1883 · 로봇 PC만 받음"
+   ]
+  }
+ ]
+}
