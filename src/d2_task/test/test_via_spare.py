@@ -657,3 +657,35 @@ def test_초기화_뒤_정리_끝이면_빈_진행표로_장면을_비운다():
     m._recover()
     assert m.state == 'IDLE'
     assert io.progress and io.progress[-1]['parts'] == [] and io.progress[-1]['schema'] == 'progress/2.0'
+
+
+def test_조립_중_정지면_W144_녹화를_닫고_다시_시작이면_새로_연다():
+    """10/15 박진용: 정지로 멈춘 판은 녹화가 안 닫혀 원본(카메라 30 Hz)이 계속 쌓였다(10/14 V008 24 GB · V009 57 GB).
+    조립 중 정지 → 바로 닫음(완료 아님) · [다시 시작]으로 이어 가면 CHECK 첫 단계가 새로 연다 · 끝나면 다시 닫음."""
+    from test_task_manager import SAFE_STOP
+    m, io = make_w144()
+    start(m)
+    m.run_once()                                                              # CHECK — 녹화 엶
+    assert [e[0] for e in io.w144 if e[0] in ('start', 'finish')] == ['start']
+    m.on_safety(SAFE_STOP)
+    m.run_once()                                                              # STOPPED — 닫기 예약
+    m.run_once()                                                              # 잠금 밖에서 닫음
+    assert m.state == 'STOPPED' and ('finish', False) in io.w144
+    m.on_safety(SAFE_OK)
+    drive(m, 'DONE')
+    m.run_once()                                                              # 끝 — 잠금 밖에서 닫음
+    kinds = [e[0] if e[0] == 'start' else e for e in io.w144 if e[0] in ('start', 'finish')]
+    assert kinds == ['start', ('finish', False), 'start', ('finish', True)]
+
+
+def test_조립_중이_아닐_때_정지는_W144_녹화를_건드리지_않는다():
+    """대기 · 완성 뒤 정지는 열린 녹화가 없다 — 닫기 · 다시 열기를 예약하지 않는다."""
+    from test_task_manager import SAFE_STOP
+    m, io = make_w144()
+    m.on_safety(SAFE_STOP)
+    m.run_once()
+    m.run_once()
+    m.on_safety(SAFE_OK)
+    m.run_once()
+    m.run_once()
+    assert not [e for e in io.w144 if e[0] in ('start', 'finish')] and not m._w144_reopen
