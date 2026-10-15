@@ -360,6 +360,7 @@ button.mitem.selected .tag.ok { color: #fff; border-color: #fff; }
 /* ---------- 손목 카메라 — 640×480 그림을 그대로(4:3). 넓은 칸 맨 위에 크게, 화면 높이 60 % 까지(10/14 PL) ---------- */
 .cam { aspect-ratio: 4 / 3; border-radius: 12px; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; }
 .cam img { width: 100%; height: 100%; object-fit: contain; display: block; transition: transform 0.2s; }
+.cam.stale img { opacity: 0.4; filter: grayscale(0.7); } /* 지난 조립 · 오래된 손목 그림(10/15 PL '가++') — 지우지 않고 흐리게 */
 .wrist-panel .cam { width: min(100%, calc(60vh * 4 / 3)); margin: 0 auto; cursor: zoom-in; }
 .cam-idle { background: var(--canvas-bg); border: 1px dashed var(--line); color: var(--muted); font-size: 14px; cursor: default; }
 .layout .view-panel .view3d, .layout .view-panel > .view3d-empty { height: auto; aspect-ratio: 4 / 3; max-height: 60vh; } /* 옆 손목 카메라와 같은 꼴 */
