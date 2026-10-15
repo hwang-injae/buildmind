@@ -6,7 +6,7 @@
 
 - 같은 폴더의 `COLCON_IGNORE` 때문에 `colcon build`는 이 폴더를 건너뛴다(ROS 패키지가 아님).
 - 레시피를 로봇 목표(TCP)로 바꾸는 일은 집기·놓기 노드(`src/d2_robot/d2_motion`)가 한다. 작업 폴더의 `Recipe_to_Robot`(두산 직접 실행)은 이 저장소에 넣지 않았다 — W104 합의(pose = 블록 중심)로 역할이 집기·놓기에 있고, 로봇을 움직이는 코드는 팀 정지 규칙(서기 궤적·`SignalHandlerOptions.NO`)을 따라야 하기 때문.
-- 형식은 **E-69**(작명 규칙 v3, `docs/작명규칙_설계_레시피_블록_v3_*.md`) · IRD 6장 `recipe/4.0` · `placements/4.0`을 따른다(10/14 E-111 C6 — 레시피 열쇠 `design_id`, 3.0 이하는 읽기 거절. 10/8 — 옛 E-52 `cad_structure/1.0` · `cad_recipe/1.0` · `_structure.json`은 없앰). 용어: **레시피 = 구조**(`_recipe.json`), **조립 방법 = placements**(`_placements.csv`).
+- 형식은 **E-69**(작명 규칙 v3, `docs/guides/작명규칙_설계_레시피_블록_v3_*.md`) · IRD 6장 `recipe/4.0` · `placements/4.0`을 따른다(10/14 E-111 C6 — 레시피 열쇠 `design_id`, 3.0 이하는 읽기 거절. 10/8 — 옛 E-52 `cad_structure/1.0` · `cad_recipe/1.0` · `_structure.json`은 없앰). 용어: **레시피 = 구조**(`_recipe.json`), **조립 방법 = placements**(`_placements.csv`).
 
 ```
 cads/<id>.dxf (부품 이름 · SEQ · STAGE · GRASP 속성 = 원본)

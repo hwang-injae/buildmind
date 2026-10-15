@@ -1,6 +1,6 @@
 # web — HMI 설계 노트 (10/8 · 10/9 황인재, PL 결정)
 
-> 정본은 [IRD](../docs/02_인터페이스_IRD_v3_101315.md) 2 · 4 · 6 · 8 · 10장과 [SDD](../docs/03_설계_SDD_v3_101321.md) 3.1.1 · 6.6 · 6.8 · 6.10장, 결정 E-67 · E-69 · E-70 ~ E-77이다. 이 노트는 **웹 안**(화면 · REST · WebSocket · 저장소 · AI 흐름)을 코드로 옮길 때의 세부만 적는다. ROS · MQTT 이름 · 칸은 IRD가 정본이고(E-57 '정함') 여기서 새로 정하지 않는다 — 바꿀 것은 IRD를 고치는 PL 확인 PR로 올린다. 파일 이름은 SDD 3.1.1을 따른다. [backend/README.md](backend/README.md)는 backend 파일 목록만 짧게 적는다.
+> 정본은 [IRD](../docs/02_인터페이스_IRD_v4_101608.md) 2 · 4 · 6 · 8 · 10장과 [SDD](../docs/03_설계_SDD_v4_101608.md) 3.1.1 · 6.6 · 6.8 · 6.10장, 결정 E-67 · E-69 · E-70 ~ E-77이다. 이 노트는 **웹 안**(화면 · REST · WebSocket · 저장소 · AI 흐름)을 코드로 옮길 때의 세부만 적는다. ROS · MQTT 이름 · 칸은 IRD가 정본이고(E-57 '정함') 여기서 새로 정하지 않는다 — 바꿀 것은 IRD를 고치는 PL 확인 PR로 올린다. 파일 이름은 SDD 3.1.1을 따른다. [backend/README.md](backend/README.md)는 backend 파일 목록만 짧게 적는다.
 > **10/16 최종 정리(main c0d5c71 기준).** 웹 PC = 한석형 노트북(E-92 10/15 덧붙임). IP는 그날 두 PC에서 `ip -4 addr show`로 확인해 아래 `<웹IP>` · `<로봇IP>` 자리에 넣는다.
 
 구조(E-32 · E-41): 브라우저 `frontend`(Next.js 정적 `out/`, three.js) ↔ REST + WebSocket `/ws` ↔ `backend`(FastAPI :8000, paho-mqtt) ↔ MQTT 브로커 ↔ 로봇 PC `d2_bridge`. 브라우저는 브로커 · DB · 설계 AI · ROS를 모른다. 저장소는 `web/.env`에 `COMPOSE_PROFILES=db` · `DATABASE_URL`이 있으면 PostgreSQL(`db` 컨테이너, W088), 없으면 JSON 파일 폴더(아래 'DB 켜기 · 끄기').
