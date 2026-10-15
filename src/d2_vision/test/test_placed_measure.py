@@ -233,9 +233,18 @@ def _few_points_hole():
     return scene([box(pt['center'], pt['rot'], keep=keep)]), pt
 
 
-def _tilted(axis):
+def _tilted(axis, deg=7.0):
     pt = part(0.0)
-    return scene([box(pt['center'], pt['rot'] @ rot_axis(axis, 7.0))]), pt
+    return scene([box(pt['center'], pt['rot'] @ rot_axis(axis, deg))]), pt
+
+
+def _lifted(axis, h_mm):
+    """한쪽 모서리를 h_mm 들어 올린 블록(그 모서리 밑에 무언가가 끼어 걸친 모양). axis 0 = 긴 모서리(폭 방향으로 기욺) · 1 = 짧은 끝(길이 방향)."""
+    pt = part(0.0)
+    span = W if axis == 0 else L
+    c = np.array(pt['center'], float)
+    c[2] += h_mm / 2000.0                      # 한쪽이 바닥에 닿은 채 다른 쪽이 h 만큼 들리면 가운데는 h/2 올라간다
+    return scene([box(c, pt['rot'] @ rot_axis(axis, math.degrees(math.asin(h_mm / 1000.0 / span))))]), pt
 
 
 def _half_hidden():
@@ -256,7 +265,7 @@ REJECT_CASES = {
     'few_points_grid': (_few_points, 'FEW_POINTS'),
     'few_points_hole': (_few_points_hole, 'FEW_POINTS'),
     'tilted_long': (lambda: _tilted(1), 'TILTED'),        # 짧은 축(폭) 둘레 7° — 긴 축 양 끝 높이 차 약 9 mm
-    'tilted_side': (lambda: _tilted(0), 'TILTED'),        # 긴 축 둘레 7° — 양 끝 차는 작고 각도 기준(5°)으로 걸림
+    'tilted_side': (lambda: _lifted(0, 8.0), 'TILTED'),   # 긴 모서리 한쪽 8 mm 들림(약 19°) — 양 끝 차는 작고 폭 방향 각도 기준(10°)으로 걸림
     'half_hidden': (_half_hidden, 'SIZE_MISMATCH'),
 }
 
@@ -278,6 +287,14 @@ def test_rejects_tuple_covers_every_code():
         assert blk is None and rej[0] in REJECTS
         got.add(rej[0])
     assert got == set(REJECTS) and len(REJECTS) == len(set(REJECTS))
+
+
+def test_side_tilt_below_wide_limit_is_ok():
+    """폭 방향(긴 축 둘레) 7° 는 놓은 블록 전용 문턱(TILT_WIDE_DEG 10°) 아래라 정상으로 잰다(10/15 — 깊이 가장자리 처짐으로
+    반듯한 블록도 폭 방향 4 ~ 6° 로 재지는 것을 막으려고). 예전(5°)에는 TILTED 였다."""
+    pts, pt = _tilted(0, 7.0)
+    blk, rej = measure_placed(pts, pt, SIZE)
+    assert rej is None and blk['tilted'] is False, rej
 
 
 # ---------- 10/14 고친 것(하위 검토에서 찾음 — 크기 되돌림 · 틈 보이는 이웃 빼기) ----------

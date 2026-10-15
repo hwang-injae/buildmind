@@ -5,7 +5,8 @@ W144(챌린지 A4 — 놓은 블록이 많이 비켰으면 다시 집어 놓기)
 받침과 다른 점: 둘레에 다른 블록이 있을 수 있어서, 블록 하나로 볼 수 없으면 좌표를 내지 않고 거절 코드를 낸다(잘못된 다시 집기를 막으려고).
 
 거절 코드(reject): NO_PART(설계 자리에 그 높이의 윗면이 없음) · COVERED(설계 자리 위에 다른 물체가 덮음) · STANDING(세운 블록 — 윗면이
-15 × 25 mm 라 지금은 재지 않음) · FEW_POINTS(윗면 점이 모자람) · TILTED(윗면이 5 mm 또는 5° 넘게 기욺) · NEIGHBOR_MERGED(같은 높이
+15 × 25 mm 라 지금은 재지 않음) · FEW_POINTS(윗면 점이 모자람) · TILTED(긴 축 양 끝 높이 차 5 mm · 긴 축 5° · 폭 방향 10° 중 하나 넘음 —
+놓은 블록 전용 문턱, 10/15) · NEIGHBOR_MERGED(같은 높이
 이웃과 붙어 윗면이 블록보다 큼 — 경계가 안 보임) · SIZE_MISMATCH(윗면이 블록보다 4 mm 넘게 작음 — 가장자리가 가려지거나 깊이 구멍).
 정확도는 실기로 아직 안 봤다(10/14) — 작업 관리자는 실기 흔들림을 확인한 뒤에 다시 집기에 쓴다(PL · 한석형).
 단위: 입력 · 출력 좌표 m(base_link). 바깥 영향 없음.
@@ -15,7 +16,7 @@ import math
 import numpy as np
 from scipy import ndimage
 
-from d2_vision.block_finder import TILT_DEG, TILT_DEG_MIN_SHORT_MM, TILT_MM, TOP_AXES, wrap_deg
+from d2_vision.block_finder import TOP_AXES, wrap_deg
 from d2_vision.spare_measure import EDGE_PCT, MIN_PTS_FLAT, UP_DIM
 
 REACH_M = 0.015            # 설계 자리(위에서 본 상자) 둘레로 이만큼 넓혀 점을 본다 — 놓기 어긋남(몇 mm)과 이웃 붙음을 함께 보려고
@@ -26,6 +27,13 @@ SIZE_TOL_M = 0.004         # 잰 윗면 두 변이 블록 치수와 이보다 �
 MIN_FRAC = 0.5             # 윗면 점이 받침 재기 최소(MIN_PTS_FLAT 비율)의 이 배보다 적으면 FEW_POINTS — 둘레 이웃에 가려 반쯤 보일 수 있어서
 SEG_CELL_M = 0.002         # 윗면 점을 이 칸으로 나눠 이어진 덩어리만 이 블록으로 본다 — 틈(2 칸 이상)이 보이는 이웃은 떨어진 덩어리라 빠진다
 EDGE_KEEP = (EDGE_PCT[1] - EDGE_PCT[0]) / 100.0   # 양 끝 백분위로 잰 폭 = 실제 폭 × 이 비율(고르게 퍼진 점) — 크기는 이걸로 나눠 되돌린다
+# 기울기 문턱 — 놓은 블록 전용(10/15, 한석형 건의 · 민범진). block_finder(흩뿌린 블록 집기 5 mm · 5°)에서 가져다 쓰던 것을 뗐다.
+TILT_MM = 5.0             # 긴 축 양 끝 높이 차(mm) 이상이면 TILTED — block_finder · IRD E-43 과 같은 값
+TILT_LONG_DEG = 5.0       # 긴 축 방향 기울기 각(°) — block_finder B1(10/14 PL)과 같은 값
+TILT_WIDE_DEG = 10.0      # 폭 방향 기울기 각(°) — 깊이 카메라가 윗면 가장자리를 처지게 재서(가운데 5 mm 밖부터 3 ~ 5 mm) 반듯한 블록도
+                          # 폭 방향 4 ~ 6° 로 재진다(실기 V008 · V009 · V001 15장 최대 4.1°, 다시 찍기 5 ~ 6°). 진짜 옆 기울어짐은
+                          # 이웃(15 mm 위)에 걸칠 때라 10° 를 넘는다
+TILT_DEG_MIN_SHORT_MM = 20.0   # 각도 기준은 윗면 짧은 변이 이 이상(눕힌 75 × 25 면)일 때만 — block_finder 와 같은 값
 REJECTS = ('NO_PART', 'COVERED', 'STANDING', 'FEW_POINTS', 'TILTED', 'NEIGHBOR_MERGED', 'SIZE_MISMATCH')
 
 
@@ -56,7 +64,7 @@ def measure_placed(pts, part, block_actual_m):
           · BlockChecker.parts 와 같은 칸) · block_actual_m = [길이, 폭, 두께] m.
     출력: (블록 dict, None) — {part_id, x_m, y_m, top_z_m, yaw_deg, up, tilted, confidence, size_mm [두 변]} 또는 (None, (거절 코드, 설명)).
     순서: ① 세움이면 STANDING ② 설계 자리 둘레(REACH_M) 점 ③ 자리 안 높은 점 비율로 COVERED ④ 설계 윗면 ± TOP_TOL_M 점 — 없으면 NO_PART,
-          가운데와 이어진 덩어리만(틈 보이는 이웃 뺌) — 모자라면 FEW_POINTS ⑤ 윗면 평면 기울기로 TILTED ⑥ 주축 yaw · 양 끝 백분위 가운데 ·
+          가운데와 이어진 덩어리만(틈 보이는 이웃 뺌) — 모자라면 FEW_POINTS ⑤ 윗면 평면의 긴 축 양 끝 높이 차 · 긴 축 각 · 폭 방향 각으로 TILTED ⑥ 주축 yaw · 양 끝 백분위 가운데 ·
           두 변 길이(백분위 폭 ÷ EDGE_KEEP) → 크면 NEIGHBOR_MERGED, 작으면 SIZE_MISMATCH. 윗면 높이 = 윗면 점 가운데 값.
     바깥 영향 없음. 실패: part 칸이 없으면 KeyError."""
     L, W, T = (float(v) for v in block_actual_m)
@@ -96,10 +104,14 @@ def measure_placed(pts, part, block_actual_m):
     lo_u, hi_u = np.percentile((xy - mean) @ u, EDGE_PCT)
     lo_v, hi_v = np.percentile((xy - mean) @ v, EDGE_PCT)
     span_u, span_v = (hi_u - lo_u) / EDGE_KEEP, (hi_v - lo_v) / EDGE_KEEP   # 백분위 폭 → 실제 폭
-    tilt_deg = math.degrees(math.atan(math.hypot(coef[0], coef[1])))
     tilt_mm = abs(coef[0] * u[0] + coef[1] * u[1]) * span_u              # 긴 축 양 끝 높이 차
-    if tilt_mm >= TILT_MM / 1000.0 or (b * 1000.0 >= TILT_DEG_MIN_SHORT_MM and tilt_deg >= TILT_DEG):
-        return None, ('TILTED', f'윗면 양 끝 높이 차 {tilt_mm * 1000:.1f} mm · 기울기 {tilt_deg:.1f}°')
+    # 각도는 설계 자리 축으로 나눈다 — 기운 윗면이 높이 띠(±TOP_TOL_M)에 잘려 네모에 가까워지면 점 주축 u 가 폭 쪽으로 뒤집혀
+    # 길이 방향 기울기가 느슨한 폭 문턱을 받는다(합성: 길이 방향 한 끝 5 · 8 mm 들림이 통과)
+    ax = rot[:2, ('LENGTH', 'WIDTH', 'THICKNESS').index(TOP_AXES[up][0])]
+    ax = ax / np.linalg.norm(ax)
+    long_deg, wide_deg = (math.degrees(math.atan(abs(coef[0] * d[0] + coef[1] * d[1]))) for d in (ax, (-ax[1], ax[0])))
+    if tilt_mm >= TILT_MM / 1000.0 or (b * 1000.0 >= TILT_DEG_MIN_SHORT_MM and (long_deg >= TILT_LONG_DEG or wide_deg >= TILT_WIDE_DEG)):
+        return None, ('TILTED', f'윗면 긴 축 양 끝 높이 차 {tilt_mm * 1000:.1f} mm · 긴 축 {long_deg:.1f}° · 폭 방향 {wide_deg:.1f}°')
     if span_u > a + SIZE_TOL_M or span_v > b + SIZE_TOL_M:
         return None, ('NEIGHBOR_MERGED', f'윗면 {span_u * 1000:.0f} × {span_v * 1000:.0f} mm > 블록 {a * 1000:.0f} × {b * 1000:.0f} mm — 같은 높이 이웃과 붙어 경계가 안 보임')
     if span_u < a - SIZE_TOL_M or span_v < b - SIZE_TOL_M:
