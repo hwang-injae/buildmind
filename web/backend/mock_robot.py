@@ -134,7 +134,7 @@ def fake_supply_jpeg(scene, ranks=None, pick=None):
 
 def fake_spare_jpeg(cfg, dx_mm, dy_mm, dyaw_deg):
     """가짜 받침 다시 재기 그림(640×480 JPEG) — 진짜 손목 비전 그림 함수(block_finder.draw_spare, #181 · 10/14 22시 PL)로
-    빨간 목표 상자 · 초록 잰 블록 · 'base dx dy mm' · 'dyaw' 를 그린다. 카메라는 받침 바로 위 0.40 m(시험과 같은 자세).
+    빨간 목표 상자 · 초록 잰 블록 · 상자 안 x · y 화살표 · TARGET 아래 큰 'dx dy mm' · 'dyaw' 를 그린다. 카메라는 받침 바로 위 0.40 m(시험과 같은 자세).
     입력: cfg = robot.yaml · 잰 블록이 목표에서 비킨 값(mm · °). d2_vision · cv2 · numpy 가 없으면 None(그림만 안 보냄)."""
     try:
         import cv2
