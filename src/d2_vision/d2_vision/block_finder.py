@@ -993,6 +993,25 @@ def top_face_corners(b, size_m):
     return np.array([[p[0], p[1], float(b['top_z_m'])] for p in xy])
 
 
+def block_corners(b, size_m):
+    """블록 여덟 모서리 base 점 (8, 3) m — 윗면 네 모서리(top_face_corners) + 그 자세 높이만큼 아래 네 모서리. 바깥 영향 없음."""
+    top = top_face_corners(b, size_m)
+    return np.vstack([top, top - [0.0, 0.0, float(size_m[DIM[b['up']]])]])
+
+
+def _draw_standing(cv2, img, b, intr, T_base2cam, size_m):
+    """받침 위 선 블록 b 하나만 그린다(draw_spare 에서 — 10/15 PL): 블록 여덟 모서리를 사진에 옮긴 바깥 테두리(초록, 2 px — 사진에 보이는
+    블록을 감싸는 바운딩 박스) + 위에 'SPARE STAND' · 'SPARE EDGE'(각도는 안 씀 — 눕힌 목표와의 차이는 선 블록에 뜻이 없다).
+    카메라 뒤로 가면 그리지 않는다. 출력: img(고친 그림)."""
+    px = project_to_image(block_corners(b, size_m), intr, T_base2cam)
+    if px is None:
+        return img
+    hull = cv2.convexHull(np.round(px).astype(np.int32))
+    cv2.polylines(img, [hull], True, OVERLAP_BGR['none'], 2)
+    _put_label(cv2, img, f"SPARE {UP_NAME.get(b['up'], b['up'])}", (px[:, 0].mean(), px[:, 1].min() - 6), center=True)
+    return img
+
+
 def draw_spare(color, measured, target, intr, T_base2cam, block_actual_m):
     """받침 다시 재기(find_blocks area spare) 그림: 잰 블록 윗면 사각형(초록) + 목표 자리 상자(빨강) + 글자(wrist_image, 10/14 HMI · PL).
 
@@ -1004,9 +1023,13 @@ def draw_spare(color, measured, target, intr, T_base2cam, block_actual_m):
           둘 다 있으면 TARGET 아래에 큰 한 줄 spare_offset_big('dx +2.1  dy -0.8 mm', 10/15 PL '나') + base +x · +y 방향 화살표를
           목표 상자 위(상자 밖 — 잰 블록 글자보다 위) · 위가 모자라면 상자 오른쪽 → 왼쪽 → 왼쪽 위 구석(_axes_spot, 10/15 PL)
           (받침 관측 자세는 사진이 돌아가 있어 base +x 가 사진 위쪽으로 보인다 — 숫자를 사진 가로 · 세로로 읽지 않게 화살표로).
+    잰 블록이 선 블록(STAND · EDGE — 세우기 뒤 다시 잴 때 · 공급에서 선 채 옮겨 온 블록)이면 그 블록 테두리(_draw_standing)만 그린다 —
+    눕힌 목표 상자 · TARGET · dx dy · 축을 그리면 FLAT 을 확인하는 것처럼 보였다(10/15 PL).
     카메라 뒤로 가는 사각형은 그리지 않는다. 바깥 영향 없음. 실패: cv2 가 없으면 ImportError."""
     import cv2
     img = np.ascontiguousarray(color).copy()
+    if measured is not None and measured.get('up') in ('WIDTH', 'LENGTH'):
+        return _draw_standing(cv2, img, measured, intr, T_base2cam, block_actual_m)
     target_px = target_label = None
     avoid = []                                   # 그린 테두리 · 글자 상자 — 축 화살표가 피할 곳
     for b, bgr, thick, below in ((target, TARGET_BGR, 4, True), (measured, OVERLAP_BGR['none'], 2, False)):

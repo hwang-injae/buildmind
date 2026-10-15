@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from d2_vision.block_finder import (AXIS_GAP_PX, OFFSET_SCALE, TARGET_BGR, _axes_spot, base_axes_px, draw_spare, project_to_image, spare_label,
-                                    spare_offset_big, spare_offset_text, top_face_corners)
+                                    block_corners, spare_offset_big, spare_offset_text, top_face_corners)
 from d2_vision.spare_measure import OPEN_GAP_MM, ideal_spare_block, measure_on_spare
 
 ROBOT = yaml.safe_load((Path(__file__).resolve().parents[2] / 'd2_robot' / 'd2_bringup' / 'config' / 'robot.yaml').read_text(encoding='utf-8'))
@@ -144,6 +144,29 @@ def test_draw_spare_exact_fit_keeps_both_outlines():
     target = ideal_spare_block(SPOT, SIZE)
     img = draw_spare(color, dict(target), target, DRAW_INTR, DRAW_T, SIZE)
     assert (img == (0, 200, 0)).all(axis=2).any() and (img == TARGET_BGR).all(axis=2).any()
+
+
+@pytest.mark.parametrize('up', ['LENGTH', 'WIDTH'])
+def test_draw_spare_standing_block_only_its_box(up):
+    """10/15 PL: 받침 위 선 블록(세우기 뒤 다시 잴 때)은 그 블록 테두리(여덟 모서리를 옮긴 바깥 선, 초록)와 'SPARE STAND · EDGE' 만 —
+    눕힌 목표 상자(빨강) · TARGET · 아래 큰 dx dy · 축 화살표는 안 그린다(FLAT 을 확인하는 것처럼 보였다)."""
+    cv2 = pytest.importorskip('cv2')
+    color = np.full((480, 640, 3), 90, np.uint8)
+    target = ideal_spare_block(SPOT, SIZE)
+    h = SIZE[{'LENGTH': 0, 'WIDTH': 1}[up]]
+    meas = {**target, 'up': up, 'yaw_deg': 88.0, 'top_z_m': SZ + h}
+    img = draw_spare(color, meas, target, DRAW_INTR, DRAW_T, SIZE)
+    assert not (img == TARGET_BGR).all(axis=2).any()                        # 빨간 목표 상자 없음
+    corners = block_corners(meas, SIZE)
+    assert corners.shape == (8, 3) and np.allclose(corners[4:, 2], SZ)      # 아래 네 모서리 = 받침 윗면
+    px = project_to_image(corners, DRAW_INTR, DRAW_T)
+    green = (img == (0, 200, 0)).all(axis=2)
+    vs, us = np.nonzero(green)
+    assert len(us) and abs(us.min() - px[:, 0].min()) <= 2 and abs(us.max() - px[:, 0].max()) <= 2   # 테두리 = 블록 바깥
+    white = (img == 255).all(axis=2)
+    (tw, _), _ = cv2.getTextSize(f'SPARE {"STAND" if up == "LENGTH" else "EDGE"}', cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
+    wv, wu = np.nonzero(white)
+    assert len(wu) and wv.max() < vs.min() and wu.max() - wu.min() + 1 <= tw + 4   # 흰 것은 블록 위 글자 한 줄뿐(dx dy · 축 없음)
 
 
 def test_spare_texts_dyaw_and_base_offset():
