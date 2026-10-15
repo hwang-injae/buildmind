@@ -263,7 +263,8 @@ class PickRanker:
         center_top_z_m 이 없거나 손가락 자리가 막힌 기울어진 블록 · pts 가 있으면 깊이로 손가락 자리가 막힌 후보.
         잡기 'TILT' = 기울어진 눕힌 블록을 공구를 기울여 좁은 폭으로 집기. blocks 가 목록이 아니면 ValueError(부르는 쪽 실수).
         꼬리표 = 줄 세우는 열쇠 순서대로 '묶음 · 높이 N층 · 칸 이름 · 열림 n · 잡기 · 방법 · 틈 n mm'
-        (예 '눕힌 블록 · 높이 3층 · 눕힘 곧게 · 열림 0 · FLAT_LONG · 곧게 · 틈 99 mm'). 높이 = 정수 층(layer_of).
+        (예 '눕힌 블록 · 높이 3층 · 눕힘 곧게 · 열림 0 · FLAT_LONG · 곧게 · 틈 99 mm'). 높이 = 반듯한 블록은 정수 층(layer_of),
+        기울어진 블록은 실제 높이 소수 한 자리(level_of — 예 '높이 2.4층').
         """
         if not isinstance(blocks, list):
             raise ValueError(f'blocks 가 목록이 아니다: {type(blocks).__name__}')
@@ -307,9 +308,11 @@ class PickRanker:
                 key = (group, -self.level_of(b), tier, -fr, method, 0 if grasp == 'TILT' else self.GRASP_ORDER.index(grasp), abs(dyaw), abs(s),
                        -self.gap_of(b, grasp))
                 # 꼬리표는 위 열쇠 순서대로(묶음 → 높이 → 칸 → 열림 → 잡기 → 방법 → 틈) — 화면 손목 그림 아래에서 왜 이 블록이 먼저인지
-                # 앞에서부터 읽히게(10/14 22시 PL · 박진용 ③, 글자만 — 순서는 key 가 정함). 높이는 정수 층(lay): 반듯한 블록은 level_of 와
-                # 같고 기울어진 블록은 level_of(층 사이 값)를 반올림한 층
-                tag = (f'{GROUP_NAMES[group]} · 높이 {lay}층 · {TIER_NAMES[tier]} · 열림 {fr} · {grasp} · '
+                # 앞에서부터 읽히게(10/14 22시 PL · 박진용 ③, 글자만 — 순서는 key 가 정함). 높이는 key 의 level_of 를 그대로 보인다:
+                # 반듯한 블록은 정수 층(lay), 기울어진 블록은 소수 한 자리 — 반올림하면 2.4층 기울어진 블록이 반듯한 2층보다 먼저 집혀도
+                # 둘 다 '높이 2층'으로 보였다(10/15 PL '가' · 박진용 #183 리뷰)
+                height = f'{self.level_of(b):.1f}' if b.get('tilted') else f'{lay}'
+                tag = (f'{GROUP_NAMES[group]} · 높이 {height}층 · {TIER_NAMES[tier]} · 열림 {fr} · {grasp} · '
                        f'{"기울여 집기" if grasp == "TILT" else self.method_of(dyaw, s)} · 틈 {self.gap_of(b, grasp):.0f} mm')
                 rows.append((key, i, grasp, dyaw, s, tag))
         rows.sort(key=lambda r: r[0])
