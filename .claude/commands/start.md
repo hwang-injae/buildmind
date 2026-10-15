@@ -9,7 +9,7 @@
 단계:
 1. git: `user.name`·`user.email`·`pull.rebase false`. GitHub 초대를 수락했는지 확인한다(https://github.com/hwang-injae/rokey_9_pjt2_D2/invitations).
 2. 저장소: `git clone https://github.com/hwang-injae/rokey_9_pjt2_D2.git`. 지금 폴더가 그 저장소인지 `git remote -v`로 본다. `gh auth login`은 사용자가 직접 한다(선택).
-3. 내 에이전트 프롬프트: `docs/에이전트_프롬프트/에이전트프롬프트_<이름>_*.md`를 저장소 맨 위 `CLAUDE.local.md`로 복사한다(Gemini는 `GEMINI.local.md`). 이 이름은 `.gitignore`에 있어 올라가지 않는다.
+3. 내 에이전트 프롬프트(있으면): 팀원별 프롬프트는 10/16부터 저장소에 없다(E-123 ⑨ — 각자 PC에만). 받은 파일이 있으면 저장소 맨 위 `CLAUDE.local.md`로 복사한다(Gemini는 `GEMINI.local.md` — 둘 다 `.gitignore`에 있어 올라가지 않음). 없으면 건너뛴다.
 4. ROS 2 환경: `docs/env/README.md` 순서대로 — Ubuntu 24.04·ROS 2 Jazzy, 두산 드라이버(로봇 PC), (로봇 쪽) CycloneDDS 설치, `.bashrc`에 `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`와 `ROS_DOMAIN_ID=60`(로봇 PC 안에서만 쓴다). PC 사이는 MQTT — `mosquitto-clients`를 깔고 환경 README 6-1 확인표를 본다(웹 PC는 ROS 없음, 10/6 E-26 · E-27). 문서 끝 점검표를 하나씩 본다.
 5. Docker: `docker --version`. 규칙 세 가지를 짚는다 — 지우기 전 `docker ps -a`로 만든 사람 확인, 원본 자료는 이미지에 넣지 않고 `-v`로 연결, 키는 `--env-file .env`.
 6. 읽을 것을 네가 요약해 준다: `AGENTS.md`(규칙), `docs/README.md`의 읽는 순서, `docs/02_인터페이스_IRD_*.md`에서 내 파트 노드·통신만, `docs/05_작업분류_파트별_*.md`에서 내 파트, `docs/06_팀협업규칙_*.md`의 팀 규칙 10개.

@@ -1,6 +1,8 @@
 # tests — ROS 없이 도는 자동 시험
 
-저장소 루트에서 `python3 -m pytest tests -q` 로 돈다(개인 venv 면 `~/venvs/<이름>/bin/python -m pytest tests -q`). 도구는 `pip install -r tests/requirements.txt`(pytest · pyyaml · ruff). CI(`.github/workflows/ci.yml`)가 PR(main 대상)과 main push 마다 같은 것과 `src/d2_task/test` · `src/d2_vision/test`(ROS 없이 pytest)를 돌린다 — 토큰(Claude API)은 쓰지 않는다.
+> 10/16 최종 정리(main c0d5c71 기준).
+
+저장소 루트에서 `python3 -m pytest tests -q` 로 돈다(개인 venv 면 `~/venvs/<이름>/bin/python -m pytest tests -q`). 도구는 `pip install -r tests/requirements.txt` — pytest · pyyaml · ruff + 시험이 import 하는 ezdxf · numpy(레시피 도구 · 비전) · scipy(스캔 추론기) · paho-mqtt · fastapi · httpx(웹 backend). 일부만 깔면 그 시험이 import 오류로 떨어진다. CI(`.github/workflows/ci.yml`)가 PR(main 대상)과 main push 마다 같은 것과 `src/d2_task/test` · `src/d2_vision/test`(ROS 없이 pytest)를 돌린다 — 토큰(Claude API)은 쓰지 않는다.
 
 | 파일 | 무엇을 지키나 |
 |---|---|
@@ -28,7 +30,7 @@
 ## 새 시험을 더할 때
 
 - **ROS 없는 계산·설정·문서 규칙**은 여기 `tests/` 에, 파일 이름은 `test_<무엇>.py`. 파일 맨 위 docstring 에 무엇을 지키는지 한 줄.
-- **ROS 노드 시험**은 `src/<패키지>/test/` 에 둔다(`colcon test`). rclpy 없이 도는 `d2_task` · `d2_vision` 시험은 CI가 pytest로 바로 돌린다(`ci.yml`). 그 패키지 `setup.py` 에 `tests_require=['pytest']` 가 있어야 colcon 이 pytest 로 돌린다(없으면 `setup.py test` 로 떨어져 시험이 돌지 않는다). CI 는 **두산 의존이 없는 패키지만** colcon build·test 한다(`ci.yml` 의 `CI_PKGS`) — 두산·OnRobot 패키지가 필요한 `d2_bringup`·`d2_motion`·`d2_gripper`·`d2_safety` 는 실기 PC에서 빌드한다.
+- **ROS 노드 시험**은 `src/<패키지>/test/` 에 둔다(`colcon test`). rclpy 없이 도는 `d2_task` · `d2_vision` 시험은 CI가 pytest로 바로 돌린다(`ci.yml`). colcon 이 pytest 로 돌리려면 그 패키지 `setup.py` 에 `tests_require=['pytest']` 가 있어야 한다(없으면 `setup.py test` 로 떨어져 시험이 돌지 않는다 — `ci.yml` 주석 · 10/7 민범진). **지금(main c0d5c71) 저장소의 `setup.py` 어디에도 `tests_require` 가 없다** — 그래서 CI 의 `colcon test`(`d2_vision`)는 종료 코드를 경고로만 남기고, 실제 시험은 pytest 단계(`src/d2_task/test` · `src/d2_vision/test`)가 돌린다. `setup.py` 에 넣을지는 담당 팀원 몫(코드 쪽). CI 는 **두산 의존이 없는 패키지만** colcon build·test 한다(`ci.yml` 의 `CI_PKGS`) — 두산·OnRobot 패키지가 필요한 `d2_bringup`·`d2_motion`·`d2_gripper`·`d2_safety` 는 실기 PC에서 빌드한다.
 - 숫자·좌표는 지어내지 않고 `robot_cfg` fixture 로 `robot.yaml` 을 읽는다. 관계(순서·합·일치)를 본다.
 - 키 모양 문자열이 필요하면 파일에 쓰지 않고 실행 때 이어 붙인다(`'sk-' + 'proj-' + 'A' * 30`) — PR 검사가 파일 안의 키 모양을 막는다.
 - 저장소 루트에 `pytest.ini`·`pyproject.toml` 을 두지 않는다 — `colcon test` 가 그것을 rootdir 로 잡는다. 실행은 늘 `python3 -m pytest tests`.

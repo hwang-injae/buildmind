@@ -1,5 +1,7 @@
 # recipe_manager — CAD 설계에서 조립 레시피까지
 
+> 10/16 최종 정리(main c0d5c71 기준).
+
 젠가 가구의 CAD 설계를 **레시피**(구조 — 무엇을 어디에)와 **조립 방법**(어떤 순서로 어떻게 잡아 놓는가)으로 바꾼다(10/8 E-69 용어). ROS 노드가 아니라 **미리 돌리는 도구**다. 담당: 한세교(CAD).
 
 - 같은 폴더의 `COLCON_IGNORE` 때문에 `colcon build`는 이 폴더를 건너뛴다(ROS 패키지가 아님).
@@ -37,7 +39,7 @@ cads/<id>.dxf (부품 이름 · SEQ · STAGE · GRASP 속성 = 원본)
 - 세운 블록(STAND_*) · 옆세운 블록(EDGE_*)은 흩뿌린 공급에서 집어 받침에 눕힌 뒤 받침에서 세워(`STANDUP_HIGH` 세움 · `STANDUP_SIDE` 옆세움) 레시피 잡기로 다시 집는다(10/13 E-103 받침 경유 · 10/14 E-110). 옛 '같은 자세로 놓인 공급 칸에서 집기'는 공급 칸을 없애며(E-103) 끝났다.
 - 모델 ID = `<번호 3자리>_<가구>_<모양>`(의자 먼저, 책상 다음, 새로 만들면 다음 번호). CAD 파일 이름 = 모델 ID 소문자, 기본 설계 `design_id` = 모델 ID 그대로(대문자 — W121 · E-60), 레시피 파일 = `<모델ID>_recipe.json` · `_placements.csv`(이름 안 구분은 `_`, 점은 확장자 앞 하나만).
 - **부품 이름 `part_name`**(E-52 · E-69 → 10/13 E-94 용어 B) = `<역할>[_<옵션>]_<그룹 3자리>_<부품 2자리>`(역할 · 옵션은 영문 대문자 한 단어씩, 옵션 0~1개 — `build`가 검사) — 역할 `LEG` · `SEAT` · `BACK` · `BEAM` · `TOP` · `BASE` · `COLUMN`. 그룹 번호는 같은 역할 그룹을 앞(−y)→뒤, 왼(−x)→오른 순, 부품 번호는 그룹 안에서 아래층부터 · 앞→뒤 · 왼→오른(`build`가 위치와 대조해 틀리면 거부). 노드 사이 `part_id` = `<design_id>_<part_name>`(예 `001_CHAIR_BENCH_V000_LEG_001_01`) — 레시피 파일 안에는 부품 이름만 쓴다. 놓는 순서는 이름이 아니라 `sequence`. 이름 규칙 함수는 정본 `d2_task.recipe_document`(`part_name` · `part_id`)를 쓴다(10/14 E-111 C3).
-- **잡기: 연짝(같은 층에 나란히 붙은 줄 — `d2_task.row_grasp.row_orders`)은 모두 `FLAT_LONG`**(10/13 E-104 — CAD · AI · 스캔 설계 모두, `FLAT_LONG` 손가락이 들어가는 블록만), **그 밖은 짧은 쪽 우선**(10/7 한세교 — 긴 쪽 잡기에서 놓기 오차가 더 컸다): 놓는 순간 두 손가락이 들어가면 `*_SHORT`, 막히면 `*_LONG`(손가락 판단은 task 검사 묶음 `grasp_options`). CAD 4종의 GRASP 속성도 이 규칙으로 맞춰 12개 블록이 긴 쪽 → 짧은 쪽으로 바뀌었다(001 `SEAT_001_01`, 002 `SEAT_001_01` · `BACK_001_01~05`, 003 `BEAM_001_01` · `BEAM_002_01` · `TOP_001_01`, 004 `BASE_001_01` · `TOP_001_01`) — 10/6 실기는 긴 쪽이었으므로 **W118에서 실기 재확인**. (→ 10/13 E-104: 좌판 · 상판 · 바닥 줄은 다시 `FLAT_LONG` — 위 표의 CSV 셈)
+- **잡기: 연짝(같은 층에 나란히 붙은 줄 — `d2_task.row_grasp.row_orders`)은 모두 `FLAT_LONG`**(10/13 E-104 — CAD · AI · 스캔 설계 모두, `FLAT_LONG` 손가락이 들어가는 블록만), **그 밖은 짧은 쪽 우선**(10/7 한세교 — 긴 쪽 잡기에서 놓기 오차가 더 컸다): 놓는 순간 두 손가락이 들어가면 `*_SHORT`, 막히면 `*_LONG`(손가락 판단은 task 검사 묶음 `grasp_options`). CAD 4종의 GRASP 속성도 이 규칙으로 맞춰 12개 블록이 긴 쪽 → 짧은 쪽으로 바뀌었다(001 `SEAT_001_01`, 002 `SEAT_001_01` · `BACK_001_01~05`, 003 `BEAM_001_01` · `BEAM_002_01` · `TOP_001_01`, 004 `BASE_001_01` · `TOP_001_01`). (→ 10/13 E-104: 좌판 · 상판 · 바닥 줄은 다시 `FLAT_LONG` — 위 표의 CSV 셈)
 - 10/7 W139: CAD 4종 안 블록 이름을 `<모델ID>_B<순서>` → 역할 이름으로 바꿈(DXF INSERT · 블록 정의 · XDATA, STEP 제품 이름 — 핸들 · 좌표 · 속성 그대로). 블록 중심 · 회전 · 순서 · 받침 높이는 4종 모두 바꾸기 전과 같다(잡기만 위 12개가 바뀜).
 - 책장(LV3)·아치(LV5)·세운 의자(LV6)는 쓰지 않아 뺐다. 원본은 한세교 작업 폴더에 있다.
 
@@ -88,7 +90,3 @@ python3 src/recipe_manager/recipe_manager/main.py build src/recipe_manager/cads/
 - CAD 레시피의 순서와 잡기는 사람이 CAD 속성에 적는다(잡기는 위 규칙 — 연짝 `FLAT_LONG`, 그 밖 짧은 쪽 우선). AI 생성 · 스캔 설계는 **AI가** 역할 · 그룹 · 순서 · 단계 · 잡기를 쓰고, 변환기 ①은 번호 · 중심 · R · 받침 · 닫힘 축만 채워 검사한다 — 빠지거나 틀리면 `CHECK_FAILED`로 재생성, 코드가 대신 정하지 않는다(10/8 E-69). 예외: 연짝 잡기는 웹이 검사 전에 `FLAT_LONG`으로 맞춘다(10/13 E-104 ③).
 - 레시피에는 로봇·현장 값(TCP, 조립 원점, 그리퍼 명령값)을 넣지 않는다. 조립 원점은 `src/d2_robot/d2_bringup/config/robot.yaml`의 `assembly_origin` 하나만 쓴다.
 - CAD 핸들(`cad.handle`) · `source_cad.sha256`은 CAD 대응 검증용이다 — 사람 · 노드 사이에서는 부품 이름(`part_name` · `part_id`)만 쓴다.
-
-## 남은 일
-
-- 변환기 ① 본체(`parts_to_recipe` — `d2_task` 안 별도 파일, 10/8 E-58)와 task 노드 연결(`task_node.py`의 `DesignChecker(cfg)`에 `parts_to_recipe` 인자): 한세교 W110 — **끝(#99 본체 · #100 검사 묶음 연결, 10/8 밤)**: AI 칸(`role` · `group`(10/13 E-94 전 `part`) · `stage` · `grasp`) 받기 · 공식 채움 없음 · 역할 목록 파일 `src/d2_task/d2_task/roles.json`(10/8 E-69).

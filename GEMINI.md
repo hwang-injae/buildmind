@@ -1,6 +1,6 @@
 # 에이전트 규칙 (D2) — GEMINI.md (AGENTS.md와 같은 내용)
 
-이 저장소에서 일하는 AI 에이전트(Claude·Gemini·Codex 등)는 아래를 지킨다. `CLAUDE.md`·`GEMINI.md`는 이 파일과 같은 내용이다(고칠 때 셋 다 고친다). 사람마다 다른 개인 프롬프트는 `CLAUDE.local.md` 등에 두고 저장소에 올리지 않는다.
+이 저장소에서 일하는 AI 에이전트(Claude·Gemini·Codex 등)는 아래를 지킨다. `AGENTS.md`·`CLAUDE.md`·`GEMINI.md`는 같은 내용이다(제목 줄만 다름 — 고칠 때 셋 다 고친다). 사람마다 다른 개인 프롬프트는 `CLAUDE.local.md` 등에 두고 저장소에 올리지 않는다.
 
 ## 1. 읽는 범위 (토큰 절약 — 팀 규칙 8)
 1. pull 뒤 이번에 들어온 커밋의 제목·본문과 바뀐 파일 목록만 본다.
@@ -15,7 +15,7 @@
 - 관련 기능은 **클래스로 묶는다** — **노드 하나 = 노드 클래스 하나 = 파일 하나.** 노드가 쓰는 계산 클래스(ROS 없이 도는 것)는 같은 패키지의 다른 파일로 나눠도 된다 — 다른 사람이 맡거나 ROS 없이 시험할 때만(규칙 ②). 예: 노드 `gripper_node.py` 하나 + 그 노드가 쓰는 계산 `grasp_check.py`(ROS 없음).
 - 한 번만 쓰는 참조·'나중을 위한' 구조(추상 계층·설정 단계)를 만들지 않는다. 지금 필요한 만큼만 짠다.
 - 두 번 이상 쓰는 값은 `src/d2_robot/d2_bringup/config/robot.yaml` 한 곳에 둔다. 개인 절대 경로(`/home/...`)를 쓰지 않는다(`get_package_share_directory()`·`Path(__file__).parent`).
-- 단위: 노드끼리 m·rad, 파일 mm. **이름 규칙(10/13 PL — 용어 B): 진짜 젠가 블록이면 `block`, 설계 안 부품(블록 하나 크기의 자리)이면 `part`, 부품 그룹(덩어리)이면 `group`.** 부품 번호는 `part_id`(전체 부품 이름 = `<design_id 대문자>_<역할>[_<옵션>]_<그룹 3자리>_<부품 2자리>`, 예: `001_CHAIR_BENCH_V000_LEG_001_01` — E-52 · E-60 · E-69, 옛 `block_id`). 레시피 · 순서표 안 짧은 이름은 `part_name`(`LEG_001_01`). 생성 · 스캔 설계도 AI가 역할 · 그룹(`role` · `group`)을 쓰고 번호는 변환기 ①이 매긴다. 레시피는 모델마다 `<모델ID>_recipe.json`(구조 `recipe/4.0`) + `<모델ID>_placements.csv`(조립 방법 + `recipe_sha256`, 전달 JSON은 `placements/4.0`) 두 파일(10/8 E-69 — `_structure.json` 없음). 이름은 모두 `/d2/` 아래. 전용 메시지는 `d2_interfaces`.
+- 단위: 노드끼리 m·rad, 파일 mm. **이름 규칙(10/13 PL — 용어 B): 진짜 젠가 블록이면 `block`, 설계 안 부품(블록 하나 크기의 자리)이면 `part`, 부품 그룹(덩어리)이면 `group`.** 부품 번호는 `part_id`(전체 부품 이름 = `<design_id 대문자>_<역할>[_<옵션>]_<그룹 3자리>_<부품 2자리>`, 예: `001_CHAIR_BENCH_V000_LEG_001_01` — E-52 · E-60 · E-69, 옛 `block_id`). 레시피 · 순서표 안 짧은 이름은 `part_name`(`LEG_001_01`). 생성 · 스캔 설계도 AI가 역할 · 그룹(`role` · `group`)을 쓰고 번호는 변환기 ①이 매긴다. 레시피는 설계마다 `<design_id>_recipe.json`(구조 `recipe/4.0` — 예 `001_CHAIR_BENCH_V000_recipe.json`) + `<design_id>_placements.csv`(조립 방법 + `recipe_sha256`, 전달 JSON은 `placements/4.0`) 두 파일(10/8 E-69 · 10/14 E-111 — `_structure.json` 없음). 이름은 모두 `/d2/` 아래. 전용 메시지는 `d2_interfaces`.
 - 로봇을 움직이는 코드에는 Ctrl+C·막힘·실패 때 **먼저 로봇을 세우는** 처리(서기 궤적)를 넣는다. rclpy는 `SignalHandlerOptions.NO`로 시작한다.
 - **주석(규칙 10):** 클래스·함수마다 한국어 docstring을 넣는다 — 무엇을 하는지 한 줄, 입력·출력(단위), 로봇을 움직이거나 메시지를 보내는 등 바깥 영향, 실패 때 동작. 코드 안에는 '왜'(숫자·순서·안전 처리)를 적고, 코드를 그대로 읽어 주는 주석은 쓰지 않는다. 코드를 고치면 주석도 고친다. 예시는 `docs/06_팀협업규칙_*.md` 2-6.
 - MoveIt2 장면은 **장면 관리 노드만** 고친다. 멈출지는 정지 노드, 진행표는 작업 판단, **설계가 쌓을 만한지는 검사 묶음(task), 무엇을 쌓을지는 사람(설계 3D의 [조립] 한 번 — 10/13 E-96)**이 정한다. LLM 호출은 `web/backend/design_gen.py` 한 곳(AI = Claude — 웹 PC 호스트 중계 `web/claude_bridge.py`를 거침, 10/13 E-99), DB 접근은 `design_store.py` 한 곳(10/6 E-08·E-22, 둘 다 웹 PC). PC 사이 통신은 `d2_bridge` 한 곳(E-29). 화면 `web/frontend`(브라우저에서 실행)는 `web/backend`의 REST · WebSocket만 쓴다(10/7 E-41).
@@ -24,18 +24,18 @@
 - **OpenAI API 키는 절대** 코드·설정·커밋·이슈·PR·노션·채팅에 쓰지 않는다. PC별 `.env`에서 환경 변수로 읽고, 컨테이너에는 `--env-file .env`로 넘긴다. PR 검사가 키 모양 문자열과 `.env`를 막는다.
 - 컨테이너를 지우는 명령은 사람이 `docker ps -a`로 확인한 뒤에만 실행한다. `docker system prune`·`docker rm -f $(docker ps -aq)` 금지.
 - 원본 자료(녹화·대용량 CAD·DB 데이터)는 컨테이너·이미지에 넣지 않고 로컬 폴더를 연결(`-v`)한다.
-- 컨테이너는 **웹 PC에만**(10/6 18시 E-31): `web/compose.yaml`의 `mosquitto`(MQTT 브로커) · `db`(DB) · `web`(backend FastAPI + frontend 정적 파일) — 셋 다 황인재(S-17). 웹 PC 호스트에는 설계 AI 중계 `web/claude_bridge.py`(E-99)와 음성 `voice.py`. 로봇 PC(ROS 노드 전부)는 호스트. `hmi` · `db-hmi` · `vision` 컨테이너는 없다. 공통 설정은 `docs/env/README.md` 6-1 · 7장.
+- 컨테이너는 **웹 PC에만**(10/6 18시 E-31): `web/compose.yaml`의 `mosquitto`(MQTT 브로커) · `db`(DB) · `web`(backend FastAPI + frontend 정적 파일) — 셋 다 황인재(S-17). 웹 PC 호스트에는 설계 AI 중계 `web/claude_bridge.py`(E-99)와 음성 `web/backend/voice.py`. 로봇 PC(ROS 노드 전부)는 호스트. `hmi` · `db-hmi` · `vision` 컨테이너는 없다. 공통 설정은 `docs/env/README.md` 6-1 · 7장.
 - **PC 사이는 MQTT 다리 한 곳**(E-27~E-29): 웹 PC에는 ROS가 없다. 로봇 PC `d2_bridge`가 ROS ↔ MQTT를 바꾼다(토픽 `d2/<ROS 이름>`, 서비스 `…/req` · `…/res` + `req_id`, 상태 retained). 로봇 PC의 다른 노드는 MQTT를 모르고, `web/`은 ROS를 모른다. 규칙은 IRD 10장.
 
 ## 4. 커밋·PR (팀 규칙 7·8)
 - 브랜치: `{이름}/{YYYYMMDD}-{기능}-{설명}` — `{이름}`은 한글 이름(예: `한세교/20261006-motion-scene-manager`). main은 PR로만(황인재만 예외 — 10/6 PL, PR 없이 바로 push하되 push 전에 `pr_check.py`를 통과하고 커밋 메시지에 `완료: W번호`).
 - 커밋 메시지: `type: 요약` + 이유 2~3줄(필요하면) + **`변경 파일: 경로, 경로`** + `영향: 파트·묶음`.
 - PR 본문 양식의 **'변경 파일'**(필수)과 **'완료한 일정표 작업'**(`완료: W041`)을 채운다.
-- PR을 올리면 **PR 검사**(문법·main 반영·충돌·키·변경 파일·문서 이름·정지 설정)와 **CI**(`ci.yml`: `tests/` · `src/d2_task/test` · `src/d2_vision/test` pytest · 두산 의존 없는 패키지 colcon · ruff 치명 오류 — 토큰 없음)가 돈다. 둘 다 통과해야 merge. **10/14 ~ 10/16 시연(지금): 기능 동결(E-109) 뒤라 팀원 PR은 draft로 두고 auto-merge는 잠시 끔 — PL이 통합 브랜치에 합쳐 시험한 뒤 main에 push한다**(E-112 덧붙임 ⑤ · `docs/06_팀협업규칙_*.md` 3-2-0). 평소: **Claude ①~⑧ 검토는 팀원 PR 전부에서 돈다**(10/7, `/pr-review`와 같은 기준) — '막음'이 없으면 자동 승인 → auto-merge, 있으면 수정 요청. 검토가 못 돌면 사람(황인재·한세교)이 승인한다. **IRD 내용 · `d2_interfaces`를 바꾸거나 본문에 체크 안 된 'PL 확인' 줄이 있으면 자동 승인하지 않고 PL이 확인한 뒤 승인한다(10/7).**
+- PR을 올리면 **PR 검사**(문법·main 반영·충돌·키·변경 파일·문서 이름·정지 설정)와 **CI**(`ci.yml`: `tests/` · `src/d2_task/test` · `src/d2_vision/test` pytest · 두산 의존 없는 패키지 colcon · ruff 치명 오류 — 토큰 없음)가 돈다. 둘 다 통과해야 merge. **10/14 ~ 10/16 시연: 기능 동결(E-109 ①) 뒤라 팀원 PR은 draft로 두고 PL이 통합 브랜치에 합쳐 시험한 뒤 main에 push한다**(E-112 덧붙임 ⑤ — 10/14는 auto-merge도 잠시 끔 · 10/15에는 PL이 고른 동결 예외 PR만 승인 → auto-merge로 main에 직접 병합, `docs/06_팀협업규칙_*.md` 3-2-0). 평소: **Claude ①~⑧ 검토는 팀원 PR 전부에서 돈다**(10/7, `/pr-review`와 같은 기준) — '막음'이 없으면 자동 승인 → auto-merge, 있으면 수정 요청. 검토가 못 돌면 사람(황인재·한세교)이 승인한다. **IRD 내용 · `d2_interfaces`를 바꾸거나 본문에 체크 안 된 'PL 확인' 줄이 있으면 자동 승인하지 않고 PL이 확인한 뒤 승인한다(10/7).**
 - 하루를 마칠 때 `CHANGES.md` 맨 위에 파트별 한 줄을 적는다.
 
 ## 5. 문서 이름 (팀 규칙 9)
-- `docs/` 아래 문서: `이름_v<버전>_<MMDDHH>.md`. **10/13 23시 ~ 10/16 시연까지는 문서 파일 이름(버전 · 월일시)을 바꾸지 않는다 — 내용만 고친다(`docver.py touch` · `major` 쓰지 않음, 새 문서만 만들 때 월일시). 이름 정리는 시연 뒤 PM이 한 번에**(10/13 PL E-109 — PR마다 이름 · 링크를 바꿔 통합 충돌). 그 밖 기간: 큰 변경만 버전 +1(`python3 tools/docver.py major <파일>`), 작은 수정은 월일시만(`python3 tools/docver.py touch <파일>`). 링크도 같이 고쳐진다. 이전 판은 git 이력에 있다. 새 판을 만들면 옛 판 파일은 지운다(같은 폴더에 두 판을 두지 않는다).
+- `docs/` 아래 문서: `이름_v<버전>_<MMDDHH>.md`. ~~10/13 23시 ~ 10/16 시연까지는 문서 파일 이름(버전 · 월일시)을 바꾸지 않는다~~(10/13 PL E-109 ② — PR마다 이름 · 링크를 바꿔 통합 충돌 → 10/15 23시대 PL: 풀림 — E-123). 이름 정리는 PM이 한 번에 한다. 평소: 큰 변경만 버전 +1(`python3 tools/docver.py major <파일>`), 작은 수정은 월일시만(`python3 tools/docver.py touch <파일>`). 링크도 같이 고쳐진다. 이전 판은 git 이력에 있다. 새 판을 만들면 옛 판 파일은 지운다(같은 폴더에 두 판을 두지 않는다).
 - `README.md`·`.github/`·코드는 이 규칙에서 뺀다.
 
 ## 6. 일하는 방식
@@ -52,7 +52,7 @@
 |---|---|---|
 | 로봇 동작 | 박진용, 한세교 (+CAD·레시피·변환기 ① 한세교) | 로봇 셀 · MoveIt 실행기·정지 · MoveIt 장면 · MoveIt 집기·놓기 · 안전 감시 · 인프라·통합 · CAD·레시피·**변환기 ①(부품 JSON `parts/4.0` → 레시피)** · 세우기 동작(E-37 → 10/14 E-110 `STANDUP_*`) |
 | 비전 | 민범진, 한석형, 황인재(10/7 E-42 — HMI와 두 파트. 10/8~11 황인재는 라벨링 · YOLO 학습만 돕는다, E-51) | 손목 보정·녹화 · 손목 블록 인식·배치 확인 · 작업 판단 · 작업 관리자 · **검사 묶음(안정성·받침·잡기) · 변환기 ②(레시피 → 부품 JSON `parts/4.0`) · 스캔 추론기 ③(점군 → 블록 JSON `blocks/2`)** · 흩어진 블록 찾기 · 고르기(E-36 · E-46) |
-| HMI | 황인재 (+PL, 비전도 맡음) | 화면 · **웹 글상자 · AI 설계 생성(Claude — 웹 PC 호스트 중계 `claude_bridge`, 10/13 E-99 · 설계도 직접 작성 E-69) · DB(`designs`·`builds`) · 미리보기·버전 트리 · 스캔 비교 화면** · 웹 PC compose(`mosquitto`·`db`·`web`) · MQTT 다리 `d2_bridge`(W127, 황인재 담당 — E-56) — 웹 코드는 `web/frontend` · `web/backend`(ROS 아님). 음성(`web/backend/voice.py` — 마이크 버튼 · 시동어 · 받아 적기 STT · 음성 '정지')은 민범진(10/13 E-105 · 10/14 E-118) |
+| HMI | 황인재 (+PL, 비전도 맡음) | 화면 · **웹 글상자 · AI 설계 생성(Claude — 웹 PC 호스트 중계 `claude_bridge`, 10/13 E-99 · 설계도 직접 작성 E-69) · DB(`designs`·`builds`·`gen_logs`) · 미리보기·버전 트리 · 스캔 비교 화면** · 웹 PC compose(`mosquitto`·`db`·`web`) · MQTT 다리 `d2_bridge`(W127, 황인재 담당 — E-56) — 웹 코드는 `web/frontend` · `web/backend`(ROS 아님). 음성(`web/backend/voice.py` — 마이크 버튼 · 시동어 · 받아 적기 STT · 음성 '정지')은 민범진(10/13 E-105 · 10/14 E-118) |
 
 - 주제(10/6 E-01): **AI가 설계하고 로봇이 조립하는 젠가 가구** — 요청(웹 글·음성) → 생성 → 검사 → 세대 관리 → 자동 조립(흩어진 블록 집기 포함, E-36) (+ 사람이 완성한 구조를 스캔해 설계도로 만들어 복제). 웹캠·사람 손 인식은 쓰지 않고(E-19 · E-21), 협동 번갈아 쌓기는 챌린지 후보(저장, 10/8 E-64)로 미뤘다. 결정은 `docs/decisions/결정기록_주제개편_1006_*.md`.
-- PC 배치(10/6 18시 E-26~E-35): **로봇 PC**(ROS 2 노드 전부 — task·검사 묶음·다리 포함, 호스트) + **웹 PC**(ROS 없음 — compose `mosquitto`·`db`·`web`, 호스트 `claude_bridge` · 음성). 로봇 PC = 박진용 PC · 웹 PC = 한석형 PC(10/11 E-92). PC 사이 **MQTT** — 두 PC는 Wi-Fi, 브로커는 웹 PC Wi-Fi IPv4에서 DOCKER-USER로 로봇 PC만 받고(인증 없음), 화면은 웹 PC localhost(`127.0.0.1:8000`)에서만 연다(#136, `web/README.md` '두 PC Wi-Fi 연결'). CI는 토큰 없이. 결정은 `docs/decisions/결정기록_PC배치_MQTT_CI_1006_*.md`.
+- PC 배치(10/6 18시 E-26~E-35): **로봇 PC**(ROS 2 노드 전부 — task·검사 묶음·다리 포함, 호스트) + **웹 PC**(ROS 없음 — compose `mosquitto`·`db`·`web`, 호스트 `claude_bridge` · 음성). 로봇 PC = 박진용 PC · 웹 PC = 한석형 PC(10/11 E-92 — 10/15 오전 한세교 PC로 바꿨다가 14시 다시 한석형 노트북, E-92 10/15 덧붙임). PC 사이 **MQTT** — 두 PC는 Wi-Fi, 브로커는 웹 PC Wi-Fi IPv4에서 DOCKER-USER로 로봇 PC만 받고(인증 없음), 화면은 웹 PC localhost(`127.0.0.1:8000`)에서만 연다(#136, `web/README.md` '두 PC Wi-Fi 연결'). CI는 토큰 없이. 결정은 `docs/decisions/결정기록_PC배치_MQTT_CI_1006_*.md`.
