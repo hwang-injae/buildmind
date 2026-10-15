@@ -19,6 +19,7 @@ AI 가 빠뜨리거나 틀린 칸을 코드가 대신 채우지 않는다(E-69) 
 """
 import hashlib
 import json
+import logging
 import os
 import re
 import string
@@ -139,7 +140,8 @@ class DesignGenerator:
                 from openai import OpenAI
                 self._client = OpenAI(base_url=LLM_URL, api_key='claude-bridge', timeout=CALL_TIMEOUT_S, max_retries=CALL_RETRIES)
             except Exception as e:   # noqa: BLE001 — 라이브러리 없음 등 모두 '생성 못 함'으로
-                raise GenError('GEN_FAILED', '설계 AI 중계를 부를 준비를 못 했어요 — 웹 PC를 확인하세요') from e   # openai 라이브러리 없음 등
+                logging.getLogger('web.gen').warning('[생성] 중계 클라이언트 준비 실패: %r', e)   # 화면 글은 짧게, 까닭은 backend 로그에
+                raise GenError('GEN_FAILED', '설계 AI 중계를 부를 준비를 못 했어요 — 웹 PC를 확인하세요') from e
         return self._client
 
     # ---------- Template 이름 · 스캔 AI 판단 기록 ----------
@@ -898,5 +900,4 @@ class DesignGenerator:
         try:
             log['file'] = self.store.save_gen_log(log)
         except Exception as e:   # noqa: BLE001 — 기록 때문에 사용자 요청이 실패하지 않게
-            import logging
             logging.getLogger('web.gen').warning('[생성] 기록 저장 실패: %s', e)
