@@ -3,6 +3,7 @@
 에이전트는 이 파일의 맨 위 며칠만 읽는다. 자세한 내용은 커밋·PR의 '변경 파일'을 본다.
 
 ## 2026-10-15
+- 공통(PM — 10/15 15시대 PL · E-121 덧붙임 ⑭, 박진용 통합 테스트 003 V002): **스캔이 잘못 읽어 W201에 걸리면 저장 막힘 그대로** — 시연은 다시 스캔 또는 추천 설계(E-97). 첫 스캔 일치율 안 뜸은 민범진 · HMI가 봄
 - task(한석형 #190, 10/15 15시대 PL '나' — 동결 중 예외로 한석형 직접 병합 main 416f638): **A4 모서리 판정(기본 꺼짐 `w144_corner_judge`) · 사람 수정 대기 알림 `placed_check`**. #191 `corners_z_m`도 한석형 직접 병합 길 · #187도 민범진 PR 직접 병합(#191 뒤, PL '가'). PM: IRD 2장 `placed_check` · 4.2 `placed_method`(#187 뒤) · `corners_z_m`(깊이 #191 · 마스크 #187 뒤), 결정 기록 E-119 ㉓ 15시대 덧붙임
 - 비전(민범진 #187) · task(한석형 #190) — 10/15 14시대 PL · E-119 덧붙임 ㉓, 다음 통합: **#187 A4 YOLO 마스크 + 관절 광선 재기(기본 꺼짐 `placed_method:=mask`)** · **#190 A4 모서리 판정(기본 꺼짐 `w144_corner_judge` — 켜면 높이 차 · TILTED는 사람 대기, XY 2 mm 다시 집기)**. 10/16 시연 A4 = 마스크로 재기만(`w144_regrasp` false — #190은 시연에서 안 켜짐) · '마스크 −3 px 옮김' 폐기 · 놓기 치우침 −2.4 mm는 박진용 자 확인 뒤. IRD 4.2 assembly에 `placed_method` · `w144_corner_judge` · `corners_z_m`(PM)
 - 공통(PM — 10/15 14시대, PPT 수정 세션이 코드와 대조해 짚음): **문서의 STT 'Whisper' 표기를 코드대로 `gpt-4o-mini-transcribe`(안 되면 `whisper-1`)로** — SDD · 환경 문서 · 아키텍처 설명 v4, 01 FR-G07 · TR-12에 '오인식 바로잡기는 설계 생성 Claude 호출 안에서(따로 부르는 LLM 없음)'. web/ 쪽(주석 · README · requirements)은 HMI 몫
