@@ -68,7 +68,7 @@
 | 보는 방법 | 열기 | 무엇이 보이나 |
 |---|---|---|
 | **draw.io** — 전체 그림 확대 · 이동 | <a href="https://viewer.diagrams.net/?lightbox=1&nav=1#Uhttps%3A%2F%2Fraw.githubusercontent.com%2Fhwang-injae%2Frokey_9_pjt2_D2%2Fmain%2Fdocs%2Fimages%2F%25EC%258B%259C%25EC%258A%25A4%25ED%2585%259C%25EC%2595%2584%25ED%2582%25A4%25ED%2585%258D%25EC%25B2%2598_v7_101320.drawio"><img src="https://img.shields.io/badge/draw.io-%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EC%95%84%ED%82%A4%ED%85%8D%EC%B2%98%20v7-F08705?style=for-the-badge&logo=diagramsdotnet&logoColor=white" alt="draw.io로 보기"></a> | 노드 카드(입력 → 처리 → 출력) · 토픽 · 서비스 선 · 컨테이너 · 오른쪽 MQTT 토픽 표 · ERD |
-| **아키파이(archify) 그림 모음** — 탭으로 골라 보기(움직임 · 다크 모드 · 내보내기) | <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/index.html?v=20261016b#arch"><img src="https://img.shields.io/badge/archify-%EA%B7%B8%EB%A6%BC%20%EB%AA%A8%EC%9D%8C%204%EA%B0%9C-8250df?style=for-the-badge" alt="아키파이 그림 모음"></a> | 탭 4개 — **시스템 아키텍처**(구성 요소 28개 · 연결 42개, 선 글자 = 토픽 · 서비스 이름) · **플로우 차트**(요청 → 생성 → 검사 → 저장 → 조립 + 스캔 복제 · 예외) · **DB ERD**(표 3개 + 보기 1개) · **MQTT 토픽 흐름** · 마우스를 올려도 흐려지지 않음(위 스위치로 켬) |
+| **아키파이(archify) 그림 모음** — 탭으로 골라 보기(움직임 · 다크 모드 · 내보내기) | <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/index.html?v=20261016c#arch"><img src="https://img.shields.io/badge/archify-%EA%B7%B8%EB%A6%BC%20%EB%AA%A8%EC%9D%8C%204%EA%B0%9C-8250df?style=for-the-badge" alt="아키파이 그림 모음"></a> | 탭 4개 — **시스템 아키텍처**(구성 요소 28개 · 연결 42개, 선 글자 = 토픽 · 서비스 이름) · **플로우 차트**(요청 → 생성 → 검사 → 저장 → 조립 + 스캔 복제 · 예외) · **DB ERD**(표 3개 + 보기 1개) · **MQTT 토픽 흐름** · 마우스를 올려도 흐려지지 않음(위 스위치로 켬) |
 
 | 위치 | 노드 · 프로그램 | 하는 일 |
 |---|---|---|
@@ -90,7 +90,7 @@
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/플로우차트_v1_101610_dark.png">
     <img src="docs/images/플로우차트_v1_101610_light.png" width="900" alt="BuildMind 전체 흐름 — 스캔 복제 · 사람 · 설계(생성 · 검사 · 저장) · 로봇 조립 · 예외 5줄 플로우 차트">
   </picture><br>
-  <sub>아키파이(archify) 플로우 차트 · 움직이는 그림으로 보기: <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/index.html?v=20261016b#flow">그림 모음 → 플로우 차트</a></sub>
+  <sub>아키파이(archify) 플로우 차트 · 움직이는 그림으로 보기: <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/index.html?v=20261016c#flow">그림 모음 → 플로우 차트</a></sub>
 </p>
 
 <details>
