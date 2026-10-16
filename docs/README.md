@@ -19,7 +19,7 @@ AI가 설계하고 로봇이 조립하는 젠가 가구(D2팀)의 요구사항 �
 | [research/](research/) | 선행 프로젝트 · 참고 자료 · 10/3 검증 코드 [`ref_1003/`](research/ref_1003/) — **작업 4(`prompt_v09*` · `run_v09` · `jenga_check`)가 AI 생성 · 검사기의 바탕** |
 | [guides/](guides/) | 설명 · 규칙 문서(10/16 E-123 ⑦) — [시스템 아키텍처 설명](guides/시스템아키텍처_설명_v4_101608.md) · [작명 규칙(설계 · 레시피 · 부품 이름)](guides/작명규칙_설계_레시피_블록_v3_101608.md) · [YOLO 데이터 수집 · 라벨링 규칙](guides/YOLO데이터_수집라벨링규칙_v1_101608.md) |
 | [ops/](ops/) | 운영 절차(10/16 E-123 ⑦) — [복구 절차(정지 뒤 다시 시작)](ops/복구절차_정지뒤다시시작_v1_101608.md): 원인별로 푸는 법 · 블록 쥔 채 멈췄을 때 · 다시 이어서 돌리기 · 스캔 중 멈췄을 때 |
-| [images/](images/) | [**시스템 아키텍처 v7**](images/시스템아키텍처_v7_101320.png)(정본 `.drawio`) · **아키파이(archify) 인터랙티브 HTML(10/15):** [시스템 아키텍처 — ROS 노드 · 토픽](images/archify/시스템아키텍처_노드토픽_v1_101519.html) · [DB ERD](images/archify/DB_ERD_v1_101519.html) · [MQTT 토픽 흐름](images/archify/MQTT토픽흐름_v1_101519.html)(브라우저로 열기 — 같은 이름 `.archify.json` = 원본, `archify finalize`로 다시 만듦) · [YOLO 종류 비교](images/YOLO종류_비교_v1_100708.png) · [작업대 배치 v5](images/작업대_배치_v5_100719.png)(10/7 옛 그림 — 작업면 z −18 mm · 공급 칸 6개 · 촬영 자세 3곳 시절, 받침 없음. 지금 값은 `robot.yaml`) |
+| [images/](images/) | [**시스템 아키텍처 v7**](images/시스템아키텍처_v7_101320.png)(정본 `.drawio`) · **아키파이(archify) 인터랙티브 HTML(10/15 · 10/16 플로우 차트 더함):** [그림 모음](images/archify/index.html)(탭 4개 — 브라우저로 열기) · [시스템 아키텍처 — ROS 노드 · 토픽](images/archify/시스템아키텍처_노드토픽_v1_101519.html) · [DB ERD](images/archify/DB_ERD_v1_101519.html) · [MQTT 토픽 흐름](images/archify/MQTT토픽흐름_v1_101519.html)(브라우저로 열기 — 같은 이름 `.archify.json` = 원본, `archify finalize`로 다시 만듦) · [YOLO 종류 비교](images/YOLO종류_비교_v1_100708.png) · [작업대 배치 v5](images/작업대_배치_v5_100719.png)(10/7 옛 그림 — 작업면 z −18 mm · 공급 칸 6개 · 촬영 자세 3곳 시절, 받침 없음. 지금 값은 `robot.yaml`) |
 
 ## 문서 파일 이름 규칙 (팀 규칙 ⑨)
 

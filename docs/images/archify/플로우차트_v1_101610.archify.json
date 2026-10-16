@@ -1,0 +1,405 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "BuildMind 전체 흐름 — 요청 → AI 생성 → 검사 → 저장 → 로봇 조립 (+ 스캔 복제)",
+    "locale": "ko",
+    "quality_profile": "showcase",
+    "output": "발표/archify/workflow-d2-flow-20261016-101027/d2-flow.html",
+    "legend": {
+      "entries": {
+        "frontend": {
+          "label": "사람 · 웹 화면"
+        },
+        "backend": {
+          "label": "로봇 PC · 스캔 처리"
+        },
+        "security": {
+          "label": "검사 · 정지"
+        },
+        "database": {
+          "label": "DB(PostgreSQL)"
+        },
+        "cloud": {
+          "label": "Claude(설계 AI)"
+        },
+        "external": {
+          "label": "사람 손이 필요한 예외"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "scan",
+      "label": "스캔 복제"
+    },
+    {
+      "id": "ui",
+      "label": "사람 · 웹 화면"
+    },
+    {
+      "id": "design",
+      "label": "설계 — 생성 · 검사 · 저장"
+    },
+    {
+      "id": "robot",
+      "label": "로봇 조립 — task · 비전 · MoveIt2"
+    },
+    {
+      "id": "exc",
+      "label": "예외 — 사람 손",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "p_gen",
+      "label": "요청 · 생성 · 검사",
+      "fromCol": 0,
+      "toCol": 2
+    },
+    {
+      "id": "p_build",
+      "label": "저장 · 로봇 조립",
+      "fromCol": 3,
+      "toCol": 5,
+      "variant": "emphasis"
+    }
+  ],
+  "mainPath": [
+    "req",
+    "gen",
+    "check",
+    "pick",
+    "db",
+    "start",
+    "place",
+    "verify",
+    "done"
+  ],
+  "nodes": [
+    {
+      "id": "scanbtn",
+      "lane": "scan",
+      "col": 0,
+      "type": "backend",
+      "icon": "start",
+      "label": "[스캔]",
+      "sublabel": "5자세 깊이 촬영"
+    },
+    {
+      "id": "infer",
+      "lane": "scan",
+      "col": 1,
+      "type": "backend",
+      "label": "설계 복원",
+      "sublabel": "층 지도 + 정수계획"
+    },
+    {
+      "id": "fill",
+      "lane": "scan",
+      "col": 2,
+      "type": "cloud",
+      "label": "Claude 채우기",
+      "sublabel": "역할 · 순서 · 잡기"
+    },
+    {
+      "id": "req",
+      "lane": "ui",
+      "col": 1,
+      "type": "frontend",
+      "icon": "start",
+      "label": "요청",
+      "sublabel": "바탕 설계 + 글 · 음성"
+    },
+    {
+      "id": "pick",
+      "lane": "ui",
+      "col": 3,
+      "type": "frontend",
+      "icon": "person",
+      "label": "후보 고르기",
+      "sublabel": "미리보기 → [조립]"
+    },
+    {
+      "id": "done",
+      "lane": "ui",
+      "col": 5,
+      "type": "frontend",
+      "icon": "success",
+      "label": "완성",
+      "sublabel": "조립 기록 저장"
+    },
+    {
+      "id": "gen",
+      "lane": "design",
+      "col": 1,
+      "type": "cloud",
+      "label": "Claude 생성",
+      "sublabel": "후보 3개 parts/4.0"
+    },
+    {
+      "id": "check",
+      "lane": "design",
+      "col": 2,
+      "type": "security",
+      "icon": "decision",
+      "label": "검사 묶음",
+      "sublabel": "안정성 · 받침 · W201"
+    },
+    {
+      "id": "db",
+      "lane": "design",
+      "col": 3,
+      "type": "database",
+      "label": "DB 저장",
+      "sublabel": "부모 + 다음 V 번호"
+    },
+    {
+      "id": "start",
+      "lane": "robot",
+      "col": 3,
+      "type": "backend",
+      "label": "블록 찾기",
+      "sublabel": "YOLO seg · PickRanker"
+    },
+    {
+      "id": "place",
+      "lane": "robot",
+      "col": 4,
+      "type": "backend",
+      "label": "MoveIt2 집기 · 놓기",
+      "sublabel": "받침 경유 · 다시 재기"
+    },
+    {
+      "id": "verify",
+      "lane": "robot",
+      "col": 5,
+      "type": "backend",
+      "icon": "decision",
+      "label": "확인 · 다시 재기",
+      "sublabel": "축별 2 mm 넘나?"
+    },
+    {
+      "id": "oos",
+      "lane": "exc",
+      "col": 1,
+      "type": "external",
+      "icon": "failure",
+      "label": "범위 밖 안내",
+      "sublabel": "다시 말해 주세요"
+    },
+    {
+      "id": "blocked",
+      "lane": "exc",
+      "col": 2,
+      "type": "external",
+      "icon": "failure",
+      "label": "스캔 저장 막힘",
+      "sublabel": "추천 설계로 [조립]"
+    },
+    {
+      "id": "wait",
+      "lane": "exc",
+      "col": 3,
+      "type": "external",
+      "icon": "waiting",
+      "label": "공급 채우기",
+      "sublabel": "WAIT_SUPPLY"
+    },
+    {
+      "id": "stop",
+      "lane": "exc",
+      "col": 4,
+      "type": "security",
+      "icon": "stop",
+      "label": "정지 · 잠금",
+      "sublabel": "서기 궤적"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-req-gen",
+      "from": "req",
+      "to": "gen",
+      "label": "[AI 생성]",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-gen-check",
+      "from": "gen",
+      "to": "check",
+      "label": "검사 요청",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-check-pick",
+      "from": "check",
+      "to": "pick",
+      "label": "통과 후보",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-pick-db",
+      "from": "pick",
+      "to": "db",
+      "label": "저장",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-db-start",
+      "from": "db",
+      "to": "start",
+      "label": "[조립]",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-start-place",
+      "from": "start",
+      "to": "place",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-place-verify",
+      "from": "place",
+      "to": "verify",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-verify-done",
+      "from": "verify",
+      "to": "done",
+      "label": "다 놓임",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-check-gen",
+      "from": "check",
+      "to": "gen",
+      "label": "까닭 · 2번",
+      "variant": "dashed",
+      "role": "return"
+    },
+    {
+      "id": "e-verify-place",
+      "from": "verify",
+      "to": "place",
+      "label": "다시 집기",
+      "variant": "dashed",
+      "role": "return"
+    },
+    {
+      "id": "e-verify-start",
+      "from": "verify",
+      "to": "start",
+      "label": "다음 부품",
+      "variant": "default",
+      "role": "return"
+    },
+    {
+      "id": "e-scan-infer",
+      "from": "scanbtn",
+      "to": "infer",
+      "variant": "default"
+    },
+    {
+      "id": "e-infer-fill",
+      "from": "infer",
+      "to": "fill",
+      "label": "그대로 저장",
+      "variant": "default"
+    },
+    {
+      "id": "e-fill-check",
+      "from": "fill",
+      "to": "check",
+      "variant": "default"
+    },
+    {
+      "id": "e-gen-oos",
+      "from": "gen",
+      "to": "oos",
+      "label": "범위 밖",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-check-blocked",
+      "from": "check",
+      "to": "blocked",
+      "label": "스캔 막힘",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-blocked-start",
+      "from": "blocked",
+      "to": "start",
+      "label": "추천 설계",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "e-start-wait",
+      "from": "start",
+      "to": "wait",
+      "label": "블록 없음",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-wait-start",
+      "from": "wait",
+      "to": "start",
+      "label": "[계속]",
+      "variant": "dashed",
+      "role": "return"
+    },
+    {
+      "id": "e-place-stop",
+      "from": "place",
+      "to": "stop",
+      "label": "정지 입력",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-stop-start",
+      "from": "stop",
+      "to": "start",
+      "label": "다시 시작",
+      "variant": "dashed",
+      "role": "return"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "생성 · 검사",
+      "items": [
+        "Claude가 같은 Template 설계를 참고해 후보 3개를 씀(5분 상한)",
+        "검사 묶음 = 무게중심 여유 7 mm · 받침 · 손가락 틈 · 작업영역 · W201 조립 가능",
+        "10/15 리허설: 변형 요청 4 / 5 통과 · 형식 실패 0"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "조립",
+      "items": [
+        "흩어진 블록을 YOLO seg + 깊이로 찾고 PickRanker로 고름",
+        "받침에 놓고 다시 재어 레시피 잡기로 집음(세우기 포함)",
+        "모든 이동은 MoveIt2 — 놓인 블록 · 쥔 블록을 피함"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "멈춤 · 사람 손",
+      "items": [
+        "정지 입력 · 로봇 알람 · 시간 초과 → 정지 노드가 서기 궤적 · 잠금",
+        "공급이 비면 WAIT_SUPPLY — 사람이 채우고 [계속]",
+        "스캔 저장이 막히면 추천 설계로 [조립]"
+      ]
+    }
+  ]
+}

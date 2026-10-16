@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BuildMind 그림 모음</title>
+<style>
+  :root { --bg: #0b0f17; --bar: #111827; --line: #263042; --text: #e6edf3; --muted: #9aa4b2; --accent: #2dd4bf; --tab: #1b2333; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans KR", sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 16px; background: var(--bar); border-bottom: 1px solid var(--line); }
+  h1 { margin: 0; font-size: 16px; font-weight: 700; white-space: nowrap; }
+  nav { display: flex; flex-wrap: wrap; gap: 6px; }
+  nav button { border: 1px solid var(--line); background: var(--tab); color: var(--text); padding: 7px 12px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+  nav button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+  .tools { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
+  .tools label { display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+  .tools a { color: var(--muted); }
+  main { position: relative; height: calc(100% - 58px); }
+  iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+  #msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; pointer-events: none; }
+  @media (max-width: 720px) { main { height: calc(100% - 110px); } .tools { margin-left: 0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>BuildMind 그림 모음</h1>
+  <nav role="tablist" aria-label="그림 고르기"></nav>
+  <div class="tools">
+    <label title="끄면 노드에 마우스를 올려도 나머지가 흐려지지 않습니다(클릭하면 그 노드만 강조)"><input type="checkbox" id="hover"> 마우스 올리면 강조</label>
+    <a id="open" href="#" target="_blank" rel="noopener">이 그림만 새 창</a>
+  </div>
+</header>
+<main>
+  <div id="msg">그림을 불러오는 중…</div>
+  <iframe id="view" title="BuildMind 그림"></iframe>
+</main>
+<noscript><p style="padding:16px">자바스크립트가 꺼져 있어요. 그림 파일을 바로 여세요: 시스템아키텍처_노드토픽_v1_101519.html · 플로우차트_v1_101610.html · DB_ERD_v1_101519.html · MQTT토픽흐름_v1_101519.html</p></noscript>
+<script>
+// 아키파이(archify) 그림 4개를 탭으로 골라 본다. 그림 파일은 그대로 두고, 같은 폴더(또는 GitHub main 원본)에서 읽어 iframe 에 넣는다.
+// '마우스 올리면 강조'를 끄면 아키파이의 미리 보기(Intent Trace — 마우스를 올린 노드 말고 모두 20 % 로 흐림)만 막는다.
+var REPO_RAW = 'https://raw.githubusercontent.com/hwang-injae/rokey_9_pjt2_D2/main/docs/images/archify/';
+var REPO_BLOB = 'https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/';
+var VIEWS = [
+  { id: 'arch', label: '시스템 아키텍처', file: '시스템아키텍처_노드토픽_v1_101519.html' },
+  { id: 'flow', label: '플로우 차트', file: '플로우차트_v1_101610.html' },
+  { id: 'erd', label: 'DB ERD', file: 'DB_ERD_v1_101519.html' },
+  { id: 'mqtt', label: 'MQTT 토픽 흐름', file: 'MQTT토픽흐름_v1_101519.html' }
+];
+var NO_HOVER_CSS =
+  'svg[data-intent-trace-active] [data-node-id]{fill-opacity:1!important;stroke-opacity:1!important}' +
+  'svg[data-intent-trace-active] [data-edge-from]{opacity:1!important}' +
+  'svg[data-intent-trace-active] [data-graph-role="automatic-crossover"]>[data-graph-role="automatic-crossover-underlay"]{opacity:1!important}' +
+  'svg[data-intent-trace-active] [data-lifecycle-rail]{opacity:1!important}';
+var cache = {};
+var nav = document.querySelector('nav');
+var frame = document.getElementById('view');
+var msg = document.getElementById('msg');
+var hover = document.getElementById('hover');
+var openLink = document.getElementById('open');
+var current = null;
+
+try { hover.checked = localStorage.getItem('bm-hover') === 'on'; } catch (e) {}
+
+function load(file) {
+  // 같은 폴더(로컬 서버 · GitHub Pages)에서 먼저, 안 되면 GitHub main 원본에서 읽는다(htmlpreview 로 열었을 때).
+  if (cache[file]) return Promise.resolve(cache[file]);
+  var fromHere = location.protocol.indexOf('http') === 0 && location.hostname !== 'htmlpreview.github.io'
+    ? fetch(encodeURI(file)).then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+    : Promise.reject(new Error('skip'));
+  return fromHere.catch(function () {
+    return fetch(REPO_RAW + encodeURIComponent(file)).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); });
+  }).then(function (text) { cache[file] = text; return text; });
+}
+
+function applyHover() {
+  // iframe 안 문서에 미리 보기를 막는 스타일을 넣거나 뺀다(srcdoc 은 같은 출처라 바로 손댈 수 있다).
+  var doc = frame.contentDocument;
+  if (!doc || !doc.head) return;
+  var s = doc.getElementById('bm-no-hover');
+  if (hover.checked) { if (s) s.remove(); return; }
+  if (!s) { s = doc.createElement('style'); s.id = 'bm-no-hover'; s.textContent = NO_HOVER_CSS; doc.head.appendChild(s); }
+}
+
+function show(id) {
+  var v = VIEWS.filter(function (x) { return x.id === id; })[0] || VIEWS[0];
+  current = v;
+  Array.prototype.forEach.call(nav.children, function (b) { b.setAttribute('aria-selected', String(b.dataset.id === v.id)); });
+  openLink.href = 'https://htmlpreview.github.io/?' + REPO_BLOB + encodeURIComponent(v.file);
+  if (location.hash !== '#' + v.id) history.replaceState(null, '', '#' + v.id);
+  msg.textContent = '그림을 불러오는 중…'; msg.style.display = 'flex';
+  load(v.file).then(function (text) {
+    if (current !== v) return;
+    frame.onload = function () { applyHover(); msg.style.display = 'none'; };
+    frame.srcdoc = text;
+  }).catch(function (e) {
+    msg.textContent = '그림을 못 불러왔어요(' + e.message + ') — 오른쪽 위 \'이 그림만 새 창\'으로 여세요.';
+  });
+}
+
+VIEWS.forEach(function (v) {
+  var b = document.createElement('button');
+  b.type = 'button'; b.role = 'tab'; b.dataset.id = v.id; b.textContent = v.label;
+  b.addEventListener('click', function () { show(v.id); });
+  nav.appendChild(b);
+});
+hover.addEventListener('change', function () {
+  try { localStorage.setItem('bm-hover', hover.checked ? 'on' : 'off'); } catch (e) {}
+  applyHover();
+});
+window.addEventListener('hashchange', function () { show(location.hash.slice(1)); });
+show(location.hash.slice(1) || 'arch');
+</script>
+</body>
+</html>

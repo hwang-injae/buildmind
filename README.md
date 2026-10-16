@@ -68,7 +68,7 @@
 | 보는 방법 | 열기 | 무엇이 보이나 |
 |---|---|---|
 | **draw.io** — 전체 그림 확대 · 이동 | <a href="https://viewer.diagrams.net/?lightbox=1&nav=1#Uhttps%3A%2F%2Fraw.githubusercontent.com%2Fhwang-injae%2Frokey_9_pjt2_D2%2Fmain%2Fdocs%2Fimages%2F%25EC%258B%259C%25EC%258A%25A4%25ED%2585%259C%25EC%2595%2584%25ED%2582%25A4%25ED%2585%258D%25EC%25B2%2598_v7_101320.drawio"><img src="https://img.shields.io/badge/draw.io-%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EC%95%84%ED%82%A4%ED%85%8D%EC%B2%98%20v7-F08705?style=for-the-badge&logo=diagramsdotnet&logoColor=white" alt="draw.io로 보기"></a> | 노드 카드(입력 → 처리 → 출력) · 토픽 · 서비스 선 · 컨테이너 · 오른쪽 MQTT 토픽 표 · ERD |
-| **아키파이(archify)** — 인터랙티브(움직임 · 다크 모드 · 내보내기) | <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/%EC%8B%9C%EC%8A%A4%ED%85%9C%EC%95%84%ED%82%A4%ED%85%8D%EC%B2%98_%EB%85%B8%EB%93%9C%ED%86%A0%ED%94%BD_v1_101519.html"><img src="https://img.shields.io/badge/archify-%EB%85%B8%EB%93%9C%20%C2%B7%20%ED%86%A0%ED%94%BD-8250df?style=for-the-badge" alt="아키파이 노드 · 토픽"></a> <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/DB_ERD_v1_101519.html"><img src="https://img.shields.io/badge/archify-DB%20ERD-8250df?style=for-the-badge" alt="아키파이 DB ERD"></a> <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/MQTT%ED%86%A0%ED%94%BD%ED%9D%90%EB%A6%84_v1_101519.html"><img src="https://img.shields.io/badge/archify-MQTT%20%ED%86%A0%ED%94%BD%20%ED%9D%90%EB%A6%84-8250df?style=for-the-badge" alt="아키파이 MQTT 토픽 흐름"></a> | 구성 요소 28개 · 연결 42개(선 글자 = 토픽 · 서비스 이름) / PostgreSQL 표 3개 + 보기 1개 / MQTT 토픽 흐름 |
+| **아키파이(archify) 그림 모음** — 탭으로 골라 보기(움직임 · 다크 모드 · 내보내기) | <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/index.html#arch"><img src="https://img.shields.io/badge/archify-%EA%B7%B8%EB%A6%BC%20%EB%AA%A8%EC%9D%8C%204%EA%B0%9C-8250df?style=for-the-badge" alt="아키파이 그림 모음"></a> | 탭 4개 — **시스템 아키텍처**(구성 요소 28개 · 연결 42개, 선 글자 = 토픽 · 서비스 이름) · **플로우 차트**(요청 → 생성 → 검사 → 저장 → 조립 + 스캔 복제 · 예외) · **DB ERD**(표 3개 + 보기 1개) · **MQTT 토픽 흐름** · 마우스를 올려도 흐려지지 않음(위 스위치로 켬) |
 
 | 위치 | 노드 · 프로그램 | 하는 일 |
 |---|---|---|
@@ -82,6 +82,8 @@
 이름 · 칸의 정본은 [인터페이스 문서(IRD)](docs/02_인터페이스_IRD_v4_101608.md), 패키지 · 상태표 · 절차는 [설계 문서(SDD)](docs/03_설계_SDD_v4_101608.md)입니다. 좌표 · 그리퍼 값 · 시간 기준은 설정 파일 하나(`src/d2_robot/d2_bringup/config/robot.yaml`)에 둡니다.
 
 ### 🔄 알고리즘 플로우 차트 (Logic Flow)
+
+아래 3개는 GitHub에서 바로 그려지는 mermaid 그림이고, 한 장으로 합친 아키파이 판은 [그림 모음 → 플로우 차트](https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/index.html#flow)에서 봅니다.
 
 **① 요청 → AI 설계 생성 → 검사 → 저장**
 
@@ -268,7 +270,7 @@ ros2 run d2_vision scan_live_preview
 |---|---|---|---|---|
 | 🧱 | 자동 조립 완성 | **11 / 11 블록** | 벤치 11개 · 3번 중 2번 | 화면에서 고른 설계를 끝까지 쌓음 — 벤치 실기 4번 이상(10/6 ~ 10/15) |
 | 🤖 | 흩어진 블록 집기 | **35 / 35 (100 %)** | 10개 중 8개 | 10/15 통합 테스트 집기 · 놓기 시도 35번 실패 0 · 10/13 정식 흐름 35 / 37 · 36 / 37 |
-| 🧠 | AI 설계 검사 합격 | **6 / 6 후보** | 요청 3개 중 2개 통과 | 실제 Claude — 글 요청 3 / 3(165초) · 음성 요청 3 / 3(115초) |
+| 🧠 | AI 설계 검사 합격 | **변형 요청 4 / 5** · 형식 실패 **0** | 요청 3개 중 2개 통과 | 10/15 리허설 — 1개는 '범위 밖' 안내(대안 제시) · 통과 평균 103초 · 10/14 후보 6 / 6(글 165초 · 음성 115초) |
 | 🏗️ | AI가 만든 설계 실제 조립 | **2종 완성** | 2종 | 음성으로 만든 `003_DESK_STAND_V002` · `004_DESK_PEDESTAL_V001` |
 | 🔍 | 스캔 복원 일치율 | **100 %** · **95 %**(65개 중 62) | 90 % 이상 | 사람이 쌓은 벤치 실기(10/13) · 기본 설계 사진 판정 |
 | 📏 | 놓은 블록 다시 집기 | 어긋남 **2.17 → 0.73 mm** | ±2 mm | 놓은 블록을 다시 재서 2 mm 넘으면 다시 집어 놓음(10/14) |
