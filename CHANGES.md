@@ -7,6 +7,7 @@
 - 공통(PM — 10/16 오전 PL, E-123 ⑫ ⑬): **AGENTS · CLAUDE · GEMINI.md · .claude/commands 저장소에서 뺌**(PR 자동 검토 기준 → `.github/pr-review-criteria.md`) · **README** 주요 기능에 MoveIt2(멈춤 · 화면 · 음성 칸 뺌) · 아키텍처 draw.io · 아키파이 바로 보기 링크 · 결과 요약 배지 + 표 · 폴더 구조도
 - 공통(PM — 10/16 오전 PL · 한석형 자료): **04 결과표에 10/15 리허설 2 AI 생성 기록(gen_logs 14건) 반영** — 변형 요청 4 / 5 통과 · 형식 실패 0 · 통과 평균 102.8초 · 잡음 · 시동어 6건 VOICE_UNCLEAR 생성 0 · 스캔 채우기 3건(V010 저장) — AC-2 · AC-8 · NFR-04 · V-44 · KPI · README 결과 표 · PPT(22장 · 21장 — PPT 수정 에이전트)
 - 공통(PM — 10/16 오전 PL): **아키파이 플로우 차트(workflow) 새로 + 그림 모음 페이지 `docs/images/archify/index.html`** — 탭 4개(시스템 아키텍처 · 플로우 차트 · DB ERD · MQTT), 마우스를 올려도 나머지가 흐려지지 않게(스위치로 켬), README · docs/README · 아키텍처 설명 링크를 하나로
+- 공통(PM — 10/16 PL): **아키파이 플로우 차트 글자 정렬(노드 아이콘 빼서 제목 · 설명 높이 맞춤) · README 플로우 차트 = 아키파이 그림(밝은 · 어두운 판 자동) + mermaid 3개는 접어 둠** · 그림 모음이 GitHub 새 판을 매번 확인(no-cache)
 - 남은 것: 04 결과표 '＿＿(10/16 시연 결과 — PL 확인)' 칸 · 코드 주석 옛 글(담당 팀원 — task_node 311 · task_manager 1363 '다시 집기 기본 꺼짐' · srv 주석 · types.ts · capture_scene.py 경로)
 
 ## 2026-10-15
