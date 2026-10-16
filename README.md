@@ -30,7 +30,7 @@
 
 ### 3. 흩어진 블록 집기
 - 공급 영역에 흩뿌린 블록을 손목 카메라 D435i로 찍어 **YOLO seg(자체 학습 모델) 윤곽 + 깊이**로 자세 · yaw · 손가락 틈 · 겹침 · 기울어짐을 판정하고, **PickRanker**가 가장 잡기 쉬운 블록을 고릅니다.
-- 집은 블록은 받침에 한 번 놓고 다시 재어(세운 블록은 눕히고, 세울 블록은 `STANDUP_HIGH` · `STANDUP_SIDE`로 세움) 레시피 잡기로 다시 집습니다(**받침 경유**). 모든 이동은 MoveIt2로, 쌓인 블록과 쥔 블록을 피합니다.
+- 집은 블록은 받침에 한 번 놓고 다시 재어(세운 블록은 눕히고, 세울 블록은 `STANDUP_HIGH` · `STANDUP_SIDE`로 세움) 레시피 잡기로 다시 집습니다(**받침 경유**).
 
 ### 4. 놓은 블록 다시 재기 · 다시 집기 + 놓기 보정
 - 블록을 놓을 때마다 손목 카메라로 있음 · 없음 + 높이를 확인하고, 방금 놓은 블록을 **YOLO 마스크 + 카메라 광선**으로 다시 잽니다. 축별 2 mm 이상 어긋나면 같은 블록을 최대 2번 다시 집어 놓습니다(기본 켬). 못 재면 까닭만 기록하고 다음 블록으로 갑니다.
@@ -40,13 +40,10 @@
 - 사람이 쌓은 구조물을 촬영 자세 5곳에서 깊이 촬영 → **층 지도 + 정수계획(SciPy milp)** 으로 블록 자리 · 방향 · 가려진 블록까지 복원합니다(젠가 블록 크기가 하나라 15 · 25 · 75 mm 격자에 맞출 수 있음).
 - [그대로 저장] → Claude가 역할 · 순서 · 잡기를 채움 → 검사 → 설계로 저장 → 사람이 치우면 로봇이 같은 자리에 복제합니다. 저장이 검사에 막히면 저장된 설계 중 **추천 설계(일치율 상위)** 로 바로 조립합니다.
 
-### 6. 언제나 멈춤 · 복구
-- 화면 [정지] · Ctrl+C · 로봇 알람 · 작업 관리자 시간 초과 · 음성 '정지' + 펜던트 비상정지 → 늘 켜 둔 **정지 노드**가 '지금 자리에 서기' 궤적을 제어기에 직접 보내고 잠급니다.
-- 화면 [다시 시작] — 항상 진행 확인부터 — 또는 [초기화] → 치우고 [정리 끝]으로만 풉니다. 블록이 없으면 "공급 채워 주세요", 맞는 블록이 없으면 "맞는 블록이 없어요"를 띄우고 사람이 [계속]을 누릅니다.
-
-### 7. 웹 화면 · 음성
-- 설계 목록 · three.js 3D 미리보기 · 버전 트리 · 진행표 · 손목 검출 영상(고른 블록과 까닭) · 스캔 점군 비교를 한 화면에서 봅니다.
-- 음성은 마이크 버튼 → 시동어(openWakeWord) → 받아 적기(OpenAI `gpt-4o-mini-transcribe`, 안 되면 `whisper-1`) → 요청 문장, 또는 '정지'입니다.
+### 6. MoveIt2로 모든 동작 계획 · 실행
+- 집기 · 옮기기 · 놓기 · 관측 자세 · 스캔 촬영 자세 이동까지 **모든 팔 동작을 MoveIt2(`move_group`)로 계획**합니다 — OMPL BiTRRT(안 풀리면 RRTConnect) · IK KDL.
+- **장면(Planning Scene)** 에 작업대 · 받침 상자 · 이미 놓은 블록을 넣고, 집은 블록은 그리퍼에 붙여(`SceneAttach`) 쥔 채로 피해 갑니다. 놓인 블록과의 여유는 20 mm → 10 mm → 0(실제 크기) 순서로 줄여 다시 계획하고, 흩뿌린 주변 블록은 부풀린 장애물로, 스캔 때는 구조물을 상자로 피합니다.
+- 다가가기 · 들기 · 빠지기는 직선 경로, 조립 자리로 내려가기만 0.4배 속도, 놓기는 블록 바닥이 1 mm 뜬 위치에서 위치 제어로 놓습니다. 정지 · 시간 초과 때는 진행 중 목표를 취소하고 정지 노드가 '지금 자리에 서기' 궤적을 제어기에 직접 보냅니다.
 
 ---
 
@@ -63,8 +60,15 @@
 
 <p align="center">
   <img src="docs/images/시스템아키텍처_v7_101320.png" width="900" alt="시스템 아키텍처 v7 — 노드 카드: 입력 → 처리 → 출력"><br>
-  <sub>시스템 아키텍처 v7(main c0d5c71 — 노드 카드마다 입력 → 처리 → 출력, 화살표 색 = 데이터 갈래) · 따라 읽는 법: <a href="docs/guides/시스템아키텍처_설명_v4_101608.md">시스템 아키텍처 설명</a> · 인터랙티브 그림(브라우저로 열기): <a href="docs/images/archify/시스템아키텍처_노드토픽_v1_101519.html">노드 · 토픽</a> · <a href="docs/images/archify/DB_ERD_v1_101519.html">DB ERD</a> · <a href="docs/images/archify/MQTT토픽흐름_v1_101519.html">MQTT 토픽 흐름</a></sub>
+  <sub>시스템 아키텍처 v7(main 기준 — 노드 카드마다 입력 → 처리 → 출력, 화살표 색 = 데이터 갈래) · 따라 읽는 법: <a href="docs/guides/시스템아키텍처_설명_v4_101608.md">시스템 아키텍처 설명</a></sub>
 </p>
+
+**그림을 브라우저에서 바로 보기** (링크를 누르면 설치 없이 열립니다)
+
+| 보는 방법 | 열기 | 무엇이 보이나 |
+|---|---|---|
+| **draw.io** — 전체 그림 확대 · 이동 | <a href="https://viewer.diagrams.net/?lightbox=1&nav=1#Uhttps%3A%2F%2Fraw.githubusercontent.com%2Fhwang-injae%2Frokey_9_pjt2_D2%2Fmain%2Fdocs%2Fimages%2F%25EC%258B%259C%25EC%258A%25A4%25ED%2585%259C%25EC%2595%2584%25ED%2582%25A4%25ED%2585%258D%25EC%25B2%2598_v7_101320.drawio"><img src="https://img.shields.io/badge/draw.io-%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EC%95%84%ED%82%A4%ED%85%8D%EC%B2%98%20v7-F08705?style=for-the-badge&logo=diagramsdotnet&logoColor=white" alt="draw.io로 보기"></a> | 노드 카드(입력 → 처리 → 출력) · 토픽 · 서비스 선 · 컨테이너 · 오른쪽 MQTT 토픽 표 · ERD |
+| **아키파이(archify)** — 인터랙티브(움직임 · 다크 모드 · 내보내기) | <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/%EC%8B%9C%EC%8A%A4%ED%85%9C%EC%95%84%ED%82%A4%ED%85%8D%EC%B2%98_%EB%85%B8%EB%93%9C%ED%86%A0%ED%94%BD_v1_101519.html"><img src="https://img.shields.io/badge/archify-%EB%85%B8%EB%93%9C%20%C2%B7%20%ED%86%A0%ED%94%BD-8250df?style=for-the-badge" alt="아키파이 노드 · 토픽"></a> <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/DB_ERD_v1_101519.html"><img src="https://img.shields.io/badge/archify-DB%20ERD-8250df?style=for-the-badge" alt="아키파이 DB ERD"></a> <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/MQTT%ED%86%A0%ED%94%BD%ED%9D%90%EB%A6%84_v1_101519.html"><img src="https://img.shields.io/badge/archify-MQTT%20%ED%86%A0%ED%94%BD%20%ED%9D%90%EB%A6%84-8250df?style=for-the-badge" alt="아키파이 MQTT 토픽 흐름"></a> | 구성 요소 28개 · 연결 42개(선 글자 = 토픽 · 서비스 이름) / PostgreSQL 표 3개 + 보기 1개 / MQTT 토픽 흐름 |
 
 | 위치 | 노드 · 프로그램 | 하는 일 |
 |---|---|---|
@@ -250,18 +254,27 @@ ros2 run d2_vision scan_live_preview
 
 ## 📊 결과 요약
 
-시연(10/16) 판정은 [결과표](docs/04_결과_결과표_v2_101608.md)에 채웁니다. 아래는 10/15까지 실기 기록입니다.
+<p align="center">
+  <img src="https://img.shields.io/badge/%EC%9E%90%EB%8F%99%20%EC%A1%B0%EB%A6%BD-11%20%2F%2011%20%EB%B8%94%EB%A1%9D-2ea44f?style=for-the-badge" alt="자동 조립 11 / 11 블록">
+  <img src="https://img.shields.io/badge/%ED%9D%A9%EC%96%B4%EC%A7%84%20%EB%B8%94%EB%A1%9D%20%EC%A7%91%EA%B8%B0-35%20%2F%2035-2ea44f?style=for-the-badge" alt="흩어진 블록 집기 35 / 35">
+  <img src="https://img.shields.io/badge/AI%20%EC%84%A4%EA%B3%84%20%EA%B2%80%EC%82%AC%20%ED%95%A9%EA%B2%A9-6%20%2F%206-1f6feb?style=for-the-badge" alt="AI 설계 검사 합격 6 / 6">
+  <img src="https://img.shields.io/badge/%EC%8A%A4%EC%BA%94%20%EB%B3%B5%EC%9B%90%20%EC%9D%BC%EC%B9%98%EC%9C%A8-100%20%25-8250df?style=for-the-badge" alt="스캔 복원 일치율 100 %">
+  <img src="https://img.shields.io/badge/%EC%9E%90%EB%8F%99%20%EC%8B%9C%ED%97%98-2%2C251%20%ED%86%B5%EA%B3%BC-6e7781?style=for-the-badge" alt="자동 시험 2,251 통과">
+</p>
 
-| 항목 | 결과 |
-|---|---|
-| 자동 조립(벤치 11개) | 11/11 — 10/6 230초(속도 0.3) · 10/7 200.8초 · 10/15 9차 통합 테스트(받침 경유 · 다시 재기 켬) 14분 36초 · 집기 시도 35번 실패 0 |
-| 흩어진 블록 집기 · 받침 경유 | 10/13 정식 흐름 벤치 11/11(37번 중 35번) · 가운데 기둥 책상 11/11(37번 중 36번) · 세운 다리 책상 9/9(10/14) |
-| AI 설계 생성 | 10/14 실제 Claude — 글 요청 후보 3/3 검사 합격 165초 · 음성 요청 3/3 합격 115초 |
-| 생성 설계 조립 | 음성으로 만든 설계 2종 실제 조립 DONE(`003_DESK_STAND_V002` · `004_DESK_PEDESTAL_V001`) |
-| 스캔 복제 | 사람이 쌓은 벤치 일치율 100 %(10/13) · 사진 판정 62/65 = 95 % |
-| 놓은 블록 다시 집기 | 다시 집기 뒤 어긋남 dy 2.17 → 0.73 mm(10/14) |
-| 정지 | Ctrl+C · 펜던트 비상정지 즉시 정지 · 로봇 알람 → 잠금(10/7) · 음성 '멈춰' 정상(10/15) |
-| 자동 시험 | pytest — `src/d2_task/test` 1,442 · `tests/` 503 · `src/d2_vision/test` 306 통과(CI가 PR마다) |
+10/15까지 실기에서 잰 값입니다(10/16 시연 판정은 [결과표](docs/04_결과_결과표_v2_101608.md)에 채웁니다).
+
+| | 지표 | 결과 | 목표 | 무엇을 잰 값인가 |
+|---|---|---|---|---|
+| 🧱 | 자동 조립 완성 | **11 / 11 블록** | 벤치 11개 · 3번 중 2번 | 화면에서 고른 설계를 끝까지 쌓음 — 벤치 실기 4번 이상(10/6 ~ 10/15) |
+| 🤖 | 흩어진 블록 집기 | **35 / 35 (100 %)** | 10개 중 8개 | 10/15 통합 테스트 집기 · 놓기 시도 35번 실패 0 · 10/13 정식 흐름 35 / 37 · 36 / 37 |
+| 🧠 | AI 설계 검사 합격 | **6 / 6 후보** | 요청 3개 중 2개 통과 | 실제 Claude — 글 요청 3 / 3(165초) · 음성 요청 3 / 3(115초) |
+| 🏗️ | AI가 만든 설계 실제 조립 | **2종 완성** | 2종 | 음성으로 만든 `003_DESK_STAND_V002` · `004_DESK_PEDESTAL_V001` |
+| 🔍 | 스캔 복원 일치율 | **100 %** · **95 %**(65개 중 62) | 90 % 이상 | 사람이 쌓은 벤치 실기(10/13) · 기본 설계 사진 판정 |
+| 📏 | 놓은 블록 다시 집기 | 어긋남 **2.17 → 0.73 mm** | ±2 mm | 놓은 블록을 다시 재서 2 mm 넘으면 다시 집어 놓음(10/14) |
+| 🗂️ | 설계 세대 관리(DB) | 파생 설계 **15개** · **3세대** | 부모 · 버전 트리 | PostgreSQL `designs`(10/15 조회) |
+| ⏱️ | 블록 1개 조립 시간 | 약 **80초** | (제안) 60초 이하 | 받침 경유 · 다시 재기 포함 — 벤치 11개 14분 36초(10/15) |
+| ✅ | 자동 시험 | **2,251개** 통과 | — | `src/d2_task/test` 1,442 · `tests/` 503 · `src/d2_vision/test` 306 — CI가 PR마다 |
 
 ## 👥 팀 · 역할
 
@@ -273,6 +286,33 @@ ros2 run d2_vision scan_live_preview
 
 ## 📁 프로젝트 구조 · 문서
 
+```text
+rokey_9_pjt2_D2/
+├── src/                          # ROS 2 패키지 (로봇 PC)
+│   ├── d2_interfaces/            #   전용 메시지 7개 + JsonQuery
+│   ├── d2_robot/
+│   │   ├── d2_bringup/           #   브링업 launch · robot.yaml(설정 한 곳) · 기본 설계 레시피
+│   │   ├── d2_motion/            #   pick_place(집기 · 놓기 + MoveIt2 실행기) · scene_manager(장면)
+│   │   ├── d2_gripper/           #   RG2 그리퍼 노드
+│   │   └── d2_safety/            #   정지 노드(서기 궤적 · 잠금)
+│   ├── d2_vision/                #   wrist_block(YOLO seg · 배치 확인 · 스캔 추론) · scan_live_preview · models/*.pt
+│   ├── d2_task/                  #   task(작업 관리자 · 작업 판단 · 검사 묶음 · W201 조립 가능 검사)
+│   ├── d2_bridge/                #   ROS ↔ MQTT 다리
+│   └── recipe_manager/           #   CAD → 레시피 도구(cads · recipes)
+├── web/                          # 웹 PC (ROS 없음)
+│   ├── backend/                  #   FastAPI · AI 설계 생성 · 저장소(PostgreSQL / JSON) · voice.py(음성)
+│   ├── frontend/                 #   Next.js + three.js 화면
+│   ├── db/  · mosquitto/         #   PostgreSQL 표 · MQTT 브로커 설정
+│   ├── claude_bridge.py          #   설계 AI 중계(웹 PC 호스트)
+│   └── compose.yaml · Dockerfile #   컨테이너 3개(mosquitto · db · web)
+├── docs/                         # 문서 — 01 ~ 06 정본 · decisions · guides · ops · test-reports · env · images
+├── tests/                        # ROS 없는 자동 시험(pytest)
+├── tools/                        # 문서 이름 도구 · 웹 PC 브로커 방화벽 · 포트 확인
+├── .github/                      # PR 양식 · PR 검사 · CI · Claude 검토
+├── requirements.txt              # 로봇 PC pip 꾸러미
+└── README.md
+```
+
 | 경로 | 내용 |
 |---|---|
 | [`src/`](src/README.md) | ROS 2 패키지 — `d2_interfaces` · `d2_robot/`(`d2_bringup` · `d2_motion` · `d2_gripper` · `d2_safety`) · `d2_vision` · `d2_task` · `d2_bridge` · `recipe_manager`(레시피 도구) |
@@ -282,7 +322,7 @@ ros2 run d2_vision scan_live_preview
 | `tools/` | 문서 이름 도구 `docver.py` · 웹 PC 브로커 방화벽 `install_mqtt_access.sh` · 포트 확인 등 |
 | `.github/` | 협업 규칙 · PR 양식 · PR 검사 · CI · Claude 검토 · auto-merge |
 
-협업 규칙은 [팀 협업 규칙](docs/06_팀협업규칙_v1_101608.md) · [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) · [AGENTS.md](AGENTS.md)(AI 에이전트 규칙)에 있습니다. 날마다 바뀐 것은 [CHANGES.md](CHANGES.md)입니다.
+협업 규칙은 [팀 협업 규칙](docs/06_팀협업규칙_v1_101608.md) · [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md)에 있습니다. 날마다 바뀐 것은 [CHANGES.md](CHANGES.md)입니다.
 
 ## 라이선스
 

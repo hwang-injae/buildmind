@@ -86,3 +86,8 @@ dist/
 
 # 팀원별 에이전트 프롬프트 — 10/16 E-123 ⑨: 저장소에서 뺌(각자 PC에만, CLAUDE.local.md 로 복사해 씀)
 docs/에이전트_프롬프트/
+# 에이전트 규칙 · 단축 명령 — 10/16 E-123 ⑨: 저장소에서 뺌(각자 PC에만)
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
+/.claude/

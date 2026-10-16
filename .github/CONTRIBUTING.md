@@ -2,7 +2,7 @@
 
 팀원 5명이 같은 방식으로 Branch / PR / Issue를 다루기 위한 규칙이다. 팀 전체 규칙(역할·코드·보안·컨테이너·로봇 안전·문서 이름)은 [팀 협업 규칙](../docs/06_팀협업규칙_v1_101608.md)에 있다. 저장소: https://github.com/hwang-injae/rokey_9_pjt2_D2 (공개)
 
-> 하루 흐름: `/today 이름`(main 받기 → 오늘 내 작업 → 브랜치) → 작업 → `/wrap W번호`(커밋 → push → PR 초안). 명령은 `.claude/commands/`에 있다.
+> 하루 흐름: `/today 이름`(main 받기 → 오늘 내 작업 → 브랜치) → 작업 → `/wrap W번호`(커밋 → push → PR 초안). 명령은 `.claude/commands/`에 있었다 (→ 10/16 E-123 ⑨: 에이전트 규칙 `AGENTS.md` · `CLAUDE.md` · `GEMINI.md` · 단축 명령 `.claude/commands/`는 저장소에서 뺌 — 각자 PC에만, PR 자동 검토 기준은 `.github/pr-review-criteria.md`).
 
 ## 1. Branch
 ```
@@ -41,7 +41,7 @@ feat: MoveIt 실행기에 서기 정지 추가
 | `chore` | 설정·패키지 구성 |
 | `docs` | 문서 |
 
-- `변경 파일:`과 `영향:`은 에이전트가 그 파일만 읽게 하려는 것이다(토큰 절약, `AGENTS.md`). 하루를 마칠 때 `CHANGES.md` 맨 위에 파트별 한 줄 요약을 더한다.
+- `변경 파일:`과 `영향:`은 에이전트가 그 파일만 읽게 하려는 것이다(토큰 절약 — 에이전트 규칙, 10/16부터 각자 PC에만). 하루를 마칠 때 `CHANGES.md` 맨 위에 파트별 한 줄 요약을 더한다.
 - '수정', 'update', '123' 같은 메시지 금지. 커밋 하나에 작업 하나.
 
 ## 5. Pull Request

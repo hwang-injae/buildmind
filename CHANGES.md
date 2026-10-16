@@ -4,6 +4,7 @@
 
 ## 2026-10-16
 - 공통(PM — 10/15 23시 ~ 10/16 PL, E-123 · 시연 끝): **문서 최종 정리** — 전체 점검(Claude 지적 167 · 제미나이 판정 157 맞음 · 제미나이 새로 찾기 중 줄로 확인한 9) → PL이 고른 대로 01 ~ 06 · 아키텍처 설명 · 복구 절차(스캔 W201 막힘 = 추천 설계) · env · src/web/tests README · 규칙 파일 · 결정 기록을 main c0d5c71에 맞춤(웹 PC 명령 바로잡음 — compose 세 값 · 중계 `--host 172.17.0.1` · 음성 `--host`) · **01 · 02 · 03 v4 · 정본만 맨 위(docs/guides/ · docs/ops/)** · 문서 6개 지움 · **docs/에이전트_프롬프트/ 저장소에서 뺌(.gitignore)** · 기록물 이름 날짜 그대로(규칙 9 예외) · **루트 README = 제출 가이드라인 양식**(주요 기능 · 시스템 설계 · 플로우 차트 mermaid · 개발 환경 · 사용 장비 · 의존성 · 실행 순서) + `requirements.txt`(로봇 PC pip) · 아키텍처 그림 v7 다시 그림(드라이브 같은 ID)
+- 공통(PM — 10/16 오전 PL, E-123 ⑫ ⑬): **AGENTS · CLAUDE · GEMINI.md · .claude/commands 저장소에서 뺌**(PR 자동 검토 기준 → `.github/pr-review-criteria.md`) · **README** 주요 기능에 MoveIt2(멈춤 · 화면 · 음성 칸 뺌) · 아키텍처 draw.io · 아키파이 바로 보기 링크 · 결과 요약 배지 + 표 · 폴더 구조도
 - 남은 것: 04 결과표 '＿＿(10/16 시연 결과 — PL 확인)' 칸 · 코드 주석 옛 글(담당 팀원 — task_node 311 · task_manager 1363 '다시 집기 기본 꺼짐' · srv 주석 · types.ts · capture_scene.py 경로)
 
 ## 2026-10-15

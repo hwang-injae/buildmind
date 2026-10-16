@@ -1,6 +1,6 @@
 # PR 검사 → Claude 검토 → 판정 (팀 규칙 2-5·4·7·8·9·10)
 # 1. 검사(필수 검사): 문법·main 반영·충돌·키·변경 파일·문서 이름 + 정지 설정(단어 수준)
-# 2. Claude 검토: .claude/commands/pr-review.md 3번의 ①~⑧. 팀원(협업자)이 연 모든 PR에서 돈다(10/7 01시 PL — 황인재·한세교가 직접 보고
+# 2. Claude 검토: .github/pr-review-criteria.md 의 ①~⑧. 팀원(협업자)이 연 모든 PR에서 돈다(10/7 01시 PL — 황인재·한세교가 직접 보고
 #    승인하는 일이 거의 없어서. 10/6 저녁의 라벨 `claude-review` 조건은 없앴다. 토큰이 모자라면 문서만 바뀐 PR부터 건너뛰기로). 외부 PR에는 돌지 않는다(공개 저장소).
 # 3. 판정: ①~⑧에 '막음'이 없으면 자동 승인, 있으면 '수정 요청' + 이유. 검토가 돌지 않았거나 실패하면 판정도 돌지 않는다(코멘트 없음).
 #    본문에 체크 안 된 '- [ ] … PL 확인' 줄이 있거나 IRD(docs/02_인터페이스_IRD_*.md) 내용 · src/d2_interfaces/를 바꿨으면 막음이 없어도 승인하지 않고
@@ -113,7 +113,7 @@ jobs:
           prompt: |
             너는 팀 저장소 ${{ github.repository }} 의 PR #${{ github.event.pull_request.number }} 검토자다. 파일을 읽기만 한다.
 
-            [기준] `.claude/commands/pr-review.md` 3번의 ①~⑧ 이 막는 사유다. 그 밖(이름·주석 문장·print 등)은 참고 의견이다.
+            [기준] `.github/pr-review-criteria.md`의 ①~⑧ 이 막는 사유다. 그 밖(이름·주석 문장·print 등)은 참고 의견이다.
             필요하면 지금 폴더(main)의 `docs/06_팀협업규칙_*.md`(팀 규칙), `docs/02_인터페이스_IRD_*.md`(이름 정본),
             `docs/03_설계_SDD_*.md`의 패키지 표(패키지 → 담당 파트)를 읽는다.
 

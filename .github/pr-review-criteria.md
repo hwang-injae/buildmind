@@ -1,7 +1,7 @@
-PR 번호 $ARGUMENTS 를 검토한다(없으면 `gh pr list --state open`으로 보여 주고 고르게 한다). 승인 권한자(황인재·한세교)가 쓴다. PR 검사(Actions)가 기본 검사(문법·main 반영·충돌·키·변경 파일·문서 이름·정지 설정) 뒤 Claude로 아래 ①~⑧을 먼저 보고 결과표를 PR에 남긴다(자동 승인 / 수정 요청). 이 명령은 **사람이 다시 볼 때** 쓴다 — 자동 결과가 의심스럽거나, 검토가 못 돌았거나, 황인재가 올린 PR이라 자동 판정이 안 남았을 때.
+# PR 검토 기준 ①~⑧ (PR 검사 workflow `pr_check.yml`의 Claude 검토가 읽음)
 
-1. `gh pr view $ARGUMENTS --json title,body,author,headRefName,files,statusCheckRollup,reviews`로 본문과 검사 결과를 본다. PR 검사가 실패했으면 Checks의 이유만 정리하고 끝낸다.
-2. 본문 '변경 파일'에 적힌 파일만 `gh pr diff $ARGUMENTS`에서 읽는다(토큰 절약 — 팀 규칙 8). 목록과 실제 바뀐 파일이 다르면 그것부터 지적한다.
+> 10/16 E-123 ⑨: 에이전트 규칙 파일(`AGENTS.md` · `CLAUDE.md` · `GEMINI.md` · `.claude/commands/`)을 저장소에서 빼면서, 자동 검토가 쓰던 기준(옛 `.claude/commands/pr-review.md` 3번)만 여기로 옮겼다. 내용은 그대로.
+
 3. 막는 사유인지 본다:
    ① 로봇을 움직이는 코드에 Ctrl+C·막힘·실패 때 먼저 서는 처리(서기 궤적, `SignalHandlerOptions.NO`)가 **실제 로직으로** 있는가
    ② MoveIt2 장면을 장면 관리 노드 밖에서 고치지 않는가. 멈춤은 정지 노드, 진행표는 작업 판단, 설계가 쌓을 만한지는 검사 묶음에서만 정하는가
@@ -12,6 +12,3 @@ PR 번호 $ARGUMENTS 를 검토한다(없으면 `gh pr list --state open`으로 
    ⑦ 키·`.env`·원본 자료(녹화·DB 데이터)가 없는가. Dockerfile이 원본을 이미지에 복사하지 않는가. **CAD(DXF·STEP)는 팀이 만든 것이고 한 파일 1 MB 이하면 `recipe_manager/`에 넣어도 된다**(10/6 PL — 젠가 가구 CAD는 수십~수백 KB). 1 MB를 넘거나 강의·외부에서 받은 CAD로 보이면 막는다. **학습한 YOLO 모델(`.pt`)은 `src/d2_vision/models/`에 판 이름으로 넣어도 된다**(10/11 PL E-86 — 일반 커밋 · 한 파일 50 MB 이하). 50 MB를 넘거나 다른 곳에 두었으면 막고, 원본 사진 · 라벨 · 비교 자료(학습 데이터)는 여전히 막는다
    ⑧ 새로 만들거나 고친 클래스·함수에 무엇을 하는지·입출력(단위)·바깥 영향·실패 때 동작을 적은 docstring이 있는가(팀 규칙 10). 코드를 고쳤는데 주석이 옛 동작을 말하고 있지 않은가
    그 밖(이름·주석 문장·print 등)은 참고 의견으로만 적는다.
-4. 결과를 표로 낸다: | 항목 | 결과 | 파일:줄 |. 그리고 결정 제안(승인 / 수정 요청)과 PR에 달 코멘트 초안을 보여 준다.
-5. **사람이 확인한 뒤에만** 실행한다: `gh pr review $ARGUMENTS --request-changes --body-file <초안>`(막는 사유가 있을 때) 또는 `gh pr comment`. 자동 판정과 같은 결론이면 다시 누르지 않는다. 자동 '수정 요청'(황인재 계정)이 틀렸으면 그 리뷰를 Dismiss(취소)한 뒤 승인한다 — 승인만 누르면 수정 요청이 남아 merge가 막힌다. 올린 사람이 나 자신이면 코멘트만 남긴다. merge는 누르지 않는다 — 승인하면 GitHub auto-merge가 Squash merge 한다(10/6 저녁). **승인 = merge**이므로 승인 전에 확인한다.
-6. 본문에 `완료: W번호`가 있으면 merge 뒤 문서담당이 일정표에 반영한다고 한 줄 덧붙인다.

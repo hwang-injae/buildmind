@@ -161,8 +161,8 @@ class Verdict:
         notes = [n for n in data.get('notes') or [] if str(n).strip()]
         if notes:
             lines += ['', '**참고 의견** (막는 사유 아님)'] + [f'- {self.cell(n)}' for n in notes]
-        lines += ['', f'<sub>기준: `.claude/commands/pr-review.md` ①~⑧ · [실행 기록]({self.run_url}) · '
-                      f'Claude 판정은 틀릴 수 있다 — 승인자가 `/pr-review {self.pr}`로 다시 볼 수 있다.</sub>']
+        lines += ['', f'<sub>기준: `.github/pr-review-criteria.md` ①~⑧ · [실행 기록]({self.run_url}) · '
+                      f'Claude 판정은 틀릴 수 있다 — 승인자가 PR을 직접 다시 볼 수 있다.</sub>']
         if blocked:
             lines += ['', '❌ 항목을 고쳐 다시 push 하면 검토가 다시 돈다.']
         return '\n'.join(lines)
@@ -183,7 +183,7 @@ class Verdict:
         parsed = self.parse() if self.review_result == 'success' else None
         if parsed is None:
             self.post('comment', f'PR 검사는 통과 ✅, **Claude 검토를 못 했습니다**([실행 기록]({self.run_url})). '
-                                 f'자동 승인하지 않았습니다 — 승인자({self.approvers})가 `/pr-review {self.pr}`로 확인해 주세요.')
+                                 f'자동 승인하지 않았습니다 — 승인자({self.approvers})가 PR을 직접 확인해 주세요.')
             return
         data, items = parsed
         blocked = any(i['result'] == '막음' for i in items.values())

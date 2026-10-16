@@ -63,4 +63,4 @@ ros2 launch d2_bringup robot_nodes.launch.py mode:=real     # 실기
 
 - 두 launch에는 카메라 · 작업 관리자(`task`) · 손목 비전(`wrist_block` · `scan_live_preview`) · 다리(`bridge`)가 없다 — 따로 `ros2 run`한다(실행 순서 SDD 3.5). 수업 브링업(`m0609_rg2_bringup bringup.launch.py`)은 MoveIt을 띄우지 않으므로 이 브링업과 같이 띄우지 않는다.
 - 브링업이 떴는지는 로그 `You can start planning now!`, 노드 4개는 `[집기·놓기] 준비 끝`으로 본다. 브링업을 다시 켜면 노드 4개도 다시 켠다.
-- 가상 에뮬레이터 실행 · 종료 때 컨테이너 삭제 처리는 [저장소 규칙](../../AGENTS.md) 3장을 먼저 확인한다(지우기 전 `docker ps -a`).
+- 가상 에뮬레이터 실행 · 종료 때 컨테이너 삭제 처리는 [팀 협업 규칙](../../docs/06_팀협업규칙_v1_101608.md)의 컨테이너 규칙을 먼저 확인한다(지우기 전 `docker ps -a`).
