@@ -86,7 +86,8 @@
       "type": "backend",
       "icon": "none",
       "label": "[스캔]",
-      "sublabel": "5자세 깊이 촬영"
+      "sublabel": "5자세 깊이 촬영",
+      "width": 148
     },
     {
       "id": "infer",
@@ -95,7 +96,8 @@
       "type": "backend",
       "label": "설계 복원",
       "sublabel": "층 지도 + 정수계획",
-      "icon": "none"
+      "icon": "none",
+      "width": 148
     },
     {
       "id": "fill",
@@ -104,7 +106,8 @@
       "type": "cloud",
       "label": "Claude 채우기",
       "sublabel": "역할 · 순서 · 잡기",
-      "icon": "none"
+      "icon": "none",
+      "width": 148
     },
     {
       "id": "req",
@@ -113,7 +116,8 @@
       "type": "frontend",
       "icon": "none",
       "label": "요청",
-      "sublabel": "바탕 설계 + 글 · 음성"
+      "sublabel": "바탕 설계 + 글 · 음성",
+      "width": 148
     },
     {
       "id": "pick",
@@ -122,7 +126,8 @@
       "type": "frontend",
       "icon": "none",
       "label": "후보 고르기",
-      "sublabel": "미리보기 → [조립]"
+      "sublabel": "미리보기 → [조립]",
+      "width": 148
     },
     {
       "id": "done",
@@ -131,7 +136,8 @@
       "type": "frontend",
       "icon": "none",
       "label": "완성",
-      "sublabel": "조립 기록 저장"
+      "sublabel": "조립 기록 저장",
+      "width": 148
     },
     {
       "id": "gen",
@@ -140,7 +146,8 @@
       "type": "cloud",
       "label": "Claude 생성",
       "sublabel": "후보 3개 parts/4.0",
-      "icon": "none"
+      "icon": "none",
+      "width": 148
     },
     {
       "id": "check",
@@ -149,7 +156,8 @@
       "type": "security",
       "icon": "none",
       "label": "검사 묶음",
-      "sublabel": "안정성 · 받침 · W201"
+      "sublabel": "안정성 · 받침 · W201",
+      "width": 148
     },
     {
       "id": "db",
@@ -158,7 +166,8 @@
       "type": "database",
       "label": "DB 저장",
       "sublabel": "부모 + 다음 V 번호",
-      "icon": "none"
+      "icon": "none",
+      "width": 148
     },
     {
       "id": "start",
@@ -167,16 +176,18 @@
       "type": "backend",
       "label": "블록 찾기",
       "sublabel": "YOLO seg · PickRanker",
-      "icon": "none"
+      "icon": "none",
+      "width": 148
     },
     {
       "id": "place",
       "lane": "robot",
       "col": 4,
       "type": "backend",
-      "label": "MoveIt2 집기 · 놓기",
+      "label": "MoveIt2 집기·놓기",
       "sublabel": "받침 경유 · 다시 재기",
-      "icon": "none"
+      "icon": "none",
+      "width": 148
     },
     {
       "id": "verify",
@@ -184,8 +195,9 @@
       "col": 5,
       "type": "backend",
       "icon": "none",
-      "label": "확인 · 다시 재기",
-      "sublabel": "축별 2 mm 넘나?"
+      "label": "확인·다시 재기",
+      "sublabel": "축별 2 mm 넘나?",
+      "width": 148
     },
     {
       "id": "oos",
@@ -194,7 +206,8 @@
       "type": "external",
       "icon": "none",
       "label": "범위 밖 안내",
-      "sublabel": "다시 말해 주세요"
+      "sublabel": "다시 말해 주세요",
+      "width": 148
     },
     {
       "id": "blocked",
@@ -203,7 +216,8 @@
       "type": "external",
       "icon": "none",
       "label": "스캔 저장 막힘",
-      "sublabel": "추천 설계로 [조립]"
+      "sublabel": "추천 설계로 [조립]",
+      "width": 148
     },
     {
       "id": "wait",
@@ -212,7 +226,8 @@
       "type": "external",
       "icon": "none",
       "label": "공급 채우기",
-      "sublabel": "WAIT_SUPPLY"
+      "sublabel": "WAIT_SUPPLY",
+      "width": 148
     },
     {
       "id": "stop",
@@ -221,7 +236,8 @@
       "type": "security",
       "icon": "none",
       "label": "정지 · 잠금",
-      "sublabel": "서기 궤적"
+      "sublabel": "서기 궤적",
+      "width": 148
     }
   ],
   "edges": [
@@ -277,7 +293,9 @@
       "from": "verify",
       "to": "done",
       "label": "다 놓임",
-      "variant": "emphasis"
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "right"
     },
     {
       "id": "e-check-gen",
