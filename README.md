@@ -216,7 +216,7 @@ cd web && cp .env.example .env    # OpenAI 키(음성 받아 적기) · DB 비�
 
 ## 🚀 실행 순서 (How to Run)
 
-전체 시스템은 아래 순서대로 터미널을 열어 실행합니다. 로봇을 움직이기 전에 **펜던트를 든 사람이 옆에 있고, 사람이 작업 영역 밖인지** 확인합니다.
+전체 시스템은 아래 순서대로 터미널을 열어 실행합니다. **켜는 순서: 웹 PC(브로커 · DB · 웹 → 설계 AI 중계 → 음성) → 로봇 PC(브링업 → 손목 카메라 → 노드 4개 → 손목 비전 → 작업 관리자 → MQTT 다리)** — 다리가 붙을 브로커가 먼저 떠 있어야 하고, 노드 4개는 브링업 로그에 `You can start planning now!`가 나온 뒤에 켭니다. 로봇을 움직이기 전에 **펜던트를 든 사람이 옆에 있고, 사람이 작업 영역 밖인지** 확인합니다.
 
 ### 1. 웹 PC — 화면 · 브로커 · DB · 설계 AI · 음성
 
@@ -231,9 +231,9 @@ D2_WEB_IPV4=<웹 PC IP> WEB_UID=$(id -u) WEB_GID=$(id -g) docker compose -f web/
 python3 web/claude_bridge.py --check --host 172.17.0.1
 python3 web/claude_bridge.py --host 172.17.0.1
 
-# 터미널 3 — 음성(점검 → 실행)
-python3 web/backend/voice.py --check --host <웹 PC IP>
-python3 web/backend/voice.py --host <웹 PC IP>
+# 터미널 3 — 음성(점검 → 실행) — 의존성 설치 1에서 음성 꾸러미를 깐 가상 환경의 python 으로
+<가상환경>/bin/python web/backend/voice.py --check --host <웹 PC IP>
+<가상환경>/bin/python web/backend/voice.py --host <웹 PC IP>
 ```
 
 화면은 웹 PC 브라우저에서 `http://127.0.0.1:8000`을 엽니다(다른 PC에서는 안 열림 — 보안).
@@ -241,11 +241,13 @@ python3 web/backend/voice.py --host <웹 PC IP>
 ### 2. 로봇 PC — 브링업 · 카메라 · 노드
 
 ```bash
-# 모든 터미널: source /opt/ros/jazzy/setup.bash && source <두산 워크스페이스>/install/setup.bash && source install/setup.bash
+# 모든 터미널: 환경 변수(로봇 PC .bashrc 에 넣어 둠) + source
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp ROS_DOMAIN_ID=60
+source /opt/ros/jazzy/setup.bash && source <두산 워크스페이스>/install/setup.bash && source install/setup.bash
 # 터미널 1 — 브링업(두산 드라이버 · MoveIt2 · 그리퍼 드라이버)
 ros2 launch d2_bringup real_moveit.launch.py mode:=real host:=192.168.1.100
-# 터미널 2 — 손목 카메라(정렬 깊이)
-ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true
+# 터미널 2 — 손목 카메라(정렬 깊이 · 640×480 — YOLO 를 이 크기로 학습)
+ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true rgb_camera.color_profile:=640x480x30 depth_module.depth_profile:=640x480x30
 # 터미널 3 — 정지 노드 · 그리퍼 · 장면 · 집기 놓기(노드 4개)
 ros2 launch d2_bringup robot_nodes.launch.py mode:=real
 # 터미널 4 · 5 · 6 — 손목 비전 · 작업 관리자 · MQTT 다리
