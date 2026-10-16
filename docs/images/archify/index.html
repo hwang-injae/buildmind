@@ -87,7 +87,8 @@ function show(id) {
   current = v;
   Array.prototype.forEach.call(nav.children, function (b) { b.setAttribute('aria-selected', String(b.dataset.id === v.id)); });
   openLink.href = 'https://htmlpreview.github.io/?' + REPO_BLOB + encodeURIComponent(v.file);
-  if (location.hash !== '#' + v.id) history.replaceState(null, '', '#' + v.id);
+  // htmlpreview 는 <base> 를 GitHub 원본 주소로 넣어 상대 주소 '#id' 가 다른 출처가 된다 — 지금 주소 기준 절대 주소로, 막히면 건너뜀
+  try { if (location.hash !== '#' + v.id) history.replaceState(null, '', location.href.split('#')[0] + '#' + v.id); } catch (e) {}
   msg.textContent = '그림을 불러오는 중…'; msg.style.display = 'flex';
   load(v.file).then(function (text) {
     if (current !== v) return;
