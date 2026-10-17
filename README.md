@@ -37,30 +37,30 @@
 
 ### ▶ 1분 시연 영상
 
-<!-- 영상: 발표/README영상/BuildMind_1분_720p.mp4 — GitHub에 올린 주소(https://github.com/user-attachments/assets/…)를 아래 빈 줄 자리에 한 줄로 -->
+https://github.com/user-attachments/assets/b2ba76bf-ef47-488e-af1e-1aae9185de38
 
 <details>
 <summary><b>장면별 영상 5개</b> — 소개 · DEMO 1 AI 설계 → 로봇 조립 · DEMO 2 스캔 복제 · 핵심 기술 · 검사 · 정지 · DB · 결과</summary>
 
 **① 소개 · 작업 환경 · 시스템 구조** (0:30)
 
-<!-- 영상: BuildMind_1_소개_시스템구조.mp4 -->
+https://github.com/user-attachments/assets/863609a7-cb46-4749-a29f-8f62bd5ed3aa
 
 **② DEMO 1 — 말로 설계하고, 로봇이 조립한다** (1:35) — "다리 두 층 낮춰줘" → Claude 설계 → 검사 통과 후보 3개 → 흩어진 블록 찾기 → 받침 경유 → MoveIt2 이동 → 놓고 확인 → 완성
 
-<!-- 영상: BuildMind_2_DEMO1_AI설계_로봇조립.mp4 -->
+https://github.com/user-attachments/assets/ff01e06d-94be-4cde-8aa0-d5699410675d
 
 **③ DEMO 2 — 보고, 복원하고, 그대로 복제한다** (1:15) — 5자세 깊이 촬영 → 층 지도 + 정수계획 복원 → [그대로 저장] → 세우기 포함 복제
 
-<!-- 영상: BuildMind_3_DEMO2_스캔복제.mp4 -->
+https://github.com/user-attachments/assets/7aa25b1a-8102-4e07-91b6-e3d15155035f
 
 **④ 핵심 기술 — 정확하게 집고, 세우고, 바로잡는다** (1:20) — 기울여 잡기 · 받침에서 눕히기 · 높게 · 옆으로 세우기 · 다시 집기 · 놓은 블록 다시 재기 · 가상 모드 검증
 
-<!-- 영상: BuildMind_4_핵심기술.mp4 -->
+https://github.com/user-attachments/assets/9defcd46-ab43-4950-9152-f3d299f1bf48
 
 **⑤ 못 짓는 설계는 막고, 언제든 멈춘다** (1:01) — 로봇 조립 가능 검사 · 정지 · 설계 DB 세대 관리 · 결과
 
-<!-- 영상: BuildMind_5_검사_정지_DB_결과.mp4 -->
+https://github.com/user-attachments/assets/f2660d87-2b99-4d77-a181-26144f963ae2
 
 </details>
 
