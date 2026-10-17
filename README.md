@@ -1,4 +1,4 @@
-# 🧱 BuildMind — 말하면 AI가 설계하고, 협동로봇이 조립하는 젠가 가구
+# 🧱 BuildMind — 말하면 AI가 설계하고, 협동로봇이 조립한다
 
 <p align="center">
   <img src="https://img.shields.io/badge/ROS%202-Jazzy-22314E?style=flat-square&logo=ros&logoColor=white" alt="ROS 2 Jazzy">
@@ -14,24 +14,9 @@
   <img src="https://img.shields.io/badge/Docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker compose">
 </p>
 
-웹 글이나 말로 가구를 요청하면 **Claude가 젠가 설계도를 직접 씁니다.** 무너지지 않는지 · 로봇이 지을 수 있는지 **검사를 통과한 설계만 DB에 세대별로 저장**합니다. 그다음 두산 협동로봇 **M0609 + RG2**가 흩어진 블록을 손목 카메라(**YOLO seg + 깊이**)로 찾아 **MoveIt2로 하나씩 집어 조립**합니다. 사람이 쌓은 구조물은 **스캔해 설계도로 복원하고 똑같이 복제**합니다.
+글이나 말로 원하는 가구를 요청하면 **Claude가 젠가 블록 설계도를 쓰고**, 검사를 통과한 설계를 **두산 M0609 협동로봇이 흩어진 블록을 찾아 MoveIt2로 조립**합니다. 사람이 쌓은 구조물은 **스캔해 설계도로 복원하고 그대로 복제**합니다.
 
 > 두산 로보틱스 ROKEY Boot Camp 9기 · 협동-2 **D2팀(5명)** — 한석형 · 황인재(PL) · 민범진 · 박진용 · 한세교 · 2026.10.01 ~ 10.16(16일)
-
-## 목차
-
-1. [🎬 데모](#-데모)
-2. [💡 프로젝트 소개](#-프로젝트-소개)
-3. [✨ 핵심 기능](#-핵심-기능)
-4. [🛠️ 시스템 구조](#️-시스템-구조)
-5. [🧩 기술적 도전 · 해결](#-기술적-도전--해결)
-6. [📊 결과](#-결과)
-7. [🤝 개발 · 협업 방식](#-개발--협업-방식)
-8. [👥 팀 · 역할](#-팀--역할)
-9. [💻 개발 환경 · 장비](#-개발-환경--장비) · [🚀 설치 · 실행](#-설치--실행)
-10. [📁 폴더 구조 · 문서](#-폴더-구조--문서)
-
----
 
 ## 🎬 데모
 
@@ -64,66 +49,44 @@ https://github.com/user-attachments/assets/f2660d87-2b99-4d77-a181-26144f963ae2
 
 </details>
 
-### 기능별 GIF
+## 💡 한눈에
 
-<table>
-  <tr>
-    <td width="50%" align="center"><img src="docs/images/demo/데모_AI설계생성_v1_101715.gif" width="100%" alt="AI 설계 생성"><br><b>AI 설계 생성</b><br><sub>글 요청 "다리 두 층 낮춰줘" → Claude가 설계도 작성 → 검사 통과 후보 3개 → 3D 미리보기 · [조립]</sub></td>
-    <td width="50%" align="center"><img src="docs/images/demo/데모_조립불가안내_v1_101715.gif" width="100%" alt="검사가 막은 설계"><br><b>검사가 막은 설계</b><br><sub>스캔한 설계가 로봇 조립 가능 검사를 통과하지 못하면 [다시 스캔] · [취소]</sub></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><img src="docs/images/demo/데모_받침경유집기_v1_101715.gif" width="100%" alt="받침 경유 다시 집기"><br><b>받침 경유 다시 집기</b><br><sub>받침 위 블록을 사람이 틀어 놓아도 다시 재서 곧게 집음</sub></td>
-    <td width="50%" align="center"><img src="docs/images/demo/데모_작업대다시찾기_v1_101715.gif" width="100%" alt="흩어진 블록 다시 찾기"><br><b>흩어진 블록 다시 찾기</b><br><sub>블록 위치를 바꿔도 손목 카메라로 다시 찾아 집음</sub></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><img src="docs/images/demo/데모_세우기_v1_101715.gif" width="100%" alt="블록 세우기"><br><b>블록 세우기</b><br><sub>받침 모서리로 높게 세우기 · 옆으로 세우기</sub></td>
-    <td width="50%" align="center"><img src="docs/images/demo/데모_기울여잡기_v1_101715.gif" width="100%" alt="기울여 잡기 · 눕히기"><br><b>기울여 잡기 · 눕히기</b><br><sub>겹쳐 기울어진 블록을 각도 맞춰 잡고, 받침에서 눕힘</sub></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><img src="docs/images/demo/데모_놓은블록다시집기_v1_101715.gif" width="100%" alt="놓은 블록 다시 재기 · 다시 집기"><br><b>놓은 블록 다시 재기 · 다시 집기</b><br><sub>dy +3.7 mm(2 mm 넘음) → 같은 블록 다시 집어 놓기 → dx +0.3 · dy +0.5 mm</sub></td>
-    <td width="50%" align="center"><img src="docs/images/demo/데모_정지_v1_101715.gif" width="100%" alt="정지 — 말로 · 화면으로"><br><b>정지 — 말로 · 화면으로</b><br><sub>"hello rokey" → '정지' → 멈춤 / 화면 [정지] → [초기화] · [다시 시작]</sub></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><img src="docs/images/demo/데모_스캔복원_v1_101715.gif" width="100%" alt="스캔 → 점군 → 설계 복원"><br><b>스캔 → 점군 → 설계 복원</b><br><sub>5곳 깊이 촬영 → 점군 → 층 지도 + 정수계획 → 추론 설계</sub></td>
-    <td width="50%" align="center"><img src="docs/images/demo/데모_스캔복제_v1_101715.gif" width="100%" alt="스캔 복제"><br><b>스캔 복제</b><br><sub>사람이 쌓은 구조물을 로봇이 같은 자리 · 방향 · 모양으로 복제</sub></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><img src="docs/images/demo/데모_MoveIt2피해놓기_v1_101715.gif" width="100%" alt="MoveIt2 — 쌓은 구조물 피해 놓기"><br><b>MoveIt2 — 쌓은 구조물 피해 놓기</b><br><sub>RViz — 이미 쌓은 블록을 피하는 경로로 다음 블록을 위에 놓음</sub></td>
-    <td width="50%" align="center"><img src="docs/images/demo/데모_MoveIt2가상모드_v1_101715.gif" width="100%" alt="MoveIt2 가상 모드 검증"><br><b>MoveIt2 가상 모드 검증</b><br><sub>실기 전에 가상 모드로 세우기 경로 · 궤적 확인</sub></td>
-  </tr>
-</table>
-
----
-
-## 💡 프로젝트 소개
-
-**정해진 설계도를 쌓는 로봇 → AI가 설계도를 만들고 관리하는 로봇**
-
-| | 내용 |
+| 문제 | 우리 방법 |
 |---|---|
-| **문제** | 설계 데이터대로 쌓는 로봇은 있지만, 모양이 바뀌면 설계 · 검토 · 교시를 사람이 다시 합니다. 설계 → 검사 → 이력 → 조립이 한 흐름으로 이어지지 않고, 이미 있는 실물에는 설계도가 없습니다. |
-| **우리 방법** | 말하면 AI가 블록마다 위치 · 방향 · 잡기 · 순서까지 쓴 설계도를 만듭니다. 규칙 검사를 통과한 설계만 버전으로 저장하고, 조립 결과를 다음 생성에 참고합니다(RAG). 실물은 깊이 카메라로 스캔해 블록 단위 설계도로 복원합니다. |
-| **가볍게** | 모델을 따로 학습시키지 않고 **규칙 + 프롬프트**로 풀었습니다. 맞물림 없는 젠가 블록과 팔 하나로 조립합니다(참고: CMU BrickGPT는 미세조정 LLM · LEGO · 팔 2대). |
-| **안전하게** | 검사를 통과한 설계만, **사람이 [조립]을 눌러야** 로봇이 움직입니다. 정지 노드는 늘 켜 둡니다. |
+| 모양이 바뀌면 설계 · 검토 · 교시를 사람이 다시 한다 | 말하면 AI가 블록마다 위치 · 방향 · 잡기 · 순서까지 쓴 설계도를 만든다 |
+| 설계 → 검사 → 이력 → 조립이 끊겨 있다 | 규칙 검사를 통과한 설계만 DB에 버전으로 저장하고, 조립 결과를 다음 생성에 참고한다(RAG) |
+| 이미 있는 실물에는 설계도가 없다 | 깊이 카메라로 스캔해 블록 단위 설계도로 복원하고 복제한다 |
+
+모델을 따로 학습시키지 않고 **규칙 + 프롬프트**로, 맞물림 없는 젠가 블록과 팔 하나로 풀었습니다. 검사를 통과한 설계만, **사람이 [조립]을 눌러야** 로봇이 움직입니다.
 
 ```text
-요청(글 · 🎤 음성) → Claude 설계 후보 3개 → 검사 8단계 → 사람이 고름 → DB 저장(버전 · 부모)
-→ [조립] → 손목 카메라로 흩어진 블록 찾기 → 받침 경유 · 세우기 → MoveIt2로 놓기 → 다시 재기 · 다시 집기
-스캔(5자세) → 층 지도 + 정수계획 → 설계도 복원 → 검사 · 저장 → 같은 자리에 복제
+요청(글 · 🎤) → Claude 설계 후보 3개 → 검사 8단계 → DB 저장 → [조립] → 블록 찾기 · 집기 · 세우기 → MoveIt2로 놓기 → 다시 재기
+스캔(5자세) → 층 지도 + 정수계획 → 설계도 복원 → 검사 · 저장 → 복제 조립
 ```
-
----
 
 ## ✨ 핵심 기능
 
-### 1. 🧠 AI 설계 생성 → 검사 → 레시피
+### 🧠 AI 설계 생성 · 검사
+Claude가 고른 설계를 바탕으로 블록마다 **위치 · 방향 · 잡기 · 순서**를 쓴 후보 3개를 만들고(JSON Schema 구조화 출력 — 형식 실패 0), 무게중심 · 받침 · 손가락 틈 · **로봇 조립 가능** 등 8단계 검사를 통과한 것만 남깁니다.
+
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="docs/images/demo/데모_AI설계생성_v1_101715.gif" width="100%" alt=""다리 두 층 낮춰줘" → 후보 3개 → 3D 미리보기"><br><sub>"다리 두 층 낮춰줘" → 후보 3개 → 3D 미리보기</sub></td>
+    <td width="50%" align="center"><img src="docs/images/demo/데모_조립불가안내_v1_101715.gif" width="100%" alt="로봇이 지을 수 없는 설계는 막음"><br><sub>로봇이 지을 수 없는 설계는 막음</sub></td>
+  </tr>
+</table>
+
+<details>
+<summary>자세히</summary>
+
 - **생성:** 웹 PC에 로그인된 Claude Code를 호스트 중계(`claude_bridge`)로 부릅니다(API 키 없음). 고른 설계와 같은 Template의 다른 설계를 참고해, 부품마다 **위치 · 방향 · 역할 · 그룹 · 순서 · 단계 · 잡기**를 쓴 설계도 후보 3개(`parts/4.0`)를 만듭니다. **JSON Schema 구조화 출력**이라 형식 실패가 0입니다.
 - **검사 8단계:** 무게중심 여유 ≥ 7 mm(쌓는 도중 포함) · 받침 · 손가락 틈 · 작업영역 · Template 범위 + **로봇 조립 가능 검사** — 어떤 순서로든 그리퍼로 지을 수 있는지 봅니다(한 층 1.5초 상한). 떨어지면 까닭을 AI에 돌려줘 최대 2번 더 만듭니다.
 - 통과한 설계만 레시피 파일(`_recipe.json` + `_placements.csv`)이 되고, 사람이 3D 미리보기를 보고 **[조립]** 을 눌러야 로봇이 움직입니다.
 
-### 2. 🎙️ 음성 요청 — OpenAI 받아 적기 + Claude 바로잡기
-- **흐름:** 화면 🎤 버튼 → 시동어 **"hello rokey"**(openWakeWord · 강의 제공 모델) → 높은 '삑' → 말 → 말이 0.8초 끊기면 녹음 끝(Silero VAD, 최대 7초) → 낮은 '삑' → 받아 적기(OpenAI `gpt-4o-mini-transcribe`, 실패하면 `whisper-1`) → 받아 적은 문장이 글 창에 들어가 **바로 생성**합니다.
-- **Claude 바로잡기:** 받아 적기는 틀린 낱말이 섞일 수 있습니다. 그래서 받아 적은 글에 **확신도(OpenAI logprobs 평균)** 를 붙여 `[음성 받아 적기 — 오인식 가능, 확신도 n]`으로 표시하고, Claude가 설계를 만드는 **같은 호출 안에서** 소리가 비슷한 가구 · 부품 · 크기 말로 바로잡아 읽게 했습니다(AI를 한 번 더 부르지 않음). 확신도가 낮을수록 더 넓게 바로잡고, 그래도 뜻을 모르면 설계를 만들지 않고 "이렇게 들었어요: … — 다시 말씀해 주세요"로 답합니다.
+</details>
+
+### 🎙️ 음성 요청 — OpenAI 받아 적기 + Claude 바로잡기
+"hello rokey" → 말 → **OpenAI가 받아 적은 글을 확신도와 함께** 넘기면, **Claude가 설계를 만드는 같은 호출 안에서 비슷한 소리로 바로잡아** 읽습니다. '정지'라고 말하면 로봇이 멈춥니다(보조 정지).
 
 ```mermaid
 flowchart LR
@@ -134,40 +97,100 @@ flowchart LR
     C -- "모르겠음" --> U["설계 안 만듦<br/>'이렇게 들었어요: … — 다시 말씀해 주세요'"]
 ```
 
+<details>
+<summary>자세히</summary>
+
+- **흐름:** 화면 🎤 버튼 → 시동어 **"hello rokey"**(openWakeWord · 강의 제공 모델) → 높은 '삑' → 말 → 말이 0.8초 끊기면 녹음 끝(Silero VAD, 최대 7초) → 낮은 '삑' → 받아 적기(OpenAI `gpt-4o-mini-transcribe`, 실패하면 `whisper-1`) → 받아 적은 문장이 글 창에 들어가 **바로 생성**합니다.
+- **Claude 바로잡기:** 받아 적기는 틀린 낱말이 섞일 수 있습니다. 그래서 받아 적은 글에 **확신도(OpenAI logprobs 평균)** 를 붙여 `[음성 받아 적기 — 오인식 가능, 확신도 n]`으로 표시하고, Claude가 설계를 만드는 **같은 호출 안에서** 소리가 비슷한 가구 · 부품 · 크기 말로 바로잡아 읽게 했습니다(AI를 한 번 더 부르지 않음). 확신도가 낮을수록 더 넓게 바로잡고, 그래도 뜻을 모르면 설계를 만들지 않고 "이렇게 들었어요: … — 다시 말씀해 주세요"로 답합니다.
 - **한국어 · 잡음 처리:** 한국어 지정 + 가구 낱말 힌트를 줍니다. 말소리가 0.3초보다 짧으면 받아 적기를 부르지 않고, 무음에서 STT가 지어내는 자막식 문장('시청해 주셔서 감사합니다' 같은)과 힌트를 되읽은 글은 버립니다.
 - **말로 정지:** '정지 · 멈춰 · 스톱 · 그만'으로만 된 말은 받아 적자마자 MQTT `d2/safety/stop/req` → 다리 → 정지 노드 잠금으로 갑니다. '그만큼 높게' 같은 요청은 정지로 보지 않습니다. 말로 정지는 **보조 정지**이고, 진짜 정지는 펜던트 · 화면 [정지] · Ctrl+C입니다.
 - **안전:** 음성으로는 설계 고르기 · 조립 출발을 하지 않습니다. 로봇은 사람이 [조립]을 눌러야만 움직입니다.
 
-### 3. 🗂️ 설계 DB 세대 관리 (PLM + RAG)
-<img src="docs/images/demo/데모_DB설계목록_v1_101715.gif" align="right" width="300" alt="설계 DB 목록 — 가구 → 기본 설계 → 파생 버전을 고르면 3D 미리보기가 바뀜">
+</details>
+
+### 🗂️ 설계 DB 세대 관리 (PLM + RAG)
+<img src="docs/images/demo/데모_DB설계목록_v1_101715.gif" align="right" width="240" alt="설계 DB 목록 — 고르면 3D 미리보기가 바뀜">
+
+PostgreSQL에 기본 설계 4개와 AI가 만든 설계를 **부모 설계와 이어 버전으로** 저장하고(만든 방법 · 조립 결과 함께), 생성 때 같은 Template 설계를 AI가 골라 참고합니다(RAG).
+
+<details>
+<summary>자세히</summary>
 
 - PostgreSQL 16 표 3개(`designs` 설계 · `builds` 조립 기록 · `gen_logs` AI 호출)에 기본 설계 4개(벤치 · 등받이 의자 · 세운 다리 책상 · 가운데 기둥 책상, `_V000`)와 생성본(`_V001`, `_V002` …)을 **부모 설계와 이어서** 저장합니다. 만든 방법(CAD · 글 · 음성 · 스캔) · 조립 결과(성공 · 오차 · 시간)가 함께 남고, 화면에서 버전 트리로 봅니다.
 - 생성 때 AI가 같은 Template의 설계 요약을 보고 도구(`get_design`)로 최대 2개를 골라 읽습니다(RAG).
 
+</details>
+
 <br clear="right">
 
-### 4. 🤖 흩어진 블록 집기 · 세우기
+### 🤖 흩어진 블록 집기 · 세우기 · 다시 집기
+손목 카메라(**YOLO seg + 깊이**)로 흩어진 블록의 자세 · 기울기를 판정해 잡기 쉬운 블록부터 집고, 받침에서 다시 재어 곧게 집거나 세웁니다. 놓은 블록은 다시 재서 **2 mm 넘게 어긋나면 다시 집어** 놓습니다.
+
+<table>
+  <tr>
+    <td width="33%" align="center"><img src="docs/images/demo/데모_받침경유집기_v1_101715.gif" width="100%" alt="받침 경유 — 틀어진 블록도 다시 재서 집음"><br><sub>받침 경유 — 틀어진 블록도 다시 재서 집음</sub></td>
+    <td width="33%" align="center"><img src="docs/images/demo/데모_세우기_v1_101715.gif" width="100%" alt="높게 · 옆으로 세우기"><br><sub>높게 · 옆으로 세우기</sub></td>
+    <td width="33%" align="center"><img src="docs/images/demo/데모_기울여잡기_v1_101715.gif" width="100%" alt="기울여 잡기 · 눕히기"><br><sub>기울여 잡기 · 눕히기</sub></td>
+  </tr>
+</table>
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="docs/images/demo/데모_작업대다시찾기_v1_101715.gif" width="100%" alt="위치를 바꿔도 다시 찾아 집음"><br><sub>위치를 바꿔도 다시 찾아 집음</sub></td>
+    <td width="50%" align="center"><img src="docs/images/demo/데모_놓은블록다시집기_v1_101715.gif" width="100%" alt="dy +3.7 mm → 다시 집기 → +0.5 mm"><br><sub>dy +3.7 mm → 다시 집기 → +0.5 mm</sub></td>
+  </tr>
+</table>
+
+<details>
+<summary>자세히</summary>
+
 - 공급 영역에 흩뿌린 블록을 손목 카메라 D435i로 찍어 **YOLO seg(직접 학습한 모델) 윤곽 + 깊이**로 자세 · 방향 · 손가락 틈 · 겹침 · 기울기를 판정하고, **PickRanker**가 높은 층 · 잡기 쉬운 블록부터 고릅니다.
 - 집은 블록은 받침에 한 번 놓고 다시 재어 곧게 다시 집습니다(**받침 경유**). 세울 블록은 받침에서 세우고(`STANDUP_HIGH` · `STANDUP_SIDE`), 기울어진 블록은 기울여 잡아 눕힙니다.
-
-### 5. 📏 놓은 블록 다시 재기 · 다시 집기
 - 블록을 놓을 때마다 있음 · 없음 + 높이를 확인하고, 방금 놓은 블록을 **YOLO 마스크 + 카메라 광선**으로 다시 잽니다. 축별 2 mm 이상 어긋나면 같은 블록을 최대 2번 다시 집어 놓습니다. 못 재면 까닭만 기록하고 다음 블록으로 갑니다.
 - `FLAT_SHORT`로 놓는 블록은 놓기 위치를 긴 축으로 +2.4 mm 보정합니다(`robot.yaml` 한 곳에서 관리).
 
-### 6. 🔍 스캔 복제
+</details>
+
+### 🔍 스캔 복제
+5곳에서 깊이 촬영 → **층 지도 + 정수계획**으로 가려진 블록까지 복원 → 검사 · 저장 → 로봇이 같은 자리에 복제합니다.
+
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="docs/images/demo/데모_스캔복원_v1_101715.gif" width="100%" alt="깊이 촬영 → 점군 → 설계 복원"><br><sub>깊이 촬영 → 점군 → 설계 복원</sub></td>
+    <td width="50%" align="center"><img src="docs/images/demo/데모_스캔복제_v1_101715.gif" width="100%" alt="같은 자리 · 방향 · 모양으로 복제"><br><sub>같은 자리 · 방향 · 모양으로 복제</sub></td>
+  </tr>
+</table>
+
+<details>
+<summary>자세히</summary>
+
 - 사람이 쌓은 구조물을 촬영 자세 5곳에서 깊이 촬영 → **층 지도 + 정수계획(SciPy milp)** 으로 블록 자리 · 방향 · 가려진 블록까지 복원합니다(젠가 블록 크기가 하나라 15 · 25 · 75 mm 격자에 맞출 수 있음). 스캔 중에는 점군 미리보기를 1.5 Hz로 화면에 띄웁니다.
 - [그대로 저장] → Claude가 역할 · 순서 · 잡기를 채움 → 검사 → 설계로 저장 → 사람이 치우면 로봇이 같은 자리에 복제합니다. 저장이 검사에 막히면 저장된 설계 중 **추천 설계(일치율 상위)** 로 바로 조립합니다.
 
-### 7. 🦾 MoveIt2 동작 계획 · 안전 정지
+</details>
+
+### 🦾 MoveIt2 동작 계획 · 안전 정지
+모든 팔 동작을 **MoveIt2**로 계획합니다. 놓인 블록 · 받침 · 쥔 블록까지 장면에 넣어 피해 가고, 길을 움직이기 전에 모두 계산합니다. 정지하면 '지금 자리에 서기' 궤적을 제어기에 바로 보냅니다.
+
+<table>
+  <tr>
+    <td width="33%" align="center"><img src="docs/images/demo/데모_MoveIt2피해놓기_v1_101715.gif" width="100%" alt="쌓은 블록을 피해 놓기(RViz)"><br><sub>쌓은 블록을 피해 놓기(RViz)</sub></td>
+    <td width="33%" align="center"><img src="docs/images/demo/데모_MoveIt2가상모드_v1_101715.gif" width="100%" alt="실기 전 가상 모드 검증"><br><sub>실기 전 가상 모드 검증</sub></td>
+    <td width="33%" align="center"><img src="docs/images/demo/데모_정지_v1_101715.gif" width="100%" alt=""hello rokey" → '정지' · 화면 [정지]"><br><sub>"hello rokey" → '정지' · 화면 [정지]</sub></td>
+  </tr>
+</table>
+
+<details>
+<summary>자세히</summary>
+
 - 집기 · 옮기기 · 놓기 · 관측 · 스캔 촬영 자세까지 **모든 팔 동작을 MoveIt2(`move_group`)로 계획**합니다 — OMPL BiTRRT(안 풀리면 RRTConnect) · IK KDL.
 - **장면(Planning Scene)** 에 작업대 · 받침 상자 · 놓은 블록을 넣고, 집은 블록은 그리퍼에 붙여 쥔 채로 피해 갑니다. 놓인 블록은 계획 때만 20 mm → 10 mm → 0 순서로 부풀려 여유를 두고, 6구간 길을 움직이기 전에 모두 계산해 실패는 출발 전에 거릅니다.
 - 정지 · 시간 초과 때는 진행 중 목표를 취소하고, 정지 노드가 '지금 자리에 서기' 궤적을 제어기에 직접 보냅니다.
 
----
+</details>
 
 ## 🛠️ 시스템 구조
 
-시스템은 **PC 2대**로 나뉩니다. **로봇 PC**에는 ROS 2 노드가 모두 있고, **웹 PC**에는 ROS가 없습니다. 둘은 **MQTT 다리(`d2_bridge`)** 한 곳으로만 이어집니다.
+**PC 2대** — 로봇 PC에는 ROS 2 노드가 모두 있고, 웹 PC에는 ROS가 없습니다. 둘은 **MQTT 다리(`d2_bridge`)** 한 곳으로만 이어집니다.
 
 <p align="center">
   <img src="docs/images/시스템아키텍처_v7_101320.png" width="900" alt="시스템 아키텍처 v7 — 노드 카드: 입력 → 처리 → 출력"><br>
@@ -179,6 +202,9 @@ flowchart LR
 | <a href="https://viewer.diagrams.net/?lightbox=1&nav=1#Uhttps%3A%2F%2Fraw.githubusercontent.com%2Fhwang-injae%2Frokey_9_pjt2_D2%2Fmain%2Fdocs%2Fimages%2F%25EC%258B%259C%25EC%258A%25A4%25ED%2585%259C%25EC%2595%2584%25ED%2582%25A4%25ED%2585%258D%25EC%25B2%2598_v7_101320.drawio"><img src="https://img.shields.io/badge/draw.io-%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EC%95%84%ED%82%A4%ED%85%8D%EC%B2%98%20v7-F08705?style=for-the-badge&logo=diagramsdotnet&logoColor=white" alt="draw.io로 보기"></a> | 전체 그림 확대 · 이동 — 노드 카드 · 토픽 · 서비스 선 · 컨테이너 · MQTT 토픽 표 · ERD |
 | <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/index.html?v=20261016c#arch"><img src="https://img.shields.io/badge/archify-%EA%B7%B8%EB%A6%BC%20%EB%AA%A8%EC%9D%8C%204%EA%B0%9C-8250df?style=for-the-badge" alt="아키파이 그림 모음"></a> | 탭 4개 — 시스템 아키텍처 · 플로우 차트 · DB ERD · MQTT 토픽 흐름(움직임 · 다크 모드 · 내보내기) |
 
+<details>
+<summary>노드 표 · 플로우 차트 · mermaid 흐름</summary>
+
 | 위치 | 노드 · 프로그램 | 하는 일 |
 |---|---|---|
 | 로봇 PC | `task` | 조립 · 스캔 상태표, 다음 부품 고르기, 검사 묶음(`DesignChecker`), 정지 · 다시 시작 처리 |
@@ -188,8 +214,6 @@ flowchart LR
 | 웹 PC(컨테이너) | `mosquitto` · `db` · `web` | MQTT 브로커 · PostgreSQL · backend(REST · WebSocket · AI 생성 · 저장소) + 화면 |
 | 웹 PC(호스트) | `claude_bridge` · `voice.py` | 설계 AI 중계(Claude Code) · 음성(시동어 · 받아 적기 · 말로 정지) |
 
-### 🔄 플로우 차트
-
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/플로우차트_v1_101610_dark.png">
@@ -197,9 +221,6 @@ flowchart LR
   </picture><br>
   <sub>요청 → AI 생성 → 검사 → 저장 → 로봇 조립 + 옆으로 들어오는 스캔 복제 · 사람 손이 필요한 예외 · 움직이는 그림: <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/rokey_9_pjt2_D2/blob/main/docs/images/archify/index.html?v=20261016c#flow">그림 모음 → 플로우 차트</a></sub>
 </p>
-
-<details>
-<summary>mermaid로 나눠 보기 — ① AI 설계 생성 · ② 로봇 조립 상태표 · ③ 스캔 복제</summary>
 
 **① 요청 → AI 설계 생성 → 검사 → 저장**
 
@@ -247,15 +268,25 @@ flowchart LR
     D -- "막힘 (예: 로봇 조립 불가)" --> F["다시 스캔 또는<br/>추천 설계로 [조립]"]
 ```
 
-</details>
+
 
 이름 · 칸의 정본은 [인터페이스 문서(IRD)](docs/02_인터페이스_IRD_v4_101608.md), 패키지 · 상태표 · 절차는 [설계 문서(SDD)](docs/03_설계_SDD_v4_101608.md)입니다. 좌표 · 그리퍼 값 · 시간 기준은 설정 파일 하나(`src/d2_robot/d2_bringup/config/robot.yaml`)에 둡니다.
 
----
+</details>
 
 ## 🧩 기술적 도전 · 해결
 
-로봇이 계산대로 움직여도 실물은 몇 mm씩 어긋났습니다. **값이 이상하면 기준(높이 · 보정 · 무게)부터 다시 재는 것**으로 하나씩 고쳤습니다.
+로봇이 계산대로 움직여도 실물은 몇 mm씩 어긋났습니다. **값이 이상하면 기준(높이 · 보정 · 무게)부터 다시 재서** 하나씩 고쳤습니다.
+
+| 문제 | 원인 → 해결 | 결과 |
+|---|---|---|
+| 놓는 높이가 틀리고, 비스듬히 보면 점이 9 ~ 11 mm 밀림 | 작업대 높이 기준이 **18 mm 낮음**(손끝 길이 착오) → 높이 기준 0 · 원점 다시 교시 · 보정 광축 고침 | 26자세 평균 **2.08 mm** |
+| 정지를 눌러도 4.4 ~ 5.0초 더 움직임 | 이미 보낸 궤적이 계속 돌고 ROS가 먼저 꺼짐 → 신호를 직접 받아 '서기' 궤적을 바로 보냄 | 가상 **0.58 ~ 1.12초** · 실기 즉시 정지 |
+| 놓은 블록을 깊이만으로 재면 11개 중 3개만 잼 | 블록 가장자리에서 깊이가 번짐 → 윤곽은 YOLO 마스크, 크기 · 위치는 카메라 광선으로 계산 | **11 / 11** · 다시 집기 2.17 → **0.73 mm** |
+| 검사기가 한쪽으로 내민 계단을 "안전"으로 판정 | 맞닿은 면만 보고 위 덩어리 쏠림을 못 봄 → 단계마다 위 덩어리 전체 무게중심 계산 | +10.8 mm(통과) → **−2.5 mm(불안정)** |
+
+<details>
+<summary>15건 모두 보기 — 로봇 · 정밀도 9건 · 계획 · 비전 · AI · 음성 6건</summary>
 
 **로봇 · 정밀도 — 기준을 다시 재서 고친 것**
 
@@ -282,17 +313,29 @@ flowchart LR
 | 14 | 검사기가 한쪽으로 내민 계단을 "안전"으로 판정 | 위에 얹힌 무게를 맞닿은 면 가운데에만 걸어 계산 — 위 덩어리 전체의 쏠림을 못 봄 | 쌓는 단계마다 위 덩어리 전체 무게중심이 받침 안쪽 7 mm 이상인지 계산 → 20 mm씩 3번 내민 계단: +10.8 mm(통과) → **−2.5 mm(불안정)** |
 | 15 | 음성이 무음에서 문장을 지어냄(2/10) · '정지' 5/10 | 계속 듣고 받아 적어 무음 · 잡음도 문장으로 만듦 | 버튼 + 시동어 · 말소리만 녹음 · 지어낸 자막 버림 · 한국어 지정 → 무음 5번 · 잡음 6건 **생성 0** |
 
----
+</details>
 
 ## 📊 결과
 
 <p align="center">
   <img src="https://img.shields.io/badge/%EC%9E%90%EB%8F%99%20%EC%A1%B0%EB%A6%BD-11%20%2F%2011%20%EB%B8%94%EB%A1%9D-2ea44f?style=for-the-badge" alt="자동 조립 11 / 11 블록">
-  <img src="https://img.shields.io/badge/%ED%9D%A9%EC%96%B4%EC%A7%84%20%EB%B8%94%EB%A1%9D%20%EC%A7%91%EA%B8%B0-35%20%2F%2035-2ea44f?style=for-the-badge" alt="흩어진 블록 집기 35 / 35">
-  <img src="https://img.shields.io/badge/AI%20%EC%84%A4%EA%B3%84%20%EA%B2%80%EC%82%AC%20%ED%95%A9%EA%B2%A9-6%20%2F%206-1f6feb?style=for-the-badge" alt="AI 설계 검사 합격 6 / 6">
-  <img src="https://img.shields.io/badge/%EC%8A%A4%EC%BA%94%20%EB%B3%B5%EC%9B%90%20%EC%9D%BC%EC%B9%98%EC%9C%A8-100%20%25-8250df?style=for-the-badge" alt="스캔 복원 일치율 100 %">
+  <img src="https://img.shields.io/badge/%ED%9D%A9%EC%96%B4%EC%A7%84%20%EB%B8%94%EB%A1%9D%20%EC%A7%91%EA%B8%B0-98%20%25-2ea44f?style=for-the-badge" alt="흩어진 블록 집기 98 %">
+  <img src="https://img.shields.io/badge/AI%20%EC%84%A4%EA%B3%84%20%ED%98%95%EC%8B%9D%20%EC%8B%A4%ED%8C%A8-0-1f6feb?style=for-the-badge" alt="AI 설계 형식 실패 0">
+  <img src="https://img.shields.io/badge/%EC%8A%A4%EC%BA%94%20%EB%B3%B5%EC%9B%90%20%EC%9D%BC%EC%B9%98%EC%9C%A8-92%20%25-8250df?style=for-the-badge" alt="스캔 복원 일치율 92 %">
   <img src="https://img.shields.io/badge/%EC%9E%90%EB%8F%99%20%EC%8B%9C%ED%97%98-2%2C251%20%ED%86%B5%EA%B3%BC-6e7781?style=for-the-badge" alt="자동 시험 2,251 통과">
 </p>
+
+| 지표 | 결과 |
+|---|---|
+| 흩어진 블록 집기 | **98 %**(159 / 162, 통합 시험 4판 합) · 10/15 통합 테스트 **35 / 35** |
+| AI 설계 생성 | 검사 합격 **4 / 5** · 형식 실패 **0** · 통과 평균 **103초** · AI가 만든 설계 **2종 실제 조립** |
+| 스캔 복원 일치율 | **92 %**(12 / 13, 통합 시험) · **95 %**(62 / 65, 사진 판정) |
+| 놓기 정밀도 | 다시 집기로 **2.17 → 0.73 mm** · 높이 오차 최대 **1.8 mm**(벤치) |
+| 음성 | 시동어 **5 / 5** · 무음에서 잘못 생성 **0 / 5** · 말로 정지 **2 / 2** |
+| 자동 시험 | **2,251개** 통과 — CI가 PR마다 |
+
+<details>
+<summary>기능별 실기 결과 · 통합 시험 정량 측정 전체 보기</summary>
 
 **기능별 실기 결과** — 기능마다 실기에서 잰 값
 
@@ -325,11 +368,27 @@ flowchart LR
 | 블록당 시간 | **75 ~ 80초**(벤치 · 의자 1개 약 14분) | ≤ 60초 | ❌ 못 미침 |
 | AI 설계 생성 시간 | **103초**(통과 4개 평균 · 44 ~ 151초) | ≤ 60초 | ❌ 못 미침 |
 
-보호 정지는 6판 중 1번(책상 판) 있었습니다. 자세한 근거는 [결과표](docs/04_결과_결과표_v2_101608.md)와 [시험 보고](docs/test-reports/)에 있습니다.
+보호 정지는 6판 중 1번(책상 판) 있었습니다.
 
----
+자세한 근거는 [결과표](docs/04_결과_결과표_v2_101608.md)와 [시험 보고](docs/test-reports/)에 있습니다.
+
+</details>
+
+## 👥 팀 · 역할
+
+| 파트 | 담당 | 맡은 것 |
+|---|---|---|
+| 로봇 동작 | 박진용 · 한세교 | 로봇 셀 · MoveIt2 집기 · 놓기 · 정지 · 장면 · 세우기 · CAD · 레시피 · 변환기 |
+| 비전 | 민범진 · 한석형 · 황인재 | 손목 보정 · 블록 인식(YOLO seg) · 배치 확인 · 흩어진 블록 찾기 · 고르기 · 작업 관리자 · 검사 묶음 · 스캔 추론기 |
+| 음성 | 민범진 | 시동어 · 녹음 · 받아 적기 · 말로 정지 |
+| HMI | 황인재(PL) | 웹 화면 · AI 설계 생성 · DB · MQTT 다리 · 웹 PC compose · 통합 · 일정 · 발표 |
 
 ## 🤝 개발 · 협업 방식
+
+16일 동안 **PR 183개 · 커밋 606개 · 결정 기록 123건 · 자동 시험 2,251개**. PR마다 자동 검사 + Claude 검토 → 승인 → auto-merge, 기능 동결 뒤에는 PL 통합 브랜치로만 main에 넣었습니다.
+
+<details>
+<summary>일정 · PR 흐름 · 문서 · AI 에이전트 활용</summary>
 
 | 기간 | 단계 | 한 일 |
 |---|---|---|
@@ -355,20 +414,12 @@ flowchart LR
 
 자세한 규칙은 [팀 협업 규칙](docs/06_팀협업규칙_v1_101608.md) · [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md), 날마다 바뀐 것은 [CHANGES.md](CHANGES.md)에 있습니다.
 
----
-
-## 👥 팀 · 역할
-
-| 파트 | 담당 | 맡은 것 |
-|---|---|---|
-| 로봇 동작 | 박진용 · 한세교 | 로봇 셀 · MoveIt2 집기 · 놓기 · 정지 · 장면 · 세우기 · CAD · 레시피 · 변환기 |
-| 비전 | 민범진 · 한석형 · 황인재 | 손목 보정 · 블록 인식(YOLO seg) · 배치 확인 · 흩어진 블록 찾기 · 고르기 · 작업 관리자 · 검사 묶음 · 스캔 추론기 |
-| 음성 | 민범진 · 한석형 · 황인재 | 시동어 · 녹음 · 받아 적기(민범진) · STT 대체 모델(한석형) · 화면 🎤 · 말로 정지 · 오인식 바로잡기(황인재) |
-| HMI | 황인재(PL) | 웹 화면 · AI 설계 생성 · DB · MQTT 다리 · 웹 PC compose · 통합 · 일정 · 발표 |
-
----
+</details>
 
 ## 💻 개발 환경 · 장비
+
+<details>
+<summary>OS · 미들웨어 · 모션 · 비전 · AI · 웹 · 장비 표</summary>
 
 - **OS:** Ubuntu 24.04 LTS (로봇 PC · 웹 PC)
 - **Middleware:** ROS 2 Jazzy · CycloneDDS(로봇 PC 안, `ROS_DOMAIN_ID` 60) · MQTT Mosquitto 2(PC 사이)
@@ -387,12 +438,12 @@ flowchart LR
 | 블록 | 표준 젠가 75 × 25 × 15 mm · 1세트 54개 | 기본 설계 9 ~ 16개 + 공급 |
 | PC | 노트북 2대 — 로봇 PC(ROS 2) · 웹 PC(Docker, ROS 없음) | 둘 사이는 Wi-Fi MQTT |
 
----
+</details>
 
 ## 🚀 설치 · 실행
 
 <details>
-<summary>펼쳐 보기 — 의존성 설치 · 웹 PC · 로봇 PC 실행 순서 · 화면에서 조립</summary>
+<summary>의존성 설치 · 웹 PC · 로봇 PC 실행 순서 · 화면에서 조립</summary>
 
 ### 📦 의존성 설치
 
@@ -483,9 +534,17 @@ ros2 run d2_vision scan_live_preview
 
 </details>
 
----
+## 📁 문서
 
-## 📁 폴더 구조 · 문서
+| 경로 | 내용 |
+|---|---|
+| [`src/`](src/README.md) | ROS 2 패키지 — `d2_interfaces` · `d2_robot/` · `d2_vision` · `d2_task` · `d2_bridge` · `recipe_manager` |
+| [`web/`](web/README.md) | 웹 PC — `backend/`(FastAPI · AI 생성 · 저장소 · 음성) · `frontend/`(Next.js + three.js) · `claude_bridge.py` · `compose.yaml` |
+| [`docs/`](docs/README.md) | 정본 01 ~ 06 · `decisions/`(결정 기록) · `guides/` · `ops/` · `test-reports/` · `env/` · `images/` |
+| [`tests/`](tests/README.md) | ROS 없는 자동 시험(pytest) — CI가 PR마다 돈다 |
+
+<details>
+<summary>폴더 구조</summary>
 
 ```text
 rokey_9_pjt2_D2/
@@ -514,12 +573,7 @@ rokey_9_pjt2_D2/
 └── README.md
 ```
 
-| 경로 | 내용 |
-|---|---|
-| [`src/`](src/README.md) | ROS 2 패키지 — `d2_interfaces` · `d2_robot/` · `d2_vision` · `d2_task` · `d2_bridge` · `recipe_manager` |
-| [`web/`](web/README.md) | 웹 PC — `backend/`(FastAPI · AI 생성 · 저장소 · 음성) · `frontend/`(Next.js + three.js) · `claude_bridge.py` · `compose.yaml` |
-| [`docs/`](docs/README.md) | 정본 01 ~ 06 · `decisions/`(결정 기록) · `guides/` · `ops/` · `test-reports/` · `env/` · `images/` |
-| [`tests/`](tests/README.md) | ROS 없는 자동 시험(pytest) — CI가 PR마다 돈다 |
+</details>
 
 ## 라이선스
 
