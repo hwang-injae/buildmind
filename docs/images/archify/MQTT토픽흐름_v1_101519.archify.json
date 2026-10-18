@@ -2,7 +2,7 @@
  "schema_version": 1,
  "diagram_type": "dataflow",
  "meta": {
-  "title": "BuildMind MQTT 토픽 흐름 — 웹 PC ↔ 브로커 ↔ 다리 ↔ 로봇 PC",
+  "title": "BuildMind MQTT 토픽 흐름 — 웹 PC ↔ 브로커 ↔ 브리지 ↔ 로봇 PC",
   "locale": "ko",
   "output": "발표/archify/dataflow-d2-mqtt-20261015-185041/d2-mqtt.html",
   "quality_profile": "showcase",
@@ -15,7 +15,7 @@
      "label": "정지 — 정지 요청 · 정지 상태"
     },
     "emphasis": {
-     "label": "명령 — 웹이 로봇에 부탁"
+     "label": "명령 — 웹이 로봇에 요청"
     }
    }
   }
@@ -28,7 +28,7 @@
    "label": "브로커"
   },
   {
-   "label": "다리"
+   "label": "브리지"
   },
   {
    "label": "로봇 PC 노드"
@@ -263,14 +263,14 @@
    "title": "바이트 · 음성",
    "items": [
     "d2/vision/wrist_image · scan_image · scan_cloud · scan_preview · scan_preview_cloud",
-    "d2/hmi/intent(voice.py → backend · 다리) · d2/hmi/voice/listen(웹 PC 안만)"
+    "d2/hmi/intent(voice.py → backend · 브리지) · d2/hmi/voice/listen(웹 PC 안만)"
    ]
   },
   {
    "dot": "rose",
    "title": "규칙",
    "items": [
-    "토픽 = d2/<ROS 이름> — 다리는 바꾸기만 하고 판단하지 않는다",
+    "토픽 = d2/<ROS 이름> — 브리지는 변환만 하고 판단하지 않는다",
     "브로커는 웹 PC Wi-Fi IP:1883 · 로봇 PC만 받음"
    ]
   }

@@ -196,7 +196,7 @@
       "type": "backend",
       "icon": "none",
       "label": "확인·다시 재기",
-      "sublabel": "축별 2 mm 넘나?",
+      "sublabel": "축별 2 mm 초과?",
       "width": 148
     },
     {
@@ -301,7 +301,7 @@
       "id": "e-check-gen",
       "from": "check",
       "to": "gen",
-      "label": "까닭 · 2번",
+      "label": "원인 · 2번",
       "variant": "dashed",
       "role": "return"
     },
@@ -404,7 +404,7 @@
       "items": [
         "Claude가 같은 Template 설계를 참고해 후보 3개를 씀(5분 상한)",
         "검사 묶음 = 무게중심 여유 7 mm · 받침 · 손가락 틈 · 작업영역 · W201 조립 가능",
-        "10/15 리허설: 변형 요청 4 / 5 통과 · 형식 실패 0"
+        "10/15 리허설: 변형 요청 5개 중 4개 통과 · 형식 실패 0"
       ]
     },
     {

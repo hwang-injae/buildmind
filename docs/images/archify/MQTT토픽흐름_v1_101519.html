@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="generator" content="archify 3.1.0">
   <meta name="archify-reader-contract" content="declared-wide-v1">
-  <title>BuildMind MQTT 토픽 흐름 — 웹 PC ↔ 브로커 ↔ 다리 ↔ 로봇 PC 다이어그램</title>
+  <title>BuildMind MQTT 토픽 흐름 — 웹 PC ↔ 브로커 ↔ 브리지 ↔ 로봇 PC 다이어그램</title>
   <script>
     // Resolve the theme before first paint so light-preference users don't
     // see a dark flash. The toolbar script below re-applies with UI state.
@@ -5040,7 +5040,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       svg [data-node-id], svg [data-edge-from], svg [data-detail], svg [data-detail-anchor], svg [data-legend-hit], svg { transition: none !important; }
     }
   </style>
-<style id="bm-kr-font">/* BuildMind 10/16: 한글 노드 글자는 고정폭(JetBrains Mono) 대신 한글 글꼴로 — 글자 간격 · 굵기 고르게 */svg text, svg tspan { font-family: "Noto Sans KR", "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif !important; }</style></head>
+<style id="bm-kr-font">/* BuildMind 10/16: 한글 노드 글자는 고정폭(JetBrains Mono) 대신 한글 글꼴로 — 글자 간격 · 굵기 고르게 */svg text, svg tspan { font-family: "Noto Sans KR", "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif !important; }</style><style id="bm-mqtt-center">/* 10/18: 데이터 흐름 노드의 제목 · 설명이 상자 위쪽으로 약 5 px 치우쳐 보여 가운데로 내림(보기 3단계 모두) */svg g[data-node-id] > text { transform: translateY(5px); } .diagram-container[data-detail-level="map"] svg g[data-node-id] > text.t-primary { transform: translateY(12.5px) !important; }</style></head>
 <body>
   <!-- Toolbar: theme, live visual style, trace motion, presentation stage, and export.
        Motion appears only for trace-enabled artifacts and has no shortcut;
@@ -5150,7 +5150,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
            data-preset-badge-blueprint="블루프린트 / 개정 01"
            data-preset-badge-editorial="에디토리얼 / 현장 노트">
         <div class="pulse-dot"></div>
-        <h1>BuildMind MQTT 토픽 흐름 — 웹 PC ↔ 브로커 ↔ 다리 ↔ 로봇 PC</h1>
+        <h1>BuildMind MQTT 토픽 흐름 — 웹 PC ↔ 브로커 ↔ 브리지 ↔ 로봇 PC</h1>
       </div>
     </div>
 
@@ -5160,7 +5160,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / 도판 04">
       <svg viewBox="0 0 973 740" data-reader-fit="intrinsic-height" role="img" lang="ko" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-motion-choreography="stream">
-        <title id="archify-diagram-title">BuildMind MQTT 토픽 흐름 — 웹 PC ↔ 브로커 ↔ 다리 ↔ 로봇 PC</title>
+        <title id="archify-diagram-title">BuildMind MQTT 토픽 흐름 — 웹 PC ↔ 브로커 ↔ 브리지 ↔ 로봇 PC</title>
         <desc id="archify-diagram-description">Archify로 생성한 데이터플로우 다이어그램입니다.</desc>
         <!-- Definitions -->
         <defs>
@@ -5192,7 +5192,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text x="315" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">02 / 브로커</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="2" x="446" y="46" width="168" height="620" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="530" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">03 / 다리</text>
+        <text x="530" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">03 / 브리지</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="3" x="661" y="46" width="168" height="620" rx="10" class="c-lane" stroke-width="1"/>
         <text x="745" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">04 / 로봇 PC 노드</text>
@@ -5250,8 +5250,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="315" y="393" class="t-muted" font-size="7" text-anchor="middle">:1883 · 전달만</text>
         </g>
 
-        <g id="node-bridge" data-node-id="bridge" data-node-label="bridge" tabindex="0" role="button" aria-label="bridge 포커스, ROS ↔ MQTT, 03 / 다리" aria-pressed="false" data-node-kind="backend" data-node-sublabel="ROS ↔ MQTT" data-node-context="03 / 다리">
-          <title>bridge · ROS ↔ MQTT · 03 / 다리</title>
+        <g id="node-bridge" data-node-id="bridge" data-node-label="bridge" tabindex="0" role="button" aria-label="bridge 포커스, ROS ↔ MQTT, 03 / 브리지" aria-pressed="false" data-node-kind="backend" data-node-sublabel="ROS ↔ MQTT" data-node-context="03 / 브리지">
+          <title>bridge · ROS ↔ MQTT · 03 / 브리지</title>
           <rect x="474" y="356" width="112" height="58" rx="6" class="c-mask"/>
           <rect x="474" y="356" width="112" height="58" rx="6" class="c-backend" data-animate="node" style="--step:4" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(480 362) scale(0.6875)">
@@ -5394,7 +5394,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text x="40" y="684" class="t-primary" font-size="12" font-weight="650">범례</text>
           <g data-legend-semantic-kind="emphasis" data-legend-x="40" data-legend-baseline="704" data-legend-width="186">
             <path d="M 40 701 L 74 701" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-            <text x="83" y="704" class="t-muted" font-size="10" font-weight="500">명령 — 웹이 로봇에 부탁</text>
+            <text x="83" y="704" class="t-muted" font-size="10" font-weight="500">명령 — 웹이 로봇에 요청</text>
           </g>
           <g data-legend-semantic-kind="security" data-legend-x="248" data-legend-baseline="704" data-legend-width="217">
             <path d="M 248 701 L 282 701" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
@@ -5617,7 +5617,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </div>
         <ul>
           <li>d2/vision/wrist_image · scan_image · scan_cloud · scan_preview · scan_preview_cloud</li>
-          <li>d2/hmi/intent(voice.py → backend · 다리) · d2/hmi/voice/listen(웹 PC 안만)</li>
+          <li>d2/hmi/intent(voice.py → backend · 브리지) · d2/hmi/voice/listen(웹 PC 안만)</li>
         </ul>
       </div>
 
@@ -5627,7 +5627,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>규칙</h3>
         </div>
         <ul>
-          <li>토픽 = d2/&lt;ROS 이름&gt; — 다리는 바꾸기만 하고 판단하지 않는다</li>
+          <li>토픽 = d2/&lt;ROS 이름&gt; — 브리지는 변환만 하고 판단하지 않는다</li>
           <li>브로커는 웹 PC Wi-Fi IP:1883 · 로봇 PC만 받음</li>
         </ul>
       </div>

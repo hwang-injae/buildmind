@@ -75,7 +75,7 @@
     },
     {
      "name": "ai_reason",
-     "type": "text — 고른 까닭"
+     "type": "text — 고른 이유"
     },
     {
      "name": "template_changed",
