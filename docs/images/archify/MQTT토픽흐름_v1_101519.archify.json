@@ -116,7 +116,8 @@
    "label": "요청 · 답 · alive",
    "classification": "서비스 · alive",
    "variant": "emphasis",
-   "route": "top-channel"
+   "fromSide": "right",
+   "toSide": "top"
   },
   {
    "id": "voice-pub",
@@ -124,14 +125,18 @@
    "to": "mqtt",
    "label": "intent · stop",
    "classification": "음성",
-   "variant": "security"
+   "variant": "security",
+   "fromSide": "right",
+   "toSide": "bottom"
   },
   {
    "id": "listen",
    "from": "mqtt",
    "to": "voice",
    "label": "voice/listen",
-   "classification": "웹 PC 안"
+   "classification": "웹 PC 안",
+   "fromSide": "bottom",
+   "toSide": "right"
   },
   {
    "id": "to-bridge",
@@ -139,8 +144,7 @@
    "to": "bridge",
    "label": "…/req · intent",
    "classification": "서비스 req",
-   "variant": "emphasis",
-   "route": "top-channel"
+   "variant": "emphasis"
   },
   {
    "id": "to-task",
@@ -148,7 +152,10 @@
    "to": "task",
    "label": "명령 · 설계 검사",
    "classification": "서비스 req",
-   "variant": "emphasis"
+   "variant": "emphasis",
+   "fromSide": "top",
+   "toSide": "bottom",
+   "labelSegment": 1
   },
   {
    "id": "to-safety",
@@ -156,21 +163,27 @@
    "to": "safety",
    "label": "stop · resume",
    "classification": "서비스 req",
-   "variant": "security"
+   "variant": "security",
+   "fromSide": "top",
+   "toSide": "left"
   },
   {
    "id": "task-state",
    "from": "task",
    "to": "bridge",
    "label": "state · progress",
-   "classification": "retained"
+   "classification": "retained",
+   "fromSide": "left",
+   "toSide": "top"
   },
   {
    "id": "task-call",
    "from": "task",
    "to": "bridge",
    "label": "get_design · save",
-   "classification": "서비스 req"
+   "classification": "서비스 req",
+   "fromSide": "left",
+   "toSide": "top"
   },
   {
    "id": "safety-state",
@@ -178,7 +191,9 @@
    "to": "bridge",
    "label": "safety/state",
    "classification": "retained",
-   "variant": "security"
+   "variant": "security",
+   "fromSide": "left",
+   "toSide": "top"
   },
   {
    "id": "grip-state",
@@ -193,7 +208,9 @@
    "to": "bridge",
    "label": "wrist_image",
    "classification": "바이트",
-   "variant": "dashed"
+   "variant": "dashed",
+   "fromSide": "left",
+   "toSide": "bottom"
   },
   {
    "id": "preview-img",
@@ -201,15 +218,16 @@
    "to": "bridge",
    "label": "scan_preview",
    "classification": "바이트",
-   "variant": "dashed"
+   "variant": "dashed",
+   "fromSide": "left",
+   "toSide": "bottom"
   },
   {
    "id": "to-broker",
    "from": "bridge",
    "to": "mqtt",
    "label": "상태 · 답 · 사진",
-   "classification": "retained · res",
-   "route": "bottom-channel"
+   "classification": "retained · res"
   },
   {
    "id": "to-web",
@@ -217,7 +235,8 @@
    "to": "backend",
    "label": "상태 · 답 · 사진",
    "classification": "retained · res",
-   "route": "bottom-channel"
+   "fromSide": "top",
+   "toSide": "right"
   }
  ],
  "cards": [

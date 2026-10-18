@@ -5198,20 +5198,20 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text x="745" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">04 / 로봇 PC 노드</text>
 
         <!-- Flow paths -->
-        <path data-edge-from="backend" data-edge-to="mqtt" data-edge-label="요청 · 답 · alive" data-edge-key="0" data-edge-id="web-req" data-composition-points="156,271;156,218;259,218;259,385" d="M 156 271 L 156 218 L 259 218 L 259 385" class="a-emphasis" data-animate="edge" style="--step:0" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="voice" data-edge-to="mqtt" data-edge-label="intent · stop" data-edge-key="1" data-edge-id="voice-pub" data-composition-points="156,508;207.5,508;207.5,394;259,394" d="M 156 508 L 207.5 508 L 207.5 394 L 259 394" class="a-security" data-animate="edge" style="--step:1" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="mqtt" data-edge-to="voice" data-edge-label="voice/listen" data-edge-key="2" data-edge-id="listen" data-composition-points="259,376;207.5,376;207.5,490;156,490" d="M 259 376 L 207.5 376 L 207.5 490 L 156 490" class="a-default" data-animate="edge" style="--step:2" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="mqtt" data-edge-to="bridge" data-edge-label="…/req · intent" data-edge-key="3" data-edge-id="to-bridge" data-composition-points="371,385;371,332;474,332;474,385" d="M 371 385 L 371 332 L 474 332 L 474 385" class="a-emphasis" data-animate="edge" style="--step:3" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="bridge" data-edge-to="task" data-edge-label="명령 · 설계 검사" data-edge-key="4" data-edge-id="to-task" data-composition-points="586,379.42857142857144;637.5,379.42857142857144;637.5,172;689,172" d="M 586 379.42857142857144 L 637.5 379.42857142857144 L 637.5 172 L 689 172" class="a-emphasis" data-animate="edge" style="--step:4" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="bridge" data-edge-to="safety" data-edge-label="stop · resume" data-edge-key="5" data-edge-id="to-safety" data-composition-points="586,386.85714285714283;637.5,386.85714285714283;637.5,280;689,280" d="M 586 386.85714285714283 L 637.5 386.85714285714283 L 637.5 280 L 689 280" class="a-security" data-animate="edge" style="--step:5" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="task" data-edge-to="bridge" data-edge-label="state · progress" data-edge-key="6" data-edge-id="task-state" data-composition-points="689,157;637.5,157;637.5,375.7142857142857;586,375.7142857142857" d="M 689 157 L 637.5 157 L 637.5 375.7142857142857 L 586 375.7142857142857" class="a-default" data-animate="edge" style="--step:6" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="task" data-edge-to="bridge" data-edge-label="get_design · save" data-edge-key="7" data-edge-id="task-call" data-composition-points="689,142;637.5,142;637.5,372;586,372" d="M 689 142 L 637.5 142 L 637.5 372 L 586 372" class="a-default" data-animate="edge" style="--step:7" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="safety" data-edge-to="bridge" data-edge-label="safety/state" data-edge-key="8" data-edge-id="safety-state" data-composition-points="689,262;637.5,262;637.5,383.14285714285717;586,383.14285714285717" d="M 689 262 L 637.5 262 L 637.5 383.14285714285717 L 586 383.14285714285717" class="a-security" data-animate="edge" style="--step:8" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="gripper" data-edge-to="bridge" data-edge-label="gripper/state" data-edge-key="9" data-edge-id="grip-state" data-composition-points="689,390.57142857142856;586,390.57142857142856" d="M 689 390.57142857142856 L 586 390.57142857142856" class="a-default" data-animate="edge" style="--step:9" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="wrist" data-edge-to="bridge" data-edge-label="wrist_image" data-edge-key="10" data-edge-id="wrist-img" data-composition-points="689,499;637.5,499;637.5,394.2857142857143;586,394.2857142857143" d="M 689 499 L 637.5 499 L 637.5 394.2857142857143 L 586 394.2857142857143" class="a-dashed" data-animate="edge" style="--step:10" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="preview" data-edge-to="bridge" data-edge-label="scan_preview" data-edge-key="11" data-edge-id="preview-img" data-composition-points="689,613;637.5,613;637.5,398;586,398" d="M 689 613 L 637.5 613 L 637.5 398 L 586 398" class="a-dashed" data-animate="edge" style="--step:11" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="bridge" data-edge-to="mqtt" data-edge-label="상태 · 답 · 사진" data-edge-key="12" data-edge-id="to-broker" data-composition-points="474,385;474,440;371,440;371,385" d="M 474 385 L 474 440 L 371 440 L 371 385" class="a-default" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="mqtt" data-edge-to="backend" data-edge-label="상태 · 답 · 사진" data-edge-key="13" data-edge-id="to-web" data-composition-points="259,385;259,440;156,440;156,271" d="M 259 385 L 259 440 L 156 440 L 156 271" class="a-default" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="backend" data-edge-to="mqtt" data-edge-label="요청 · 답 · alive" data-edge-key="0" data-edge-id="web-req" data-composition-points="156,280;324,280;324,356" d="M 156 280 L 324 280 L 324 356" class="a-emphasis" data-animate="edge" style="--step:0" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="voice" data-edge-to="mqtt" data-edge-label="intent · stop" data-edge-key="1" data-edge-id="voice-pub" data-composition-points="156,508;324,508;324,414" d="M 156 508 L 324 508 L 324 414" class="a-security" data-animate="edge" style="--step:1" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="mqtt" data-edge-to="voice" data-edge-label="voice/listen" data-edge-key="2" data-edge-id="listen" data-composition-points="306,414;306,490;156,490" d="M 306 414 L 306 490 L 156 490" class="a-default" data-animate="edge" style="--step:2" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="mqtt" data-edge-to="bridge" data-edge-label="…/req · intent" data-edge-key="3" data-edge-id="to-bridge" data-composition-points="371,376;474,376" d="M 371 376 L 474 376" class="a-emphasis" data-animate="edge" style="--step:3" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="bridge" data-edge-to="task" data-edge-label="명령 · 설계 검사" data-edge-key="4" data-edge-id="to-task" data-composition-points="566,356;566,210;745,210;745,186" d="M 566 356 L 566 210 L 745 210 L 745 186" class="a-emphasis" data-animate="edge" style="--step:4" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="bridge" data-edge-to="safety" data-edge-label="stop · resume" data-edge-key="5" data-edge-id="to-safety" data-composition-points="548,356;548,280;689,280" d="M 548 356 L 548 280 L 689 280" class="a-security" data-animate="edge" style="--step:5" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="task" data-edge-to="bridge" data-edge-label="state · progress" data-edge-key="6" data-edge-id="task-state" data-composition-points="689,166;530,166;530,356" d="M 689 166 L 530 166 L 530 356" class="a-default" data-animate="edge" style="--step:6" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="task" data-edge-to="bridge" data-edge-label="get_design · save" data-edge-key="7" data-edge-id="task-call" data-composition-points="689,148;512,148;512,356" d="M 689 148 L 512 148 L 512 356" class="a-default" data-animate="edge" style="--step:7" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="safety" data-edge-to="bridge" data-edge-label="safety/state" data-edge-key="8" data-edge-id="safety-state" data-composition-points="689,262;494,262;494,356" d="M 689 262 L 494 262 L 494 356" class="a-security" data-animate="edge" style="--step:8" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="gripper" data-edge-to="bridge" data-edge-label="gripper/state" data-edge-key="9" data-edge-id="grip-state" data-composition-points="689,385;586,385" d="M 689 385 L 586 385" class="a-default" data-animate="edge" style="--step:9" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="wrist" data-edge-to="bridge" data-edge-label="wrist_image" data-edge-key="10" data-edge-id="wrist-img" data-composition-points="689,499;539,499;539,414" d="M 689 499 L 539 499 L 539 414" class="a-dashed" data-animate="edge" style="--step:10" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="preview" data-edge-to="bridge" data-edge-label="scan_preview" data-edge-key="11" data-edge-id="preview-img" data-composition-points="689,613;521,613;521,414" d="M 689 613 L 521 613 L 521 414" class="a-dashed" data-animate="edge" style="--step:11" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="bridge" data-edge-to="mqtt" data-edge-label="상태 · 답 · 사진" data-edge-key="12" data-edge-id="to-broker" data-composition-points="474,394;371,394" d="M 474 394 L 371 394" class="a-default" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="mqtt" data-edge-to="backend" data-edge-label="상태 · 답 · 사진" data-edge-key="13" data-edge-id="to-web" data-composition-points="306,356;306,262;156,262" d="M 306 356 L 306 262 L 156 262" class="a-default" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead)"/>
 
         <!-- Nodes -->
         <g id="node-backend" data-node-id="backend" data-node-label="backend" tabindex="0" role="button" aria-label="backend 포커스, FastAPI · DesignStore, 01 / 웹 PC" aria-pressed="false" data-node-kind="backend" data-node-sublabel="FastAPI · DesignStore" data-node-context="01 / 웹 PC">
@@ -5263,9 +5263,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
         <g id="node-task" data-node-id="task" data-node-label="작업 관리자" tabindex="0" role="button" aria-label="작업 관리자 포커스, task_manager, 04 / 로봇 PC 노드" aria-pressed="false" data-node-kind="backend" data-node-sublabel="task_manager" data-node-context="04 / 로봇 PC 노드">
           <title>작업 관리자 · task_manager · 04 / 로봇 PC 노드</title>
-          <rect x="689" y="126" width="112" height="62" rx="6" class="c-mask"/>
-          <rect x="689" y="126" width="112" height="62" rx="6" class="c-backend" data-animate="node" style="--step:5" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(695 132) scale(0.6875)">
+          <rect x="689" y="128" width="112" height="58" rx="6" class="c-mask"/>
+          <rect x="689" y="128" width="112" height="58" rx="6" class="c-backend" data-animate="node" style="--step:5" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(695 134) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="745" y="149" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">작업 관리자</text>
@@ -5319,74 +5319,74 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
         <!-- Flow labels -->
         <g data-detail="context" data-edge-from="backend" data-edge-to="mqtt" data-edge-label="요청 · 답 · alive" data-edge-key="0" data-edge-id="web-req">
-          <rect x="159.85" y="186" width="95.3" height="27" rx="4" class="c-mask"/>
-          <text x="207.5" y="197" class="t-edge-emphasis" font-size="8" text-anchor="middle">요청 · 답 · alive</text>
-        <text data-detail="fine" x="207.5" y="208" class="t-dim" font-size="7" text-anchor="middle">서비스 · alive</text>
+          <rect x="192.35" y="290" width="95.3" height="27" rx="4" class="c-mask"/>
+          <text x="240" y="301" class="t-edge-emphasis" font-size="8" text-anchor="middle">요청 · 답 · alive</text>
+        <text data-detail="fine" x="240" y="312" class="t-dim" font-size="7" text-anchor="middle">서비스 · alive</text>
         </g>
         <g data-detail="context" data-edge-from="voice" data-edge-to="mqtt" data-edge-label="intent · stop" data-edge-key="1" data-edge-id="voice-pub">
-          <rect x="213.5" y="472.5" width="75.7" height="27" rx="4" class="c-mask"/>
-          <text x="251.35" y="483.5" class="t-edge-security" font-size="8" text-anchor="middle">intent · stop</text>
-        <text data-detail="fine" x="251.35" y="494.5" class="t-dim" font-size="7" text-anchor="middle">음성</text>
+          <rect x="202.15" y="518" width="75.7" height="27" rx="4" class="c-mask"/>
+          <text x="240" y="529" class="t-edge-security" font-size="8" text-anchor="middle">intent · stop</text>
+        <text data-detail="fine" x="240" y="540" class="t-dim" font-size="7" text-anchor="middle">음성</text>
         </g>
         <g data-detail="context" data-edge-from="mqtt" data-edge-to="voice" data-edge-label="voice/listen" data-edge-key="2" data-edge-id="listen">
-          <rect x="193.75" y="518" width="70.8" height="27" rx="4" class="c-mask"/>
-          <text x="229.15" y="529" class="t-edge-default" font-size="8" text-anchor="middle">voice/listen</text>
-        <text data-detail="fine" x="229.15" y="540" class="t-dim" font-size="7" text-anchor="middle">웹 PC 안</text>
+          <rect x="195.6" y="458" width="70.8" height="27" rx="4" class="c-mask"/>
+          <text x="231" y="469" class="t-edge-default" font-size="8" text-anchor="middle">voice/listen</text>
+        <text data-detail="fine" x="231" y="480" class="t-dim" font-size="7" text-anchor="middle">웹 PC 안</text>
         </g>
         <g data-detail="context" data-edge-from="mqtt" data-edge-to="bridge" data-edge-label="…/req · intent" data-edge-key="3" data-edge-id="to-bridge">
-          <rect x="382.2" y="300" width="80.6" height="27" rx="4" class="c-mask"/>
-          <text x="422.5" y="311" class="t-edge-emphasis" font-size="8" text-anchor="middle">…/req · intent</text>
-        <text data-detail="fine" x="422.5" y="322" class="t-dim" font-size="7" text-anchor="middle">서비스 req</text>
+          <rect x="382.2" y="327" width="80.6" height="27" rx="4" class="c-mask"/>
+          <text x="422.5" y="338" class="t-edge-emphasis" font-size="8" text-anchor="middle">…/req · intent</text>
+        <text data-detail="fine" x="422.5" y="349" class="t-dim" font-size="7" text-anchor="middle">서비스 req</text>
         </g>
         <g data-detail="context" data-edge-from="bridge" data-edge-to="task" data-edge-label="명령 · 설계 검사" data-edge-key="4" data-edge-id="to-task">
-          <rect x="541.0999999999999" y="190.92857142857144" width="90.4" height="27" rx="4" class="c-mask"/>
-          <text x="586.3" y="201.92857142857144" class="t-edge-emphasis" font-size="8" text-anchor="middle">명령 · 설계 검사</text>
-        <text data-detail="fine" x="586.3" y="212.92857142857144" class="t-dim" font-size="7" text-anchor="middle">서비스 req</text>
+          <rect x="610.3" y="189" width="90.4" height="27" rx="4" class="c-mask"/>
+          <text x="655.5" y="200" class="t-edge-emphasis" font-size="8" text-anchor="middle">명령 · 설계 검사</text>
+        <text data-detail="fine" x="655.5" y="211" class="t-dim" font-size="7" text-anchor="middle">서비스 req</text>
         </g>
         <g data-detail="context" data-edge-from="bridge" data-edge-to="safety" data-edge-label="stop · resume" data-edge-key="5" data-edge-id="to-safety">
-          <rect x="675.25" y="308" width="75.7" height="27" rx="4" class="c-mask"/>
-          <text x="713.1" y="319" class="t-edge-security" font-size="8" text-anchor="middle">stop · resume</text>
-        <text data-detail="fine" x="713.1" y="330" class="t-dim" font-size="7" text-anchor="middle">서비스 req</text>
+          <rect x="580.65" y="290" width="75.7" height="27" rx="4" class="c-mask"/>
+          <text x="618.5" y="301" class="t-edge-security" font-size="8" text-anchor="middle">stop · resume</text>
+        <text data-detail="fine" x="618.5" y="312" class="t-dim" font-size="7" text-anchor="middle">서비스 req</text>
         </g>
         <g data-detail="context" data-edge-from="task" data-edge-to="bridge" data-edge-label="state · progress" data-edge-key="6" data-edge-id="task-state">
-          <rect x="643.5" y="204.67857142857144" width="90.4" height="27" rx="4" class="c-mask"/>
-          <text x="688.7" y="215.67857142857144" class="t-edge-default" font-size="8" text-anchor="middle">state · progress</text>
-        <text data-detail="fine" x="688.7" y="226.67857142857144" class="t-dim" font-size="7" text-anchor="middle">retained</text>
+          <rect x="453.90000000000003" y="104" width="90.4" height="27" rx="4" class="c-mask"/>
+          <text x="499.1" y="115" class="t-edge-default" font-size="8" text-anchor="middle">state · progress</text>
+        <text data-detail="fine" x="499.1" y="126" class="t-dim" font-size="7" text-anchor="middle">retained</text>
         </g>
         <g data-detail="context" data-edge-from="task" data-edge-to="bridge" data-edge-label="get_design · save" data-edge-key="7" data-edge-id="task-call">
-          <rect x="536.2" y="250" width="95.3" height="27" rx="4" class="c-mask"/>
-          <text x="583.85" y="261" class="t-edge-default" font-size="8" text-anchor="middle">get_design · save</text>
-        <text data-detail="fine" x="583.85" y="272" class="t-dim" font-size="7" text-anchor="middle">서비스 req</text>
+          <rect x="552.85" y="128" width="95.3" height="27" rx="4" class="c-mask"/>
+          <text x="600.5" y="139" class="t-edge-default" font-size="8" text-anchor="middle">get_design · save</text>
+        <text data-detail="fine" x="600.5" y="150" class="t-dim" font-size="7" text-anchor="middle">서비스 req</text>
         </g>
         <g data-detail="context" data-edge-from="safety" data-edge-to="bridge" data-edge-label="safety/state" data-edge-key="8" data-edge-id="safety-state">
-          <rect x="560.7" y="315.57142857142856" width="70.8" height="27" rx="4" class="c-mask"/>
-          <text x="596.1" y="326.57142857142856" class="t-edge-security" font-size="8" text-anchor="middle">safety/state</text>
-        <text data-detail="fine" x="596.1" y="337.57142857142856" class="t-dim" font-size="7" text-anchor="middle">retained</text>
+          <rect x="604.85" y="242" width="70.8" height="27" rx="4" class="c-mask"/>
+          <text x="640.25" y="253" class="t-edge-security" font-size="8" text-anchor="middle">safety/state</text>
+        <text data-detail="fine" x="640.25" y="264" class="t-dim" font-size="7" text-anchor="middle">retained</text>
         </g>
         <g data-detail="context" data-edge-from="gripper" data-edge-to="bridge" data-edge-label="gripper/state" data-edge-key="9" data-edge-id="grip-state">
-          <rect x="649.5" y="418.57142857142856" width="75.7" height="27" rx="4" class="c-mask"/>
-          <text x="687.35" y="429.57142857142856" class="t-edge-default" font-size="8" text-anchor="middle">gripper/state</text>
-        <text data-detail="fine" x="687.35" y="440.57142857142856" class="t-dim" font-size="7" text-anchor="middle">retained</text>
+          <rect x="599.65" y="353" width="75.7" height="27" rx="4" class="c-mask"/>
+          <text x="637.5" y="364" class="t-edge-default" font-size="8" text-anchor="middle">gripper/state</text>
+        <text data-detail="fine" x="637.5" y="375" class="t-dim" font-size="7" text-anchor="middle">retained</text>
         </g>
         <g data-detail="context" data-edge-from="wrist" data-edge-to="bridge" data-edge-label="wrist_image" data-edge-key="10" data-edge-id="wrist-img">
-          <rect x="565.5999999999999" y="439.6428571428571" width="65.9" height="27" rx="4" class="c-mask"/>
-          <text x="598.55" y="450.6428571428571" class="t-edge-dashed" font-size="8" text-anchor="middle">wrist_image</text>
-        <text data-detail="fine" x="598.55" y="461.6428571428571" class="t-dim" font-size="7" text-anchor="middle">바이트</text>
+          <rect x="581.05" y="479" width="65.9" height="27" rx="4" class="c-mask"/>
+          <text x="614" y="490" class="t-edge-dashed" font-size="8" text-anchor="middle">wrist_image</text>
+        <text data-detail="fine" x="614" y="501" class="t-dim" font-size="7" text-anchor="middle">바이트</text>
         </g>
         <g data-detail="context" data-edge-from="preview" data-edge-to="bridge" data-edge-label="scan_preview" data-edge-key="11" data-edge-id="preview-img">
-          <rect x="560.7" y="498.5" width="70.8" height="27" rx="4" class="c-mask"/>
-          <text x="596.1" y="509.5" class="t-edge-dashed" font-size="8" text-anchor="middle">scan_preview</text>
-        <text data-detail="fine" x="596.1" y="520.5" class="t-dim" font-size="7" text-anchor="middle">바이트</text>
+          <rect x="569.6" y="593" width="70.8" height="27" rx="4" class="c-mask"/>
+          <text x="605" y="604" class="t-edge-dashed" font-size="8" text-anchor="middle">scan_preview</text>
+        <text data-detail="fine" x="605" y="615" class="t-dim" font-size="7" text-anchor="middle">바이트</text>
         </g>
         <g data-detail="context" data-edge-from="bridge" data-edge-to="mqtt" data-edge-label="상태 · 답 · 사진" data-edge-key="12" data-edge-id="to-broker">
-          <rect x="377.3" y="408" width="90.4" height="27" rx="4" class="c-mask"/>
-          <text x="422.5" y="419" class="t-edge-default" font-size="8" text-anchor="middle">상태 · 답 · 사진</text>
-        <text data-detail="fine" x="422.5" y="430" class="t-dim" font-size="7" text-anchor="middle">retained · res</text>
+          <rect x="377.3" y="404" width="90.4" height="27" rx="4" class="c-mask"/>
+          <text x="422.5" y="415" class="t-edge-default" font-size="8" text-anchor="middle">상태 · 답 · 사진</text>
+        <text data-detail="fine" x="422.5" y="426" class="t-dim" font-size="7" text-anchor="middle">retained · res</text>
         </g>
         <g data-detail="context" data-edge-from="mqtt" data-edge-to="backend" data-edge-label="상태 · 답 · 사진" data-edge-key="13" data-edge-id="to-web">
-          <rect x="265" y="419.25" width="90.4" height="27" rx="4" class="c-mask"/>
-          <text x="310.2" y="430.25" class="t-edge-default" font-size="8" text-anchor="middle">상태 · 답 · 사진</text>
-        <text data-detail="fine" x="310.2" y="441.25" class="t-dim" font-size="7" text-anchor="middle">retained · res</text>
+          <rect x="185.8" y="230" width="90.4" height="27" rx="4" class="c-mask"/>
+          <text x="231" y="241" class="t-edge-default" font-size="8" text-anchor="middle">상태 · 답 · 사진</text>
+        <text data-detail="fine" x="231" y="252" class="t-dim" font-size="7" text-anchor="middle">retained · res</text>
         </g>
 
         <!-- Legend -->
