@@ -237,8 +237,8 @@ PostgreSQL에 기본 설계 4개와 AI가 만든 설계를 **부모 설계와 �
 
 | 브라우저에서 바로 보기 | 무엇이 보이나 |
 |---|---|
-| <a href="https://viewer.diagrams.net/?lightbox=1&nav=1#Uhttps%3A%2F%2Fraw.githubusercontent.com%2Frokey9-d2%2Frokey_9_pjt2_D2%2Fmain%2Fdocs%2Fimages%2F%25EC%258B%259C%25EC%258A%25A4%25ED%2585%259C%25EC%2595%2584%25ED%2582%25A4%25ED%2585%258D%25EC%25B2%2598_v7_101320.drawio"><img src="https://img.shields.io/badge/draw.io-%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EC%95%84%ED%82%A4%ED%85%8D%EC%B2%98%20v7-F08705?style=for-the-badge&logo=diagramsdotnet&logoColor=white" alt="draw.io로 보기"></a> | 전체 그림 확대 · 이동 — 노드 카드 · 토픽 · 서비스 선 · 컨테이너 · MQTT 토픽 표 · ERD |
-| <a href="https://htmlpreview.github.io/?https://github.com/rokey9-d2/rokey_9_pjt2_D2/blob/main/docs/images/archify/index.html?v=20261016c#arch"><img src="https://img.shields.io/badge/archify-%EA%B7%B8%EB%A6%BC%20%EB%AA%A8%EC%9D%8C%204%EA%B0%9C-8250df?style=for-the-badge" alt="아키파이 그림 모음"></a> | 탭 4개 — 시스템 아키텍처 · 플로우 차트 · DB ERD · MQTT 토픽 흐름(움직임 · 다크 모드 · 내보내기) |
+| <a href="https://viewer.diagrams.net/?lightbox=1&nav=1#Uhttps%3A%2F%2Fraw.githubusercontent.com%2Fhwang-injae%2Fbuildmind%2Fmain%2Fdocs%2Fimages%2F%25EC%258B%259C%25EC%258A%25A4%25ED%2585%259C%25EC%2595%2584%25ED%2582%25A4%25ED%2585%258D%25EC%25B2%2598_v7_101320.drawio"><img src="https://img.shields.io/badge/draw.io-%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EC%95%84%ED%82%A4%ED%85%8D%EC%B2%98%20v7-F08705?style=for-the-badge&logo=diagramsdotnet&logoColor=white" alt="draw.io로 보기"></a> | 전체 그림 확대 · 이동 — 노드 카드 · 토픽 · 서비스 선 · 컨테이너 · MQTT 토픽 표 · ERD |
+| <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/buildmind/blob/main/docs/images/archify/index.html?v=20261016c#arch"><img src="https://img.shields.io/badge/archify-%EA%B7%B8%EB%A6%BC%20%EB%AA%A8%EC%9D%8C%204%EA%B0%9C-8250df?style=for-the-badge" alt="아키파이 그림 모음"></a> | 탭 4개 — 시스템 아키텍처 · 플로우 차트 · DB ERD · MQTT 토픽 흐름(움직임 · 다크 모드 · 내보내기) |
 
 <details>
 <summary>노드 표 · 플로우 차트 · mermaid 흐름</summary>
@@ -257,7 +257,7 @@ PostgreSQL에 기본 설계 4개와 AI가 만든 설계를 **부모 설계와 �
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/플로우차트_v1_101610_dark.png">
     <img src="docs/images/플로우차트_v1_101610_light.png" width="900" alt="BuildMind 전체 흐름 — 스캔 복제 · 사람 · 설계(생성 · 검사 · 저장) · 로봇 조립 · 예외 5줄 플로우 차트">
   </picture><br>
-  <sub>요청 → AI 생성 → 검사 → 저장 → 로봇 조립 + 옆으로 들어오는 스캔 복제 · 사람 손이 필요한 예외 · 움직이는 그림: <a href="https://htmlpreview.github.io/?https://github.com/rokey9-d2/rokey_9_pjt2_D2/blob/main/docs/images/archify/index.html?v=20261016c#flow">그림 모음 → 플로우 차트</a></sub>
+  <sub>요청 → AI 생성 → 검사 → 저장 → 로봇 조립 + 옆으로 들어오는 스캔 복제 · 사람 손이 필요한 예외 · 움직이는 그림: <a href="https://htmlpreview.github.io/?https://github.com/hwang-injae/buildmind/blob/main/docs/images/archify/index.html?v=20261016c#flow">그림 모음 → 플로우 차트</a></sub>
 </p>
 
 **① 요청 → AI 설계 생성 → 검사 → 저장**
@@ -345,7 +345,7 @@ flowchart LR
 | ⏱️ | AI 설계 생성 시간 | 통과 평균 **103초**(44 ~ 151초) | (제안) 60초 이하 | 10/15 리허설 AI 호출 기록 — 목표에 못 미침 |
 | 🏗️ | AI가 만든 설계 실제 조립 | **2종 완성** | 2종 | 음성으로 만든 `003_DESK_STAND_V002` · `004_DESK_PEDESTAL_V001` |
 | 🎙️ | 음성 | 시동어 **5번 중 5번 인식** · 무음 5번 중 잘못 생성 **0번** · 말로 정지 **2번 중 2번 성공** · 오인식 바로잡기 후보 **3개 모두** 합격 | 무음 5번 → 생성 안 함 | 10/15 실기 · 10/14 확신도 0.55 음성 요청(115초) |
-| 🔍 | 스캔 복원 일치율 | **100 %** · **95 %**(65개 중 62개) | 90 % 이상 | 사람이 쌓은 벤치 실기(10/13) · 기본 설계 사진 판정 |
+| 🔍 | 스캔 복원 일치율 | 사람이 쌓은 벤치 실기(10/13) **100 %** · 기본 설계 사진 판정 **95 %**(65개 중 62개) | 90 % 이상 | 시험 2가지 — 통합 시험 값(92 %)은 위 결과 요약 |
 | 📏 | 놓은 블록 다시 집기 | 어긋남 **2.17 → 0.73 mm** | ±2 mm | 놓은 블록을 다시 재서 2 mm 넘으면 다시 집어 놓음(10/14) |
 | 👁️ | YOLO seg(직접 학습) | mAP50 **0.972** · mAP50-95 **0.831** | — | yolo26s-seg · 150 epoch · 사진 208장 · 모델 5종 비교 |
 | 🗂️ | 설계 세대 관리(DB) | 파생 설계 **15개** · **3세대** | 부모 · 버전 트리 | PostgreSQL `designs`(10/15 조회) |
@@ -426,8 +426,10 @@ flowchart LR
 
 - 블록당 **75 ~ 80초**(목표 60초) · AI 설계 생성 통과 평균 **103초**(목표 60초)로 시간 목표에 못 미쳤습니다.
 - 높이 오차가 책상 판에서 최대 **4.0 mm**(위층일수록 커짐 — 무너지는 경계 7 mm 안이라 13개 모두 완성), 수평 오차가 최대 **2.7 mm**로 ±2 mm 목표를 넘은 곳이 있습니다.
-- 계획했던 **사람과 번갈아 쌓는 협동 모드**는 구현하지 못했습니다.
-- 다음 과제: 큰 설계(2인용 등)의 조립 중 공급 채우기 · 사이클 시간 줄이기 / 협동 모드를 위한 사람 손 인식 · 공간 지도 / dy 오차 원인 찾기 / 로봇 오차를 흡수하려 둔 받침을 없애고 관측 동작 줄이기
+- 이번 16일 범위에서는 **로봇 단독 조립 · 스캔 복제**까지 완성했고, 처음 계획한 **사람과 번갈아 쌓는 협동 모드**는 이번에 구현하지 않았습니다. 다음 단계로 이 모드까지 넓힐 수 있습니다.
+  - 이어 쓸 수 있는 것: 사람이 쌓은 구조물을 스캔해 복원하는 기능 · 놓은 블록 다시 재기 · 정지 → 다시 시작 구조 · 설계 DB
+  - 더 필요한 것: 사람 손 인식 · 공간 지도
+- 다음 과제: 큰 설계(2인용 등)의 조립 중 공급 채우기 · 사이클 시간 줄이기 / dy 오차 원인 찾기 / 로봇 오차를 흡수하려 둔 받침을 없애고 관측 동작 줄이기
 
 ## 👥 팀 · 역할
 
@@ -604,7 +606,7 @@ ros2 run d2_vision scan_live_preview
 <summary>폴더 구조</summary>
 
 ```text
-rokey_9_pjt2_D2/
+buildmind/
 ├── src/                          # ROS 2 패키지 (로봇 PC)
 │   ├── d2_interfaces/            #   전용 메시지 7개 + JsonQuery
 │   ├── d2_robot/
