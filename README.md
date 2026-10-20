@@ -459,10 +459,10 @@ flowchart LR
 
 ## 🤝 개발 · 협업 방식
 
-16일 동안 **PR 183개 · 커밋 606개 · 결정 기록 123건 · 자동 시험 2,251개**. PR마다 자동 검사 + Claude 검토 → 승인 → auto-merge, 기능 동결 뒤에는 PL 통합 브랜치로만 main에 넣었습니다.
+16일 동안 **PR 183개 · 커밋 606개 · 결정 기록 123건 · 자동 시험 2,251개**. PR마다 자동 검사 · 자동 코드 검토 → 승인 → auto-merge, 기능 동결 뒤에는 PL 통합 브랜치로만 main에 넣었습니다.
 
 <details>
-<summary>일정 · PR 흐름 · 문서 · AI 에이전트 활용</summary>
+<summary>일정 · PR 흐름 · 문서 · 검토 절차</summary>
 
 | 기간 | 단계 | 한 일 |
 |---|---|---|
@@ -481,10 +481,10 @@ flowchart LR
   <img src="https://img.shields.io/badge/ROS%202%20%ED%8C%A8%ED%82%A4%EC%A7%80-8%EA%B0%9C-22314E?style=flat-square&logo=ros" alt="ROS 2 패키지 8개">
 </p>
 
-- **PR 흐름:** 브랜치 → PR(양식의 '변경 파일' 칸) → **PR 검사**(main 반영 · 충돌 · 문법 · 키 유출 · 변경 파일 · 문서 이름 · 정지 설정) + **Claude 검토**(읽기 도구만) → 승인 → **auto-merge(squash)**. CI는 pytest 3곳 + ruff · ROS 2 Jazzy colcon 빌드이고, 필수 검사 3개를 통과해야 들어갑니다.
+- **PR 흐름:** 브랜치 → PR(양식의 '변경 파일' 칸) → **PR 검사**(main 반영 · 충돌 · 문법 · 키 유출 · 변경 파일 · 문서 이름 · 정지 설정) + **자동 코드 검토** → 승인 → **auto-merge(squash)**. CI는 pytest 3곳 + ruff · ROS 2 Jazzy colcon 빌드이고, 필수 검사 3개를 통과해야 들어갑니다.
 - **동결 뒤:** 기능 동결(10/14 18시) 뒤에는 draft PR → PL 통합 브랜치(1 ~ 10차) → 통합 테스트 → main 순서로만 넣었습니다.
 - **문서:** 정본 01 요구사항 · 02 인터페이스 · 03 설계 · 04 결과 · 05 작업 분류 · 06 협업 규칙과 **결정 기록 E-01 ~ E-123**(뒤 번호가 앞 번호를 바꿈)을 두고, 파일 이름은 `이름_v<버전>_<MMDDHH>` 규칙으로 맞췄습니다.
-- **AI 에이전트와 함께:** 팀원마다 자기 Claude Code 에이전트로 개발했습니다. 에이전트가 만든 코드도 사람이 PR로 올리고 검사 · 검토를 거칩니다. PL 공지는 노션으로 나누고, 문서 · 일정 초안은 PL의 문서 담당 에이전트가 씁니다.
+- **검토 · 승인:** 코드는 모두 사람이 PR로 올리고, 자동 검사 · 자동 코드 검토 · 팀원 승인을 거친 것만 main에 들어갑니다. PL 공지는 노션으로 나누고, 문서 · 일정 초안은 PL이 맡습니다.
 
 자세한 규칙은 [팀 협업 규칙](docs/06_팀협업규칙_v1_101608.md) · [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md), 날마다 바뀐 것은 [CHANGES.md](CHANGES.md)에 있습니다.
 
@@ -644,7 +644,7 @@ buildmind/
 ├── docs/                         # 문서 — 01 ~ 06 정본 · decisions · guides · ops · test-reports · env · images
 ├── tests/                        # ROS 없는 자동 시험(pytest)
 ├── tools/                        # 문서 이름 도구 · 웹 PC 브로커 방화벽 · 포트 확인
-├── .github/                      # PR 양식 · PR 검사 · CI · Claude 검토
+├── .github/                      # PR 양식 · PR 검사 · CI · 자동 코드 검토
 ├── requirements.txt              # 로봇 PC pip 꾸러미
 └── README.md
 ```
