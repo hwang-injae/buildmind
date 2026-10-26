@@ -459,7 +459,7 @@ flowchart LR
 
 ## 🤝 개발 · 협업 방식
 
-16일 동안 **PR 183개 · 커밋 606개 · 결정 기록 123건 · 자동 시험 2,251개**. PR마다 자동 검사 · 자동 코드 검토 → 승인 → auto-merge, 기능 동결 뒤에는 PL 통합 브랜치로만 main에 넣었습니다.
+16일 동안 **결정 기록 123건 · 자동 시험 2,251개**. PR마다 자동 검사 · 자동 코드 검토 → 승인 → auto-merge, 기능 동결 뒤에는 PL 통합 브랜치로만 main에 넣었습니다.
 
 <details>
 <summary>일정 · PR 흐름 · 문서 · 검토 절차</summary>
@@ -474,8 +474,6 @@ flowchart LR
 | 10/15 ~ 10/16 | 리허설 · 시연 | PL 통합 9 ~ 10차 · 튜닝 · 리허설 2번 · 시연 · 발표 |
 
 <p align="center">
-  <img src="https://img.shields.io/badge/merged%20PR-183-8250df?style=flat-square&logo=github" alt="merged PR 183">
-  <img src="https://img.shields.io/badge/commits-606-6e7781?style=flat-square" alt="commits 606">
   <img src="https://img.shields.io/badge/%EA%B2%B0%EC%A0%95%20%EA%B8%B0%EB%A1%9D-123%EA%B1%B4-1f6feb?style=flat-square" alt="결정 기록 123건">
   <img src="https://img.shields.io/badge/%EC%9E%90%EB%8F%99%20%EC%8B%9C%ED%97%98-2%2C251-2ea44f?style=flat-square" alt="자동 시험 2,251">
   <img src="https://img.shields.io/badge/ROS%202%20%ED%8C%A8%ED%82%A4%EC%A7%80-8%EA%B0%9C-22314E?style=flat-square&logo=ros" alt="ROS 2 패키지 8개">
